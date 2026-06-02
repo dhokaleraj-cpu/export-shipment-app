@@ -305,6 +305,17 @@ def fetch_all(query, params=()):
     from db import fetch_all as db_fetch_all
     return db_fetch_all(query, params)
 
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_fetch_all(query, params=()):
+    """Cached SELECT helper for master/dropdown and read-only dashboard data."""
+    return fetch_all(query, params)
+
+def clear_app_cache():
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
 def execute_query(query, params=()):
     from db import execute_query as db_execute_query
     return db_execute_query(query, params)
@@ -326,6 +337,7 @@ def ensure_runtime_columns():
         "ALTER TABLE coverage_plan_lines ADD COLUMN IF NOT EXISTS next_shipment_date DATE",
         "ALTER TABLE coverage_plan_lines ADD COLUMN IF NOT EXISTS shipment_delivery_qty NUMERIC DEFAULT 0",
         "ALTER TABLE coverage_plan_lines ADD COLUMN IF NOT EXISTS two_months_inventory NUMERIC DEFAULT 0",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_coverage_plan_product_plan_date_unique ON coverage_plan_lines(product_id, plan_date)",
     ]
     for sql in schema_updates:
         try:
@@ -2315,16 +2327,54 @@ def normalize_coverage_plan_mondays(product_id):
             WHERE id=?
         """, (i + 1, monday_date.isoformat(), row["id"]))
 
+def deduplicate_coverage_plan_dates(product_id):
+    """Keep one row per product/date while preserving transaction quantities as much as possible."""
+    dup_dates = fetch_all("""
+        SELECT plan_date, COUNT(*) AS c
+        FROM coverage_plan_lines
+        WHERE product_id=? AND plan_date IS NOT NULL
+        GROUP BY plan_date
+        HAVING COUNT(*) > 1
+    """, (product_id,))
+    for d in dup_dates:
+        plan_date = d.get("plan_date")
+        rows = fetch_all("""
+            SELECT *
+            FROM coverage_plan_lines
+            WHERE product_id=? AND plan_date=?
+            ORDER BY id
+        """, (product_id, plan_date))
+        if len(rows) <= 1:
+            continue
+        keep = rows[0]
+        extras = rows[1:]
+        sum_customer_forecast = sum(float(r.get("customer_forecast") or 0) for r in rows)
+        max_stock_at_wh = max(float(r.get("stock_at_wh") or 0) for r in rows)
+        sum_shipment_delivery_qty = sum(float(r.get("shipment_delivery_qty") or 0) for r in rows)
+        sum_delivered_to_customer = sum(float(r.get("delivered_to_customer") or 0) for r in rows)
+        min_week_no = min(int(r.get("week_no") or 0) for r in rows if r.get("week_no") is not None)
+        execute_query("""
+            UPDATE coverage_plan_lines
+            SET week_no=?, customer_forecast=?, stock_at_wh=?,
+                shipment_delivery_qty=?, delivered_to_customer=?
+            WHERE id=?
+        """, (
+            min_week_no, sum_customer_forecast, max_stock_at_wh,
+            sum_shipment_delivery_qty, sum_delivered_to_customer, keep["id"]
+        ))
+        for r in extras:
+            execute_query("DELETE FROM coverage_plan_lines WHERE id=?", (r["id"],))
+
 if "Coverage Plan" in all_items:
     with selected_tabs[all_items.index("Coverage Plan")]:
         show_header("Coverage Plan", "Product-wise Customer Forecast, Shipment Delivery and Weekly Customer Delivery")
 
-        products = fetch_all("""
+        products = cached_fetch_all("""
             SELECT id, product_code, product_name, lcr_weekly, mcr_weekly, two_months_inventory
             FROM products
             ORDER BY product_code
         """)
-        warehouses = fetch_all("""
+        warehouses = cached_fetch_all("""
             SELECT id, warehouse_name, shipment_time_days
             FROM warehouses
             ORDER BY warehouse_name
@@ -2371,23 +2421,33 @@ if "Coverage Plan" in all_items:
 
             st.markdown("""
             <style>
-            .coverage-kpi-input-label {
+            .coverage-card-head {
                 background:#0b5cab;color:#ffffff;padding:10px;text-align:center;font-weight:900;
                 border-radius:4px 4px 0 0;min-height:64px;display:flex;align-items:center;justify-content:center;
                 font-size:18px;line-height:1.25;
             }
+            .coverage-card-value {
+                border:1px solid #d0d7e2;border-top:0;padding:18px;text-align:center;
+                font-size:25px;font-weight:900;background:white;min-height:86px;
+                display:flex;align-items:center;justify-content:center;color:#111827;
+            }
+            .coverage-kpi-input-box {
+                border:1px solid #d0d7e2;border-top:0;background:white;min-height:86px;
+                display:flex;align-items:center;justify-content:center;padding:14px;
+            }
             .coverage-kpi-input-box div[data-baseweb="input"] > div,
             .coverage-kpi-input-box input {
-                min-height:86px !important;text-align:center !important;font-size:25px !important;font-weight:900 !important;
+                min-height:58px !important;text-align:center !important;font-size:25px !important;
+                font-weight:900 !important;border:0 !important;box-shadow:none !important;
             }
             </style>
             """, unsafe_allow_html=True)
 
             c0, c1, c2, c3 = st.columns(4)
             with c0:
-                st.metric("Shipment Time Days", shipment_time_days)
+                st.markdown(f'<div class="coverage-card-head">SHIPMENT TIME DAYS</div><div class="coverage-card-value">{shipment_time_days}</div>', unsafe_allow_html=True)
             with c1:
-                st.markdown('<div class="coverage-kpi-input-label">SAFETY STOCK DAYS</div>', unsafe_allow_html=True)
+                st.markdown('<div class="coverage-card-head">SAFETY STOCK DAYS</div>', unsafe_allow_html=True)
                 st.markdown('<div class="coverage-kpi-input-box">', unsafe_allow_html=True)
                 safety_stock_days = st.number_input(
                     "Safety Stock Days",
@@ -2400,13 +2460,19 @@ if "Coverage Plan" in all_items:
                 st.markdown('</div>', unsafe_allow_html=True)
             with c2:
                 lcr_weekly = float(selected_product.get("lcr_weekly") or 0)
-                st.metric("LCR Weekly", f"{lcr_weekly:,.0f}")
+                st.markdown(f'<div class="coverage-card-head">LCR WEEKLY</div><div class="coverage-card-value">{lcr_weekly:,.0f}</div>', unsafe_allow_html=True)
             with c3:
                 mcr_weekly = float(selected_product.get("mcr_weekly") or 0)
-                st.metric("MCR Weekly", f"{mcr_weekly:,.0f}")
+                st.markdown(f'<div class="coverage-card-head">MCR WEEKLY</div><div class="coverage-card-value">{mcr_weekly:,.0f}</div>', unsafe_allow_html=True)
 
             current_week_start = datetime.strptime(monday_of_date(date.today()), "%Y-%m-%d").date()
             product_two_months_inventory = float(selected_product.get("two_months_inventory") or 0)
+
+            # Prevent duplicate plan_date rows for the selected product before calculations.
+            try:
+                deduplicate_coverage_plan_dates(selected_product["id"])
+            except Exception:
+                pass
 
             # Create initial coverage rows for selected product if no rows exist. Existing records are preserved.
             existing_product_rows = fetch_all("""
@@ -2527,7 +2593,7 @@ if "Coverage Plan" in all_items:
             next_shipment_date = ""
             next_shipment_qty = 0.0
             coverage_activity_started = False
-            previous_wh_bank = 0.0
+            previous_wh_bank = None
 
             for idx, r in enumerate(raw_rows):
                 plan_date = r.get("plan_date") or ""
@@ -2553,14 +2619,20 @@ if "Coverage Plan" in all_items:
                             shipment_delivery_qty += qty
 
                 customer_forecast = float(r.get("customer_forecast") or 0)
-                stock_at_wh = float(r.get("stock_at_wh") or 0)
+
+                # Excel Coverage Plan formula:
+                # Stock at WH for first row is the entered opening stock.
+                # From the second row onward, Stock at WH equals previous row WH Bank.
+                # WH Bank = Stock at WH + Shipment Delivery to Warehouse - Customer Forecast - Delivered to Customer.
+                if previous_wh_bank is None:
+                    stock_at_wh = float(r.get("stock_at_wh") or 0)
+                else:
+                    stock_at_wh = previous_wh_bank
 
                 if customer_forecast > 0 or delivered_to_customer > 0:
                     coverage_activity_started = True
 
-                # Required rolling formula:
-                # WH_Bank = previous row WH_Bank + stock_at_wh + shipment_delivery_qty - customer_forecast - delivered_to_customer
-                wh_bank = previous_wh_bank + stock_at_wh + shipment_delivery_qty - customer_forecast - delivered_to_customer
+                wh_bank = stock_at_wh + shipment_delivery_qty - customer_forecast - delivered_to_customer
                 previous_wh_bank = wh_bank
 
                 two_months_inventory = product_two_months_inventory
@@ -2579,12 +2651,12 @@ if "Coverage Plan" in all_items:
 
                 execute_query("""
                     UPDATE coverage_plan_lines
-                    SET delivered_to_customer=?, wh_bank=?, bank_status=?,
+                    SET stock_at_wh=?, delivered_to_customer=?, wh_bank=?, bank_status=?,
                         suggested_shipment_qty=?, next_shipment_date=?,
                         shipment_delivery_qty=?, two_months_inventory=?
                     WHERE id=?
                 """, (
-                    delivered_to_customer, wh_bank, bank_status, suggested_qty, suggested_date,
+                    stock_at_wh, delivered_to_customer, wh_bank, bank_status, suggested_qty, suggested_date,
                     shipment_delivery_qty, two_months_inventory, r["id"]
                 ))
 
@@ -2593,7 +2665,7 @@ if "Coverage Plan" in all_items:
                         "id": r["id"],
                         "week_no": r["week_no"],
                         "plan_date": plan_date,
-                        "stock_at_wh": stock_at_wh,
+                        "stock_at_wh": round(stock_at_wh, 2),
                         "shipment_delivery_qty": round(shipment_delivery_qty, 2),
                         "customer_forecast": customer_forecast,
                         "delivered_to_customer": delivered_to_customer,
