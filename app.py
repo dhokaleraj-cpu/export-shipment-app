@@ -24,7 +24,6 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 LOGO_PATH = Path("FSI_LOGO_new.png")
 
 CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "JPY", "CNY"]
-MAX_LIST_ROWS = 300  # Limits large on-screen tables for better web performance
 
 st.set_page_config(page_title="Export Shipment Management", layout="wide", initial_sidebar_state="collapsed")
 init_db()
@@ -302,25 +301,13 @@ div[data-testid="stFileUploader"] section [data-testid="stFileUploaderDropzoneIn
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=300, show_spinner=False)
-def _cached_fetch_all(query, params=()):
-    """Cache repeated SELECT results for 5 minutes to improve Streamlit speed."""
+def fetch_all(query, params=()):
     from db import fetch_all as db_fetch_all
     return db_fetch_all(query, params)
 
-def fetch_all(query, params=()):
-    """Cached database reads. Cache is cleared automatically after writes."""
-    safe_params = tuple(params) if params else ()
-    return _cached_fetch_all(query, safe_params)
-
 def execute_query(query, params=()):
     from db import execute_query as db_execute_query
-    result = db_execute_query(query, params)
-    try:
-        _cached_fetch_all.clear()
-    except Exception:
-        pass
-    return result
+    return db_execute_query(query, params)
 
 
 def ensure_runtime_columns():
@@ -337,7 +324,6 @@ def ensure_runtime_columns():
         "ALTER TABLE coverage_plan_lines ADD COLUMN IF NOT EXISTS bank_status NUMERIC DEFAULT 0",
         "ALTER TABLE coverage_plan_lines ADD COLUMN IF NOT EXISTS suggested_shipment_qty NUMERIC DEFAULT 0",
         "ALTER TABLE coverage_plan_lines ADD COLUMN IF NOT EXISTS next_shipment_date DATE",
-        "ALTER TABLE coverage_plan_lines ADD COLUMN IF NOT EXISTS shipment_delivery_date DATE",
         "ALTER TABLE coverage_plan_lines ADD COLUMN IF NOT EXISTS shipment_delivery_qty NUMERIC DEFAULT 0",
         "ALTER TABLE coverage_plan_lines ADD COLUMN IF NOT EXISTS two_months_inventory NUMERIC DEFAULT 0",
     ]
@@ -637,7 +623,7 @@ def quick_add_customer():
         name = st.text_input("Customer Name", key="quick_customer_name")
         email = st.text_input("Email", key="quick_customer_email")
         whatsapp = st.text_input("WhatsApp No", key="quick_customer_whatsapp")
-        terms = fetch_all("SELECT * FROM payment_terms ORDER BY days LIMIT 200")
+        terms = fetch_all("SELECT * FROM payment_terms ORDER BY days")
         term_options = {"No Payment Term": None}
         for t in terms:
             term_options[f'{t["term_name"]} - {t["days"]} days'] = t["id"]
@@ -1030,7 +1016,7 @@ selected_tabs = st.tabs(all_items)
 def customer_form():
     require_roles(("admin", "super_admin"))
     st.subheader("Customer Master")
-    terms = fetch_all("SELECT * FROM payment_terms ORDER BY days LIMIT 200")
+    terms = fetch_all("SELECT * FROM payment_terms ORDER BY days")
     term_options = {"No Payment Term": None}
     for t in terms:
         term_options[f'{t["term_name"]} - {t["days"]} days'] = t["id"]
@@ -1063,14 +1049,13 @@ def customer_form():
         FROM customers c
         LEFT JOIN payment_terms pt ON c.payment_term_id = pt.id
         ORDER BY c.id DESC
-        LIMIT 300
     """)
     show_filtered_df(edit_button_column(rows, "customers"), "master_customers", total=True)
 
     if st.session_state.user["role"] == "super_admin":
         st.divider()
         st.subheader("Edit Customer Master")
-        old_rows = fetch_all("SELECT * FROM customers ORDER BY id DESC LIMIT 300")
+        old_rows = fetch_all("SELECT * FROM customers ORDER BY id DESC")
         if old_rows:
             row_map = {f'{r["id"]} | {r["customer_name"]}': r for r in old_rows}
             selected = row_map[st.selectbox("Select Customer to Edit", list(row_map.keys()), key="edit_customer_select")]
@@ -1143,14 +1128,13 @@ def product_form():
                weight, lcr_weekly, mcr_weekly, two_months_inventory, po_number, po_date
         FROM products
         ORDER BY id DESC
-        LIMIT 300
     """)
     show_filtered_df(edit_button_column(rows, "products"), "master_products", total=True)
 
     if st.session_state.user["role"] == "super_admin":
         st.divider()
         st.subheader("Edit Product Master")
-        old_rows = fetch_all("SELECT * FROM products ORDER BY id DESC LIMIT 300")
+        old_rows = fetch_all("SELECT * FROM products ORDER BY id DESC")
         if old_rows:
             row_map = {f'{r["id"]} | {r["product_code"]} | {r["product_name"]}': r for r in old_rows}
             selected_key = st.selectbox("Select Product Master Entry to Edit", list(row_map.keys()), key="edit_product_select")
@@ -1220,12 +1204,12 @@ def master_form(title, table, fields, allowed_roles=("admin", "super_admin")):
             st.success(f"{title} saved successfully.")
         except sqlite3.IntegrityError:
             st.error("Duplicate value found. Please check unique fields.")
-    show_filtered_df(edit_button_column(fetch_all(f"SELECT * FROM {table} ORDER BY id DESC LIMIT 300"), table), f"master_{table}", total=True)
+    show_filtered_df(edit_button_column(fetch_all(f"SELECT * FROM {table} ORDER BY id DESC"), table), f"master_{table}", total=True)
 
     if st.session_state.user["role"] == "super_admin":
         st.divider()
         st.subheader(f"Edit {title}")
-        rows = fetch_all(f"SELECT * FROM {table} ORDER BY id DESC LIMIT 300")
+        rows = fetch_all(f"SELECT * FROM {table} ORDER BY id DESC")
         if rows:
             row_map = {f'{r["id"]} | ' + str(r.get(fields[0], "")): r for r in rows}
             selected = row_map[st.selectbox(f"Select {title} Entry to Edit", list(row_map.keys()), key=f"edit_select_{table}")]
@@ -1412,11 +1396,11 @@ if "Shipment Entry" in all_items:
     with selected_tabs[all_items.index("Shipment Entry")]:
         require_roles(("admin", "super_admin"))
         show_header("Shipment Entry with Pallet / Product Rows")
-        suppliers = fetch_all("SELECT * FROM suppliers ORDER BY supplier_name LIMIT 500")
-        warehouses = fetch_all("SELECT * FROM warehouses ORDER BY warehouse_name LIMIT 500")
-        products = fetch_all("SELECT * FROM products ORDER BY product_code LIMIT 500")
-        forwarders = fetch_all("SELECT * FROM forwarders ORDER BY forwarder_name LIMIT 500")
-        incoterms = fetch_all("SELECT * FROM incoterms ORDER BY incoterm_name LIMIT 500")
+        suppliers = fetch_all("SELECT * FROM suppliers ORDER BY supplier_name")
+        warehouses = fetch_all("SELECT * FROM warehouses ORDER BY warehouse_name")
+        products = fetch_all("SELECT * FROM products ORDER BY product_code")
+        forwarders = fetch_all("SELECT * FROM forwarders ORDER BY forwarder_name")
+        incoterms = fetch_all("SELECT * FROM incoterms ORDER BY incoterm_name")
         if not suppliers or not warehouses or not products:
             st.warning("Create Supplier, Warehouse, and Product masters first.")
         else:
@@ -1694,8 +1678,8 @@ if "Shipment Entry" in all_items:
                     ship_keys = list(ship_map.keys())
                     default_ship_index = ship_keys.index(default_ship_key) if default_ship_key in ship_keys else 0
                     edit_ship = ship_map[st.selectbox("Select Shipment to Edit", ship_keys, index=default_ship_index, key="edit_shipment_header_select")]
-                    suppliers2 = fetch_all("SELECT * FROM suppliers ORDER BY supplier_name LIMIT 500")
-                    warehouses2 = fetch_all("SELECT * FROM warehouses ORDER BY warehouse_name LIMIT 500")
+                    suppliers2 = fetch_all("SELECT * FROM suppliers ORDER BY supplier_name")
+                    warehouses2 = fetch_all("SELECT * FROM warehouses ORDER BY warehouse_name")
                     supplier_names = [x["supplier_name"] for x in suppliers2]
                     warehouse_names = [x["warehouse_name"] for x in warehouses2]
                     supplier_id_map = {x["supplier_name"]: x["id"] for x in suppliers2}
@@ -1782,8 +1766,8 @@ if "Delivery to Customer" in all_items:
         """, unsafe_allow_html=True)
 
 
-        customers = fetch_all("SELECT * FROM customers ORDER BY customer_name LIMIT 500")
-        terms = fetch_all("SELECT * FROM payment_terms ORDER BY days LIMIT 200")
+        customers = fetch_all("SELECT * FROM customers ORDER BY customer_name")
+        terms = fetch_all("SELECT * FROM payment_terms ORDER BY days")
 
         invoice_shipments = fetch_all("""
             SELECT id, shipment_no, invoice_no, po_number, po_date, shipment_date
@@ -2350,10 +2334,23 @@ if "Coverage Plan" in all_items:
             st.warning("Please create Product Master first.")
         else:
             product_map = {f'{p["product_code"]} | {p["product_name"]}': p for p in products}
+            product_labels = list(product_map.keys())
+            default_product_index = 0
+            for i, label in enumerate(product_labels):
+                if str(product_map[label].get("product_code") or "") == "40257237":
+                    default_product_index = i
+                    break
+
             filter_col1, filter_col2 = st.columns(2)
             with filter_col1:
                 st.markdown("<b>Select Product Code</b>", unsafe_allow_html=True)
-                selected_product_label = st.selectbox("Select Product Code", list(product_map.keys()), key="coverage_product_select", label_visibility="collapsed")
+                selected_product_label = st.selectbox(
+                    "Select Product Code",
+                    product_labels,
+                    index=default_product_index,
+                    key="coverage_product_select",
+                    label_visibility="collapsed"
+                )
             selected_product = product_map[selected_product_label]
 
             shipment_time_days = 0
@@ -2361,17 +2358,46 @@ if "Coverage Plan" in all_items:
                 st.markdown("<b>Select Warehouse for Shipment Time</b>", unsafe_allow_html=True)
                 if warehouses:
                     warehouse_map = {w["warehouse_name"]: w for w in warehouses}
-                    selected_warehouse_name = st.selectbox("Select Warehouse for Shipment Time", list(warehouse_map.keys()), key="coverage_warehouse_select", label_visibility="collapsed")
+                    selected_warehouse_name = st.selectbox(
+                        "Select Warehouse for Shipment Time",
+                        list(warehouse_map.keys()),
+                        key="coverage_warehouse_select",
+                        label_visibility="collapsed"
+                    )
                     shipment_time_days = int(warehouse_map[selected_warehouse_name].get("shipment_time_days") or 0)
                 else:
                     st.info("Create Warehouse Master and enter Shipment Time Days.")
                     shipment_time_days = st.number_input("Shipment Time Days", min_value=0, value=0, step=1, key="coverage_shipment_days_manual")
 
+            st.markdown("""
+            <style>
+            .coverage-kpi-input-label {
+                background:#0b5cab;color:#ffffff;padding:10px;text-align:center;font-weight:900;
+                border-radius:4px 4px 0 0;min-height:64px;display:flex;align-items:center;justify-content:center;
+                font-size:18px;line-height:1.25;
+            }
+            .coverage-kpi-input-box div[data-baseweb="input"] > div,
+            .coverage-kpi-input-box input {
+                min-height:86px !important;text-align:center !important;font-size:25px !important;font-weight:900 !important;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+
             c0, c1, c2, c3 = st.columns(4)
             with c0:
                 st.metric("Shipment Time Days", shipment_time_days)
             with c1:
-                safety_stock_days = st.number_input("Safety Stock Days", min_value=0, value=60, step=1, key="coverage_safety_days")
+                st.markdown('<div class="coverage-kpi-input-label">SAFETY STOCK DAYS</div>', unsafe_allow_html=True)
+                st.markdown('<div class="coverage-kpi-input-box">', unsafe_allow_html=True)
+                safety_stock_days = st.number_input(
+                    "Safety Stock Days",
+                    min_value=0,
+                    value=60,
+                    step=1,
+                    key="coverage_safety_days",
+                    label_visibility="collapsed"
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
             with c2:
                 lcr_weekly = float(selected_product.get("lcr_weekly") or 0)
                 st.metric("LCR Weekly", f"{lcr_weekly:,.0f}")
@@ -2379,39 +2405,26 @@ if "Coverage Plan" in all_items:
                 mcr_weekly = float(selected_product.get("mcr_weekly") or 0)
                 st.metric("MCR Weekly", f"{mcr_weekly:,.0f}")
 
-            # Create product-specific coverage rows from template if missing
-            existing_product_rows = fetch_all("""
-                SELECT COUNT(*) AS c FROM coverage_plan_lines WHERE product_id=?
-            """, (selected_product["id"],))[0]["c"]
-
-            if existing_product_rows == 0:
-                template_rows = fetch_all("""
-                    SELECT week_no, plan_date, customer_forecast, stock_at_wh, two_months_inventory
-                    FROM coverage_plan_lines
-                    WHERE product_id IS NULL
-                    ORDER BY week_no
-                """)
-                if not template_rows:
-                    template_rows = fetch_all("""
-                        SELECT week_no, plan_date, customer_forecast, stock_at_wh, two_months_inventory
-                        FROM coverage_plan_lines
-                        ORDER BY week_no
-                        LIMIT 52
-                    """)
-                for r in template_rows:
-                    execute_query("""
-                        INSERT INTO coverage_plan_lines
-                        (product_id, week_no, plan_date, customer_forecast, stock_at_wh, two_months_inventory)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (selected_product["id"], r["week_no"], r["plan_date"], r["customer_forecast"], r["stock_at_wh"], r["two_months_inventory"]))
-
-            st.divider()
-            st.subheader("Coverage Plan Table")
-
             current_week_start = datetime.strptime(monday_of_date(date.today()), "%Y-%m-%d").date()
             product_two_months_inventory = float(selected_product.get("two_months_inventory") or 0)
 
-            # Keep existing data, but make sure current week and future weeks exist for this product.
+            # Create initial coverage rows for selected product if no rows exist. Existing records are preserved.
+            existing_product_rows = fetch_all("""
+                SELECT COUNT(*) AS c FROM coverage_plan_lines WHERE product_id=?
+            """, (selected_product["id"],))[0]["c"] or 0
+
+            if existing_product_rows == 0:
+                for i in range(52):
+                    new_date = current_week_start + timedelta(days=7*i)
+                    execute_query("""
+                        INSERT INTO coverage_plan_lines
+                        (product_id, week_no, plan_date, customer_forecast, stock_at_wh,
+                         shipment_delivery_qty, delivered_to_customer, wh_bank, two_months_inventory,
+                         bank_status, suggested_shipment_qty, next_shipment_date)
+                        VALUES (?, ?, ?, 0, 0, 0, 0, 0, ?, 0, 0, NULL)
+                    """, (selected_product["id"], i + 1, new_date.isoformat(), product_two_months_inventory))
+
+            # Keep future weeks available without touching old rows.
             existing_future_count = fetch_all("""
                 SELECT COUNT(*) AS c
                 FROM coverage_plan_lines
@@ -2434,17 +2447,18 @@ if "Coverage Plan" in all_items:
                             INSERT INTO coverage_plan_lines
                             (product_id, week_no, plan_date, customer_forecast, stock_at_wh,
                              shipment_delivery_qty, delivered_to_customer, wh_bank, two_months_inventory,
-                             bank_status, suggested_shipment_qty, next_shipment_date, shipment_delivery_date)
-                            VALUES (?, ?, ?, 0, 0, 0, 0, 0, ?, 0, 0, NULL, NULL)
+                             bank_status, suggested_shipment_qty, next_shipment_date)
+                            VALUES (?, ?, ?, 0, 0, 0, 0, 0, ?, 0, 0, NULL)
                         """, (selected_product["id"], max_week_seed+i+1, new_date.isoformat(), product_two_months_inventory))
 
-            # Always link two months inventory to Product Master without changing other existing data.
+            # Always link two months inventory to Product Master without changing transaction data.
             execute_query("""
                 UPDATE coverage_plan_lines
                 SET two_months_inventory=?
                 WHERE product_id=?
             """, (product_two_months_inventory, selected_product["id"]))
 
+            st.divider()
             st.subheader("Add Calendar Weeks")
             ac1, ac2, ac3 = st.columns(3)
             with ac1:
@@ -2461,33 +2475,39 @@ if "Coverage Plan" in all_items:
                         WHERE product_id=?
                     """, (selected_product["id"],))[0]["max_week"] or 0)
                     inserted = 0
+                    skipped = 0
                     for i in range(int(add_weeks)):
                         new_date = add_start_date + timedelta(days=7*i)
                         exists = fetch_all("""
                             SELECT id FROM coverage_plan_lines
                             WHERE product_id=? AND plan_date=?
                         """, (selected_product["id"], new_date.isoformat()))
-                        if not exists:
-                            execute_query("""
-                                INSERT INTO coverage_plan_lines
-                                (product_id, week_no, plan_date, customer_forecast, stock_at_wh,
-                                 shipment_delivery_qty, delivered_to_customer, wh_bank, two_months_inventory,
-                                 bank_status, suggested_shipment_qty, next_shipment_date, shipment_delivery_date)
-                                VALUES (?, ?, ?, 0, 0, 0, 0, 0, ?, 0, 0, NULL, NULL)
-                            """, (selected_product["id"], max_week+i+1, new_date.isoformat(), product_two_months_inventory))
-                            inserted += 1
-                    st.success(f"Weeks added successfully. New rows inserted: {inserted}")
+                        if exists:
+                            skipped += 1
+                            continue
+                        execute_query("""
+                            INSERT INTO coverage_plan_lines
+                            (product_id, week_no, plan_date, customer_forecast, stock_at_wh,
+                             shipment_delivery_qty, delivered_to_customer, wh_bank, two_months_inventory,
+                             bank_status, suggested_shipment_qty, next_shipment_date)
+                            VALUES (?, ?, ?, 0, 0, 0, 0, 0, ?, 0, 0, NULL)
+                        """, (selected_product["id"], max_week+inserted+1, new_date.isoformat(), product_two_months_inventory))
+                        inserted += 1
+                    st.success(f"Weeks added successfully. Inserted: {inserted}, Skipped duplicate plan dates: {skipped}")
                     st.rerun()
 
+            st.divider()
+            st.subheader("Coverage Plan Table")
+
+            # Use all past and future rows for rolling WH Bank calculation.
             raw_rows = fetch_all("""
                 SELECT id, week_no, plan_date, customer_forecast, stock_at_wh, two_months_inventory
                 FROM coverage_plan_lines
-                WHERE product_id=? AND date(plan_date) >= date(?)
+                WHERE product_id=?
                 ORDER BY date(plan_date), week_no, id
-            """, (selected_product["id"], current_week_start.isoformat()))
+            """, (selected_product["id"],))
 
             # Shipment delivery qty comes directly from Shipment Entry by product.
-            # ETA week = shipment_date + selected warehouse shipment_time_days.
             shipment_rows = fetch_all("""
                 SELECT s.shipment_date, b.original_qty
                 FROM shipment_boxes b
@@ -2507,14 +2527,12 @@ if "Coverage Plan" in all_items:
             next_shipment_date = ""
             next_shipment_qty = 0.0
             coverage_activity_started = False
+            previous_wh_bank = 0.0
 
             for idx, r in enumerate(raw_rows):
                 plan_date = r.get("plan_date") or ""
                 week_start = parse_db_date(plan_date)
-                if week_start:
-                    week_end = week_start + timedelta(days=6)
-                else:
-                    week_end = None
+                week_end = week_start + timedelta(days=6) if week_start else None
 
                 delivered_to_customer = 0.0
                 if week_start and week_end:
@@ -2529,15 +2547,10 @@ if "Coverage Plan" in all_items:
                     """, (selected_product["id"], week_start.isoformat(), week_end.isoformat()))[0]["delivered_qty"] or 0)
 
                 shipment_delivery_qty = 0.0
-                shipment_delivery_date_value = None
                 if week_start and week_end:
-                    matched_dates = []
                     for delivery_dt, qty in shipment_delivery_events:
                         if week_start <= delivery_dt <= week_end:
                             shipment_delivery_qty += qty
-                            matched_dates.append(delivery_dt)
-                    if matched_dates:
-                        shipment_delivery_date_value = sorted(matched_dates)[0].isoformat()
 
                 customer_forecast = float(r.get("customer_forecast") or 0)
                 stock_at_wh = float(r.get("stock_at_wh") or 0)
@@ -2545,9 +2558,11 @@ if "Coverage Plan" in all_items:
                 if customer_forecast > 0 or delivered_to_customer > 0:
                     coverage_activity_started = True
 
-                # Required formula:
-                # wh_bank = stock_at_wh + shipment_delivery_qty - customer_forecast - delivered_to_customer
-                wh_bank = stock_at_wh + shipment_delivery_qty - customer_forecast - delivered_to_customer
+                # Required rolling formula:
+                # WH_Bank = previous row WH_Bank + stock_at_wh + shipment_delivery_qty - customer_forecast - delivered_to_customer
+                wh_bank = previous_wh_bank + stock_at_wh + shipment_delivery_qty - customer_forecast - delivered_to_customer
+                previous_wh_bank = wh_bank
+
                 two_months_inventory = product_two_months_inventory
                 bank_status = wh_bank - two_months_inventory
 
@@ -2566,31 +2581,31 @@ if "Coverage Plan" in all_items:
                     UPDATE coverage_plan_lines
                     SET delivered_to_customer=?, wh_bank=?, bank_status=?,
                         suggested_shipment_qty=?, next_shipment_date=?,
-                        shipment_delivery_date=?, shipment_delivery_qty=?, two_months_inventory=?
+                        shipment_delivery_qty=?, two_months_inventory=?
                     WHERE id=?
                 """, (
                     delivered_to_customer, wh_bank, bank_status, suggested_qty, suggested_date,
-                    shipment_delivery_date_value, shipment_delivery_qty, two_months_inventory, r["id"]
+                    shipment_delivery_qty, two_months_inventory, r["id"]
                 ))
 
-                display_rows.append({
-                    "id": r["id"],
-                    "week_no": r["week_no"],
-                    "plan_date": plan_date,
-                    "stock_at_wh": stock_at_wh,
-                    "shipment_delivery_date": shipment_delivery_date_value or "",
-                    "shipment_delivery_qty": round(shipment_delivery_qty, 2),
-                    "customer_forecast": customer_forecast,
-                    "delivered_to_customer": delivered_to_customer,
-                    "wh_bank": round(wh_bank, 2),
-                    "two_months_inventory": two_months_inventory,
-                    "bank_status": round(bank_status, 2),
-                    "suggested_shipment_qty": round(suggested_qty, 2),
-                    "next_shipment_date": suggested_date or "",
-                })
+                if week_start and week_start >= current_week_start:
+                    display_rows.append({
+                        "id": r["id"],
+                        "week_no": r["week_no"],
+                        "plan_date": plan_date,
+                        "stock_at_wh": stock_at_wh,
+                        "shipment_delivery_qty": round(shipment_delivery_qty, 2),
+                        "customer_forecast": customer_forecast,
+                        "delivered_to_customer": delivered_to_customer,
+                        "wh_bank": round(wh_bank, 2),
+                        "two_months_inventory": two_months_inventory,
+                        "bank_status": round(bank_status, 2),
+                        "suggested_shipment_qty": round(suggested_qty, 2),
+                        "next_shipment_date": suggested_date or "",
+                    })
 
             k1, k2, k3, k4 = st.columns(4)
-            k1.markdown(f'<div class="kpi-head yellow">NEXT SHIPMENT DATE</div><div class="kpi-value" style="background:#fde047;color:#b91c1c;font-weight:900;">{next_shipment_date or "-"}</div>', unsafe_allow_html=True)
+            k1.markdown(f'<div class="kpi-head yellow">NEXT SHIPMENT DATE</div><div class="kpi-value" style="background:#fde047;color:#b91c1c;font-weight:900;">{format_date_ddmmyyyy(next_shipment_date) if next_shipment_date else "-"}</div>', unsafe_allow_html=True)
             k2.markdown(f'<div class="kpi-head orange">NEXT SHIPMENT QTY</div><div class="kpi-value">{next_shipment_qty:,.0f}</div>', unsafe_allow_html=True)
             k3.markdown(f'<div class="kpi-head teal">PRODUCT</div><div class="kpi-value">{selected_product["product_code"]}</div>', unsafe_allow_html=True)
             k4.markdown(f'<div class="kpi-head green">SHIPMENT TIME</div><div class="kpi-value">{shipment_time_days} Days</div>', unsafe_allow_html=True)
@@ -2621,8 +2636,6 @@ if "Coverage Plan" in all_items:
                         styles.append("background-color:#ecfeff;color:#155e75;font-weight:900;")
                     elif col == "shipment_delivery_qty":
                         styles.append("background-color:#dcfce7;color:#166534;font-weight:900;")
-                    elif col == "shipment_delivery_date":
-                        styles.append("background-color:#dcfce7;color:#166534;font-weight:900;" if str(row[col]).strip() else "")
                     else:
                         styles.append("")
                 return styles
@@ -2632,6 +2645,7 @@ if "Coverage Plan" in all_items:
             else:
                 st.dataframe(df.style.apply(style_coverage, axis=1), use_container_width=True, hide_index=True)
                 export_buttons(df, "coverage_plan")
+
             st.divider()
             st.subheader("Customer Forecast & Stock at WH - Horizontal Grid")
             st.info("Columns show Week Number, Week Day, Year and Date. Edit Customer Forecast and Stock at WH directly in the grid and save.")
@@ -2707,16 +2721,19 @@ if "Coverage Plan" in all_items:
                         if st.button("Update Customer Forecast from Excel", type="primary", key="coverage_import_forecast_btn"):
                             updated = 0
                             inserted = 0
+                            skipped = 0
                             for _, row in forecast_df.iterrows():
                                 product_code = str(row.get("product_code") or "").strip()
                                 try:
                                     plan_date_text = monday_of_date(pd.to_datetime(row.get("plan_date")).date())
                                 except Exception:
-                                    plan_date_text = str(row.get("plan_date"))
-                                product_rows = fetch_all("SELECT id FROM products WHERE product_code=?", (product_code,))
+                                    plan_date_text = str(row.get("plan_date"))[:10]
+                                product_rows = fetch_all("SELECT id, two_months_inventory FROM products WHERE product_code=?", (product_code,))
                                 if not product_rows:
+                                    skipped += 1
                                     continue
                                 pid = product_rows[0]["id"]
+                                p_two_months = float(product_rows[0].get("two_months_inventory") or 0)
                                 forecast = float(row.get("customer_forecast") or 0)
                                 existing = fetch_all("SELECT id FROM coverage_plan_lines WHERE product_id=? AND plan_date=?", (pid, plan_date_text))
                                 if existing:
@@ -2728,11 +2745,11 @@ if "Coverage Plan" in all_items:
                                         INSERT INTO coverage_plan_lines
                                         (product_id, week_no, plan_date, customer_forecast, stock_at_wh,
                                          shipment_delivery_qty, delivered_to_customer, wh_bank, two_months_inventory,
-                                         bank_status, suggested_shipment_qty, next_shipment_date, shipment_delivery_date)
-                                        VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, 0, 0, NULL, NULL)
-                                    """, (pid, int(max_week)+1, plan_date_text, forecast, product_two_months_inventory))
+                                         bank_status, suggested_shipment_qty, next_shipment_date)
+                                        VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, 0, 0, NULL)
+                                    """, (pid, int(max_week)+1, plan_date_text, forecast, p_two_months))
                                     inserted += 1
-                            st.success(f"Customer Forecast Import Complete. Updated: {updated}, Inserted: {inserted}")
+                            st.success(f"Customer Forecast Import Complete. Updated: {updated}, Inserted: {inserted}, Skipped: {skipped}")
                             st.rerun()
                 except Exception as e:
                     st.error(f"Forecast import failed: {e}")
@@ -2769,16 +2786,19 @@ if "Coverage Plan" in all_items:
                         if st.button("Update Stock at WH from Excel", type="primary", key="coverage_import_stock_btn"):
                             updated = 0
                             inserted = 0
+                            skipped = 0
                             for _, row in stock_df.iterrows():
                                 product_code = str(row.get("product_code") or "").strip()
                                 try:
                                     plan_date_text = monday_of_date(pd.to_datetime(row.get("plan_date")).date())
                                 except Exception:
-                                    plan_date_text = str(row.get("plan_date"))
-                                product_rows = fetch_all("SELECT id FROM products WHERE product_code=?", (product_code,))
+                                    plan_date_text = str(row.get("plan_date"))[:10]
+                                product_rows = fetch_all("SELECT id, two_months_inventory FROM products WHERE product_code=?", (product_code,))
                                 if not product_rows:
+                                    skipped += 1
                                     continue
                                 pid = product_rows[0]["id"]
+                                p_two_months = float(product_rows[0].get("two_months_inventory") or 0)
                                 stock = float(row.get("stock_at_wh") or 0)
                                 existing = fetch_all("SELECT id FROM coverage_plan_lines WHERE product_id=? AND plan_date=?", (pid, plan_date_text))
                                 if existing:
@@ -2790,11 +2810,11 @@ if "Coverage Plan" in all_items:
                                         INSERT INTO coverage_plan_lines
                                         (product_id, week_no, plan_date, customer_forecast, stock_at_wh,
                                          shipment_delivery_qty, delivered_to_customer, wh_bank, two_months_inventory,
-                                         bank_status, suggested_shipment_qty, next_shipment_date, shipment_delivery_date)
-                                        VALUES (?, ?, ?, 0, ?, 0, 0, 0, ?, 0, 0, NULL, NULL)
-                                    """, (pid, int(max_week)+1, plan_date_text, stock, product_two_months_inventory))
+                                         bank_status, suggested_shipment_qty, next_shipment_date)
+                                        VALUES (?, ?, ?, 0, ?, 0, 0, 0, ?, 0, 0, NULL)
+                                    """, (pid, int(max_week)+1, plan_date_text, stock, p_two_months))
                                     inserted += 1
-                            st.success(f"Stock at WH Import Complete. Updated: {updated}, Inserted: {inserted}")
+                            st.success(f"Stock at WH Import Complete. Updated: {updated}, Inserted: {inserted}, Skipped: {skipped}")
                             st.rerun()
                 except Exception as e:
                     st.error(f"Stock import failed: {e}")
@@ -3029,7 +3049,7 @@ if "Overdue Notification" in all_items:
             if rec_email.strip():
                 execute_query("INSERT INTO notification_recipients (event_type, recipient_email, is_active) VALUES (?, ?, 1)", (rec_event, rec_email.strip()))
                 st.success("Recipient added.")
-        show_filtered_df(fetch_all("SELECT * FROM notification_recipients ORDER BY event_type, id DESC LIMIT 300"), "notification_recipients", total=False)
+        show_filtered_df(fetch_all("SELECT * FROM notification_recipients ORDER BY event_type, id DESC"), "notification_recipients", total=False)
 
         st.divider()
         show_header("Overdue Payment Notification")
