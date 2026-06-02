@@ -7,6 +7,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import os
+import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
