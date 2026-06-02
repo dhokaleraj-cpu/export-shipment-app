@@ -2464,15 +2464,18 @@ if "Coverage Plan" in all_items:
                     """, (selected_product["id"], str(week_start), str(week_end)))[0]["delivered_qty"] or 0)
 
                 # Shipment delivery qty: only calculated shipment delivery dates within this week.
+                # PostgreSQL DATE columns cannot accept a blank string ("") or comma-separated dates.
+                # Store NULL when there is no date, or the first matched delivery date when available.
                 shipment_delivery_qty = 0.0
-                shipment_delivery_date_text = ""
+                shipment_delivery_date_value = None
                 if week_start and week_end:
                     matched_dates = []
                     for delivery_dt, qty in shipment_delivery_events:
                         if week_start <= delivery_dt <= week_end:
                             shipment_delivery_qty += qty
                             matched_dates.append(delivery_dt.isoformat())
-                    shipment_delivery_date_text = ", ".join(sorted(set(matched_dates)))
+                    if matched_dates:
+                        shipment_delivery_date_value = sorted(set(matched_dates))[0]
 
                 customer_forecast = float(r["customer_forecast"] or 0)
                 stock_at_wh = float(r["stock_at_wh"] or 0)
@@ -2502,7 +2505,7 @@ if "Coverage Plan" in all_items:
                     WHERE id=?
                 """, (
                     delivered_to_customer, wh_bank, bank_status, suggested_qty, suggested_date,
-                    shipment_delivery_date_text, shipment_delivery_qty, r["id"]
+                    shipment_delivery_date_value, shipment_delivery_qty, r["id"]
                 ))
 
                 # Required order:
