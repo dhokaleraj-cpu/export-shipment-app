@@ -310,6 +310,28 @@ def execute_query(query, params=()):
     return db_execute_query(query, params)
 
 
+def ensure_runtime_columns():
+    """Keep Supabase/PostgreSQL schema aligned with the latest app fields."""
+    schema_updates = [
+        "ALTER TABLE shipments ADD COLUMN IF NOT EXISTS po_number TEXT",
+        "ALTER TABLE shipments ADD COLUMN IF NOT EXISTS po_date DATE",
+        "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS po_number TEXT",
+        "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS po_date DATE",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS po_number TEXT",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS po_date DATE",
+    ]
+    for sql in schema_updates:
+        try:
+            execute_query(sql)
+        except Exception:
+            pass
+
+try:
+    ensure_runtime_columns()
+except Exception:
+    pass
+
+
 def check_delete_password(password):
     user = st.session_state.get("user", {})
     username = user.get("username", "")
@@ -722,6 +744,8 @@ def delivery_note_html(data):
         <tr>
           <td>{idx}</td>
           <td>{item.get("original_invoice_no", original_invoice_no)}</td>
+          <td>{item.get("po_number", po_number)}</td>
+          <td>{format_date_ddmmyyyy(item.get("po_date", po_date))}</td>
           <td>{item.get("product_code", "")}</td>
           <td>{item.get("product_name", "")}</td>
           <td>{item.get("pallet_no", "")}</td>
@@ -739,16 +763,18 @@ def delivery_note_html(data):
     <html>
     <head>
     <style>
-    @page {{ size: Letter; margin: 0.5in; }}
-    body {{ font-family: Aptos, Arial, sans-serif; color:#111827; padding: 18px; }}
-    .invoice-title {{ font-size:30px; font-weight:900; color:#003B73; text-align:right; }}
+    @page {{ size: A4 portrait; margin: 12mm; }}
+    body {{ font-family: Aptos, Arial, sans-serif; color:#111827; padding: 0; }}
+    .invoice-title {{ font-size:28px; font-weight:900; color:#003B73; text-align:right; }}
     .company {{ font-size:22px; font-weight:900; color:#003B73; }}
     .small {{ font-size:12px; color:#374151; }}
-    .box {{ border:1px solid #111827; padding:10px; margin-top:10px; }}
-    .grid {{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }}
-    table {{ width:100%; border-collapse:collapse; margin-top:16px; font-size:13px; }}
-    th {{ background:#e5e7eb; color:#111827; font-weight:900; border:1px solid #111827; padding:8px; }}
-    td {{ border:1px solid #111827; padding:8px; }}
+    .box {{ border:1px solid #111827; padding:9px; margin-top:9px; }}
+    .grid {{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }}
+    .detail-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:5px 12px; }}
+    .detail-cell {{ border-bottom:1px dotted #9ca3af; padding:2px 0; }}
+    table {{ width:100%; border-collapse:collapse; margin-top:14px; font-size:10.5px; }}
+    th {{ background:#e5e7eb; color:#111827; font-weight:900; border:1px solid #111827; padding:5px; }}
+    td {{ border:1px solid #111827; padding:5px; }}
     .right {{ text-align:right; }}
     .total-row td {{ font-weight:900; background:#fef3c7; }}
     .footer {{ margin-top:35px; display:grid; grid-template-columns:1fr 1fr; gap:25px; }}
@@ -773,26 +799,28 @@ def delivery_note_html(data):
         </div>
         <div class="box">
           <b>INVOICE DETAILS</b><br>
-          Delivery Invoice No: <b>{data.get("delivery_invoice_no", "")}</b><br>
-          Delivery Date: <b>{delivery_date}</b><br>
-          Original Invoice No: <b>{original_invoice_no}</b><br>
-          Shipment No: <b>{data.get("shipment_no", "")}</b><br>
-          PO Number: <b>{po_number}</b><br>
-          PO Date: <b>{po_date}</b><br>
-          Payment Term: <b>{data.get("payment_term", "")}</b><br>
-          Due Date: <b>{due_date}</b>
+          <div class="detail-grid">
+            <div class="detail-cell">Delivery Invoice No: <b>{data.get("delivery_invoice_no", "")}</b></div>
+            <div class="detail-cell">Delivery Date: <b>{delivery_date}</b></div>
+            <div class="detail-cell">Original Invoice No: <b>{original_invoice_no}</b></div>
+            <div class="detail-cell">Shipment No: <b>{data.get("shipment_no", "")}</b></div>
+            <div class="detail-cell">PO Number: <b>{po_number}</b></div>
+            <div class="detail-cell">PO Date: <b>{po_date}</b></div>
+            <div class="detail-cell">Payment Term: <b>{data.get("payment_term", "")}</b></div>
+            <div class="detail-cell">Due Date: <b>{due_date}</b></div>
+          </div>
         </div>
       </div>
 
       <table>
         <tr>
-          <th>Item</th><th>Original Invoice No</th><th>Product Code</th><th>Description</th>
+          <th>Item</th><th>Original Invoice No</th><th>PO No</th><th>PO Date</th><th>Product Code</th><th>Description</th>
           <th>Pallet No</th><th>Box No</th><th class="right">Qty</th>
           <th class="right">Unit Price</th><th>Currency</th><th class="right">Amount</th>
         </tr>
         {item_rows}
         <tr class="total-row">
-          <td colspan="6" class="right">TOTAL</td>
+          <td colspan="8" class="right">TOTAL</td>
           <td class="right">{total_qty:,.2f}</td>
           <td></td><td>{currency}</td>
           <td class="right">{total_amount:,.2f}</td>
@@ -817,7 +845,10 @@ def delivery_note_html(data):
 def build_delivery_invoice_print_data(delivery_invoice_no):
     rows = fetch_all("""
         SELECT d.*, c.customer_name, s.shipment_no, s.invoice_no AS original_invoice_no,
-               p.product_code, p.product_name, p.po_number, p.po_date, b.pallet_no, b.box_no
+               p.product_code, p.product_name,
+               COALESCE(d.po_number, s.po_number, p.po_number) AS po_number,
+               COALESCE(d.po_date, s.po_date, p.po_date) AS po_date,
+               b.pallet_no, b.box_no
         FROM customer_deliveries d
         JOIN customers c ON d.customer_id = c.id
         JOIN shipments s ON d.shipment_id = s.id
@@ -1383,6 +1414,7 @@ if "Shipment Entry" in all_items:
                     forwarder_name = st.text_input("Forwarder Name", key="shipment_forwarder_name")
                     forwarder_map = {forwarder_name: None}
                 invoice_no = st.text_input("Original Invoice Number")
+                po_number = st.text_input("PO Number", key="shipment_po_number")
                 supplier = st.selectbox("Supplier", list(supplier_map.keys()), key="shipment_supplier")
                 attachment = st.file_uploader("Attach Shipment File", key="auto_file_uploader_1")
             with h2:
@@ -1394,6 +1426,7 @@ if "Shipment Entry" in all_items:
                     incoterm = st.text_input("Incoterm", key="shipment_incoterm")
                     incoterm_map = {incoterm: None}
                 shipment_date = st.date_input("Shipment Date", value=date.today())
+                po_date = st.date_input("PO Date", value=date.today(), key="shipment_po_date")
                 warehouse = st.selectbox("Warehouse", list(warehouse_map.keys()), key="shipment_warehouse")
                 remarks = st.text_area("Remarks", key="auto_textarea_1")
 
@@ -1555,9 +1588,9 @@ if "Shipment Entry" in all_items:
                         first_currency = st.session_state.shipment_temp_rows[0]["currency"]
                         path = save_upload(attachment, f"shipment_{shipment_no}")
                         execute_query("""
-                            INSERT INTO shipments (shipment_no, invoice_no, shipment_date, supplier_id, warehouse_id, invoice_amount, currency, attachment_path, remarks, shipping_bill_no, shipping_bill_date, shipment_doc_date, forwarder_name, incoterm, forwarder_id, incoterm_id)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (shipment_no, invoice_no, str(shipment_date), supplier_map[supplier], warehouse_map[warehouse], total_amount, first_currency, path, remarks, shipping_bill_no, str(shipping_bill_date), str(shipment_doc_date), forwarder_name, incoterm, forwarder_map.get(forwarder_name), incoterm_map.get(incoterm)))
+                            INSERT INTO shipments (shipment_no, invoice_no, po_number, po_date, shipment_date, supplier_id, warehouse_id, invoice_amount, currency, attachment_path, remarks, shipping_bill_no, shipping_bill_date, shipment_doc_date, forwarder_name, incoterm, forwarder_id, incoterm_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (shipment_no, invoice_no, po_number, str(po_date), str(shipment_date), supplier_map[supplier], warehouse_map[warehouse], total_amount, first_currency, path, remarks, shipping_bill_no, str(shipping_bill_date), str(shipment_doc_date), forwarder_name, incoterm, forwarder_map.get(forwarder_name), incoterm_map.get(incoterm)))
                         shipment_id = fetch_all("SELECT id FROM shipments WHERE shipment_no=?", (shipment_no,))[0]["id"]
                         for row in st.session_state.shipment_temp_rows:
                             old_match = fetch_all("""
@@ -1571,7 +1604,7 @@ if "Shipment Entry" in all_items:
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                             """, (shipment_id, row["pallet_no"], row["box_no"], row["product_id"], row["quantity"], row["unit_price"], row["currency"], row["amount"]))
                         st.session_state.shipment_temp_rows = []
-                        notify_event("shipment", "New Shipment Created", f"Shipment No: {shipment_no}\nOriginal Invoice: {invoice_no}\nAmount: {total_amount}\nCurrency: {first_currency}")
+                        notify_event("shipment", "New Shipment Created", f"Shipment No: {shipment_no}\nOriginal Invoice: {invoice_no}\nPO Number: {po_number}\nPO Date: {po_date}\nAmount: {total_amount}\nCurrency: {first_currency}")
                         st.success("Shipment and pallet/product rows saved successfully. Email notification attempted if enabled.")
                     except Exception as e:
                         st.error(f"Duplicate shipment or duplicate pallet row found. Existing database entries were not changed. {e}")
@@ -1579,7 +1612,7 @@ if "Shipment Entry" in all_items:
             st.divider()
             st.subheader("Last Shipment Entries")
             shipment_rows_for_actions = fetch_all("""
-                SELECT s.id, s.shipment_no, s.invoice_no, s.shipment_date, s.shipping_bill_no, s.shipping_bill_date,
+                SELECT s.id, s.shipment_no, s.invoice_no, s.po_number, s.po_date, s.shipment_date, s.shipping_bill_no, s.shipping_bill_date,
                        s.shipment_doc_date, s.forwarder_name, s.incoterm,
                        sup.supplier_name, w.warehouse_name, s.currency, s.invoice_amount
                 FROM shipments s
@@ -1729,7 +1762,7 @@ if "Delivery to Customer" in all_items:
         terms = fetch_all("SELECT * FROM payment_terms ORDER BY days")
 
         invoice_shipments = fetch_all("""
-            SELECT id, shipment_no, invoice_no, shipment_date
+            SELECT id, shipment_no, invoice_no, po_number, po_date, shipment_date
             FROM shipments
             ORDER BY shipment_date ASC, id ASC
         """)
@@ -1738,13 +1771,18 @@ if "Delivery to Customer" in all_items:
         else:
             customer_map = {x["customer_name"]: x["id"] for x in customers}
             term_map = {f'{x["term_name"]} - {x["days"]} days': x for x in terms}
-            inv_map = {f'{s["invoice_no"]} | Shipment {s["shipment_no"]} | Date {s["shipment_date"]}': s for s in invoice_shipments}
+            inv_map = {f'{s["invoice_no"]} | Shipment {s["shipment_no"]} | PO {s.get("po_number") or "-"} | Date {s["shipment_date"]}': s for s in invoice_shipments}
 
             ctop1, ctop2 = st.columns(2)
             with ctop1:
                 st.markdown('<div class="input-section-title">Original Invoice Number with Shipment Number</div>', unsafe_allow_html=True)
                 selected_invoice = st.selectbox("Original Invoice Number with Shipment Number", list(inv_map.keys()), key="delivery_original_invoice_ship", label_visibility="collapsed")
             selected_ship = inv_map[selected_invoice]
+            po_info_cols = st.columns(2)
+            with po_info_cols[0]:
+                st.text_input("PO Number", value=selected_ship.get("po_number") or "", disabled=True, key="delivery_selected_po_number")
+            with po_info_cols[1]:
+                st.text_input("PO Date", value=format_date_ddmmyyyy(selected_ship.get("po_date")), disabled=True, key="delivery_selected_po_date")
 
             available_rows = fetch_all("""
                 SELECT
@@ -1752,10 +1790,10 @@ if "Delivery to Customer" in all_items:
                     s.shipment_no,
                     s.invoice_no,
                     s.shipment_date,
+                    COALESCE(s.po_number, p.po_number) AS po_number,
+                    COALESCE(s.po_date, p.po_date) AS po_date,
                     p.product_code,
                     p.product_name,
-                    p.po_number,
-                    p.po_date,
                     COALESCE(del.delivered_qty, 0) AS delivered_qty,
                     b.original_qty - COALESCE(del.delivered_qty, 0) AS balance_qty
                 FROM shipment_boxes b
@@ -1831,6 +1869,8 @@ if "Delivery to Customer" in all_items:
                         fifo_display_rows.append({
                             "shipment_no": r["shipment_no"],
                             "original_invoice_no": r["invoice_no"],
+                            "po_number": r.get("po_number", ""),
+                            "po_date": r.get("po_date", ""),
                             "shipment_date": r["shipment_date"],
                             "pallet_no": r["pallet_no"],
                             "box_no": r["box_no"] or "-",
@@ -1856,11 +1896,11 @@ if "Delivery to Customer" in all_items:
                             execute_query("""
                                 INSERT INTO customer_deliveries
                                 (shipment_id, box_id, customer_id, delivery_date, delivered_qty, delivery_invoice_no,
-                                 payment_term_id, payment_terms_days, payment_due_date, unit_price, currency, sale_amount, attachment_path)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 payment_term_id, payment_terms_days, payment_due_date, unit_price, currency, sale_amount, attachment_path, po_number, po_date)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (row["shipment_id"], row["id"], customer_map[customer], str(delivery_date),
                                   qty, delivery_invoice_no.strip(), term["id"], term["days"], str(payment_due_date),
-                                  price, row["currency"], amount, path))
+                                  price, row["currency"], amount, path, row.get("po_number", ""), row.get("po_date", None)))
                             if first_print is None:
                                 first_print = {
                                     "customer_name": customer,
