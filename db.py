@@ -1,6 +1,7 @@
 import os
 import hashlib
 import psycopg2
+import streamlit as st
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 
@@ -9,7 +10,13 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL missing in .env file")
+    try:
+        DATABASE_URL = st.secrets["DATABASE_URL"]
+    except Exception:
+        DATABASE_URL = None
+
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL not configured")
 
 
 def convert_sqlite_to_postgres(query: str) -> str:

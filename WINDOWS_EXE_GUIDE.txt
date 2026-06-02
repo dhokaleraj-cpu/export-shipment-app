@@ -1,0 +1,56 @@
+WINDOWS 11 EXE BUILD GUIDE
+
+Use this on a Windows 11 computer, not Mac.
+
+1) Open VS Code Terminal
+cd C:\Users\YOUR_USER\export_shipment_app
+
+2) Create and activate venv
+python -m venv .venv
+.venv\Scripts\activate
+
+3) Install requirements
+pip install -r requirements.txt
+pip install pyinstaller
+
+4) Create run_app.py in the same folder with this content:
+
+from streamlit.web import cli as stcli
+import sys
+import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+os.chdir(BASE_DIR)
+
+sys.argv = [
+    "streamlit",
+    "run",
+    "app.py",
+    "--server.headless=true",
+    "--browser.gatherUsageStats=false",
+    "--server.port=8501",
+]
+
+stcli.main()
+
+5) Build EXE
+pyinstaller ^
+--onefile ^
+--windowed ^
+--name ExportShipmentMonitoring ^
+--add-data "app.py;." ^
+--add-data "db.py;." ^
+--add-data "shipment_app.db;." ^
+--add-data "FSI_LOGO_new.png;." ^
+--add-data "uploads;uploads" ^
+--add-data "Coverage Plan.xlsx;." ^
+run_app.py
+
+6) Your EXE will be here:
+dist\ExportShipmentMonitoring.exe
+
+7) Important
+Do not delete shipment_app.db.
+Keep a backup copy before distributing the EXE.
+For multiple users, do not run the same SQLite database from a shared network folder.

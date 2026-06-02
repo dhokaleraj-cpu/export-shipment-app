@@ -1,0 +1,5 @@
+id,term_name,days,remarks
+1,Immediate,0,"Payment due on delivery date"
+2,"Net 30",30,"Payment due after 30 days"
+3,"Net 45",45,"Payment due after 45 days"
+4,"Net 60",60,"Payment due after 60 days"

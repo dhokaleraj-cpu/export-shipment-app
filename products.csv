@@ -1,0 +1,5 @@
+id,product_code,product_name,unit,unit_price,currency,program,assy_plant,weight,lcr_weekly,mcr_weekly,two_months_inventory,po_number,po_date
+2,40257237,"T1XX SUV",Nos,2.71,USD,"T1XX SUV",GMC-5,0.55,6809.0,7831.0,54472.0,,
+3,40256626,"T1XX HD",Nos,2.54,USD,"T1XX HD",TRMF,0.5,8316.0,9564.0,66528.0,,
+4,40229265,"D2U C/G/H RDM",Nos,0.89,USD,"D2U C/G/H RDM",GMC-1,0.081,4160.0,4784.0,33280.0,,
+5,40282130,CUSW,Nos,1.51,USD,CUSW,GMC-1,0.165,392.0,451.0,3136.0,,

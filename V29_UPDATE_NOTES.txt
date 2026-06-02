@@ -1,0 +1,12 @@
+
+Export Shipment Management App V29
+
+Requested Updates Included:
+1. All dates displayed in DD-MM-YYYY format.
+2. Overdue Payment summary added to Main Dashboard.
+3. Coverage Plan dashboard/KPIs added to Main Dashboard.
+4. Coverage Plan page headings, subheadings and titles changed to bold styling.
+5. Existing shipment_app.db preserved.
+
+Run:
+streamlit run app.py
