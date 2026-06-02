@@ -558,7 +558,7 @@ def quick_add_supplier():
         name = st.text_input("Supplier Name", key="quick_supplier_name")
         if st.button("Save Supplier", key="quick_supplier_save"):
             if name.strip():
-                execute_query("ON CONFLICT DO NOTHING INTO suppliers (supplier_name) VALUES (?)", (name.strip(),))
+                execute_query("INSERT INTO suppliers (supplier_name) VALUES (?) ON CONFLICT DO NOTHING", (name.strip(),))
                 st.success("Supplier added. Refresh/reopen this module if not visible immediately.")
 
 def quick_add_warehouse():
@@ -566,7 +566,7 @@ def quick_add_warehouse():
         name = st.text_input("Warehouse Name", key="quick_warehouse_name")
         if st.button("Save Warehouse", key="quick_warehouse_save"):
             if name.strip():
-                execute_query("ON CONFLICT DO NOTHING INTO warehouses (warehouse_name) VALUES (?)", (name.strip(),))
+                execute_query("INSERT INTO warehouses (warehouse_name) VALUES (?) ON CONFLICT DO NOTHING", (name.strip(),))
                 st.success("Warehouse added. Refresh/reopen this module if not visible immediately.")
 
 def quick_add_product():
@@ -583,8 +583,9 @@ def quick_add_product():
         if st.button("Save Product", key="quick_product_save"):
             if code.strip() and name.strip():
                 execute_query("""
-                    ON CONFLICT DO NOTHING INTO products (product_code, product_name, unit, unit_price, currency)
+                    INSERT INTO products (product_code, product_name, unit, unit_price, currency)
                     VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT DO NOTHING
                 """, (code.strip(), name.strip(), unit, price, currency))
                 st.success("Product added. Refresh/reopen this module if not visible immediately.")
 
@@ -601,8 +602,9 @@ def quick_add_customer():
         if st.button("Save Customer", key="quick_customer_save"):
             if name.strip():
                 execute_query("""
-                    ON CONFLICT DO NOTHING INTO customers (customer_name, email, whatsapp_no, payment_term_id)
+                    INSERT INTO customers (customer_name, email, whatsapp_no, payment_term_id)
                     VALUES (?, ?, ?, ?)
+                    ON CONFLICT DO NOTHING
                 """, (name.strip(), email.strip(), whatsapp.strip(), term_options[selected_term]))
                 st.success("Customer added. Refresh/reopen this module if not visible immediately.")
 
@@ -612,7 +614,7 @@ def quick_add_payment_term():
         days = st.number_input("Days", min_value=0, step=1, key="quick_term_days")
         if st.button("Save Payment Term", key="quick_term_save"):
             if term.strip():
-                execute_query("ON CONFLICT DO NOTHING INTO payment_terms (term_name, days) VALUES (?, ?)", (term.strip(), int(days)))
+                execute_query("INSERT INTO payment_terms (term_name, days) VALUES (?, ?) ON CONFLICT DO NOTHING", (term.strip(), int(days)))
                 st.success("Payment term added. Refresh/reopen this module if not visible immediately.")
 
 def edit_button_column(rows, prefix):
@@ -1441,23 +1443,51 @@ if "Shipment Entry" in all_items:
                 st.markdown('<div class="shipment-grid-label">Product Code</div>', unsafe_allow_html=True)
                 selected_product = st.selectbox("Product Code", product_options, key="shipment_product_select", label_visibility="collapsed")
             selected_product_data = product_info[selected_product]
-            auto_price = float(selected_product_data["unit_price"] or 0)
-            auto_currency = selected_product_data["currency"] or "INR"
+            auto_price = float(selected_product_data.get("unit_price") or 0)
+            auto_currency = selected_product_data.get("currency") or "USD"
+            product_id_for_key = str(selected_product_data.get("id") or selected_product).replace(" ", "_").replace("|", "_").replace("/", "_")
+
             with r4:
                 st.markdown('<div class="shipment-grid-label">Quantity</div>', unsafe_allow_html=True)
-                quantity = st.number_input("Quantity", min_value=0.0, step=1.0, key="shipment_grid_qty", label_visibility="collapsed")
+                quantity = st.number_input(
+                    "Quantity",
+                    min_value=0.0,
+                    step=1.0,
+                    key="shipment_grid_qty",
+                    label_visibility="collapsed"
+                )
+
             with r5:
                 st.markdown('<div class="shipment-grid-label">Price</div>', unsafe_allow_html=True)
-                unit_price = st.number_input("Price", min_value=0.0, value=auto_price, step=1.0, key="shipment_grid_price", label_visibility="collapsed")
+                unit_price = st.number_input(
+                    "Price",
+                    min_value=0.0,
+                    value=auto_price,
+                    step=1.0,
+                    key=f"shipment_grid_price_{product_id_for_key}",
+                    label_visibility="collapsed"
+                )
+
             with r6:
                 st.markdown('<div class="shipment-grid-label">Currency</div>', unsafe_allow_html=True)
-                currency = st.selectbox("Currency", CURRENCIES, index=CURRENCIES.index(auto_currency) if auto_currency in CURRENCIES else 0, key="shipment_grid_currency", label_visibility="collapsed")
+                currency = st.selectbox(
+                    "Currency",
+                    CURRENCIES,
+                    index=CURRENCIES.index(auto_currency) if auto_currency in CURRENCIES else 0,
+                    key=f"shipment_grid_currency_{product_id_for_key}",
+                    label_visibility="collapsed"
+                )
+
             with r7:
                 st.markdown('<div class="shipment-grid-label">Amount</div>', unsafe_allow_html=True)
                 amount = quantity * unit_price
-                st.markdown(f'<div class="amount-input-look">{amount:,.2f} {currency}</div>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="amount-input-look">{amount:,.2f} {currency}</div>',
+                    unsafe_allow_html=True
+                )
 
             st.markdown('<div style="height:10px;"></div>', unsafe_allow_html=True)
+
             if st.button("Add Row to Table", type="primary", key="shipment_grid_add_row"):
                 if not pallet_no.strip():
                     st.error("Pallet Number is mandatory.")
@@ -1492,19 +1522,27 @@ if "Shipment Entry" in all_items:
 
             st.subheader("Current Shipment Rows")
             temp_df = pd.DataFrame(st.session_state.shipment_temp_rows)
+
             if not temp_df.empty:
-                display_df = add_total_row(temp_df[["pallet_no", "box_no", "product_code", "product_name", "quantity", "unit_price", "currency", "amount"]])
+                display_df = add_total_row(
+                    temp_df[["pallet_no", "box_no", "product_code", "product_name", "quantity", "unit_price", "currency", "amount"]]
+                )
                 st.dataframe(style_total_row(display_df), use_container_width=True, hide_index=True)
+
                 total_qty = temp_df["quantity"].sum()
                 total_amount = temp_df["amount"].sum()
-                st.markdown(f'<div class="total-box">Total Quantity: {total_qty} &nbsp;&nbsp; | &nbsp;&nbsp; Total Amount: {total_amount:,.2f}</div>', unsafe_allow_html=True)
-                if st.button("Clear Unsaved Rows"):
+                st.markdown(
+                    f'<div class="total-box">Total Quantity: {total_qty} &nbsp;&nbsp; | &nbsp;&nbsp; Total Amount: {total_amount:,.2f}</div>',
+                    unsafe_allow_html=True
+                )
+
+                if st.button("Clear Unsaved Rows", key="clear_unsaved_shipment_rows"):
                     st.session_state.shipment_temp_rows = []
                     st.rerun()
             else:
                 st.info("No rows added yet.")
 
-            if st.button("Save Shipment with All Rows", type="primary"):
+            if st.button("Save Shipment with All Rows", type="primary", key="save_shipment_all_rows"):
                 if not shipment_no.strip():
                     st.error("Shipment Number is mandatory.")
                 elif not invoice_no.strip():
@@ -1535,7 +1573,7 @@ if "Shipment Entry" in all_items:
                         st.session_state.shipment_temp_rows = []
                         notify_event("shipment", "New Shipment Created", f"Shipment No: {shipment_no}\nOriginal Invoice: {invoice_no}\nAmount: {total_amount}\nCurrency: {first_currency}")
                         st.success("Shipment and pallet/product rows saved successfully. Email notification attempted if enabled.")
-                    except sqlite3.IntegrityError as e:
+                    except Exception as e:
                         st.error(f"Duplicate shipment or duplicate pallet row found. Existing database entries were not changed. {e}")
 
             st.divider()
