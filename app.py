@@ -2472,11 +2472,7 @@ if "Coverage Plan" in all_items:
                         if week_start <= delivery_dt <= week_end:
                             shipment_delivery_qty += qty
                             matched_dates.append(delivery_dt.isoformat())
-                    shipment_delivery_date_list = sorted(set(matched_dates))
-                    shipment_delivery_date_text = ", ".join(shipment_delivery_date_list)
-                    # PostgreSQL DATE columns cannot store blank strings or comma-separated dates.
-                    # Store one valid ISO date in the database; keep comma-separated text only for screen display.
-                    shipment_delivery_date_value = shipment_delivery_date_list[0] if shipment_delivery_date_list else None
+                    shipment_delivery_date_text = ", ".join(sorted(set(matched_dates)))
 
                 customer_forecast = float(r["customer_forecast"] or 0)
                 stock_at_wh = float(r["stock_at_wh"] or 0)
@@ -2493,8 +2489,13 @@ if "Coverage Plan" in all_items:
                 suggested_date = ""
                 if suggested_qty > 0 and week_start:
                     suggested_date = (week_start - timedelta(days=int(shipment_time_days))).isoformat()
-                # PostgreSQL DATE columns need NULL instead of blank string.
+
+                # PostgreSQL DATE columns cannot accept empty strings or comma-separated dates.
+                # Use None for blank dates and use the first matched shipment delivery date for DATE column.
                 suggested_date_value = suggested_date if suggested_date else None
+                shipment_delivery_date_value = None
+                if shipment_delivery_date_text:
+                    shipment_delivery_date_value = str(shipment_delivery_date_text).split(",")[0].strip() or None
 
                 if suggested_qty > 0 and not next_shipment_date:
                     next_shipment_date = suggested_date
