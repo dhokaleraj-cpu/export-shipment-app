@@ -545,7 +545,7 @@ def send_email_message(to_email, subject, body):
 def notify_event(event_type, subject, body):
     recipients = fetch_all("""
         SELECT recipient_email FROM notification_recipients
-        WHERE event_type=? AND is_active=1
+        WHERE event_type=? AND is_active=true
     """, (event_type,))
     results = []
     for r in recipients:
@@ -1756,7 +1756,8 @@ if "Delivery to Customer" in all_items:
                 LEFT JOIN customer_deliveries d ON b.id = d.box_id
                 WHERE s.id = ?
                 GROUP BY b.id
-                HAVING balance_qty > 0
+                HAVING
+    b.original_qty - COALESCE(SUM(d.delivered_qty), 0) > 0
                 ORDER BY s.shipment_date ASC, b.pallet_no ASC, b.id ASC
             """, (selected_ship["id"],))
 
