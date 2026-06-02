@@ -24,6 +24,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 LOGO_PATH = Path("FSI_LOGO_new.png")
 
 CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "JPY", "CNY"]
+MAX_LIST_ROWS = 300  # Limits large on-screen tables for better web performance
 
 st.set_page_config(page_title="Export Shipment Management", layout="wide", initial_sidebar_state="collapsed")
 init_db()
@@ -301,13 +302,25 @@ div[data-testid="stFileUploader"] section [data-testid="stFileUploaderDropzoneIn
 </style>
 """, unsafe_allow_html=True)
 
-def fetch_all(query, params=()):
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_fetch_all(query, params=()):
+    """Cache repeated SELECT results for 5 minutes to improve Streamlit speed."""
     from db import fetch_all as db_fetch_all
     return db_fetch_all(query, params)
 
+def fetch_all(query, params=()):
+    """Cached database reads. Cache is cleared automatically after writes."""
+    safe_params = tuple(params) if params else ()
+    return _cached_fetch_all(query, safe_params)
+
 def execute_query(query, params=()):
     from db import execute_query as db_execute_query
-    return db_execute_query(query, params)
+    result = db_execute_query(query, params)
+    try:
+        _cached_fetch_all.clear()
+    except Exception:
+        pass
+    return result
 
 
 def ensure_runtime_columns():
@@ -624,7 +637,7 @@ def quick_add_customer():
         name = st.text_input("Customer Name", key="quick_customer_name")
         email = st.text_input("Email", key="quick_customer_email")
         whatsapp = st.text_input("WhatsApp No", key="quick_customer_whatsapp")
-        terms = fetch_all("SELECT * FROM payment_terms ORDER BY days")
+        terms = fetch_all("SELECT * FROM payment_terms ORDER BY days LIMIT 200")
         term_options = {"No Payment Term": None}
         for t in terms:
             term_options[f'{t["term_name"]} - {t["days"]} days'] = t["id"]
@@ -1017,7 +1030,7 @@ selected_tabs = st.tabs(all_items)
 def customer_form():
     require_roles(("admin", "super_admin"))
     st.subheader("Customer Master")
-    terms = fetch_all("SELECT * FROM payment_terms ORDER BY days")
+    terms = fetch_all("SELECT * FROM payment_terms ORDER BY days LIMIT 200")
     term_options = {"No Payment Term": None}
     for t in terms:
         term_options[f'{t["term_name"]} - {t["days"]} days'] = t["id"]
@@ -1050,13 +1063,14 @@ def customer_form():
         FROM customers c
         LEFT JOIN payment_terms pt ON c.payment_term_id = pt.id
         ORDER BY c.id DESC
+        LIMIT 300
     """)
     show_filtered_df(edit_button_column(rows, "customers"), "master_customers", total=True)
 
     if st.session_state.user["role"] == "super_admin":
         st.divider()
         st.subheader("Edit Customer Master")
-        old_rows = fetch_all("SELECT * FROM customers ORDER BY id DESC")
+        old_rows = fetch_all("SELECT * FROM customers ORDER BY id DESC LIMIT 300")
         if old_rows:
             row_map = {f'{r["id"]} | {r["customer_name"]}': r for r in old_rows}
             selected = row_map[st.selectbox("Select Customer to Edit", list(row_map.keys()), key="edit_customer_select")]
@@ -1129,13 +1143,14 @@ def product_form():
                weight, lcr_weekly, mcr_weekly, two_months_inventory, po_number, po_date
         FROM products
         ORDER BY id DESC
+        LIMIT 300
     """)
     show_filtered_df(edit_button_column(rows, "products"), "master_products", total=True)
 
     if st.session_state.user["role"] == "super_admin":
         st.divider()
         st.subheader("Edit Product Master")
-        old_rows = fetch_all("SELECT * FROM products ORDER BY id DESC")
+        old_rows = fetch_all("SELECT * FROM products ORDER BY id DESC LIMIT 300")
         if old_rows:
             row_map = {f'{r["id"]} | {r["product_code"]} | {r["product_name"]}': r for r in old_rows}
             selected_key = st.selectbox("Select Product Master Entry to Edit", list(row_map.keys()), key="edit_product_select")
@@ -1205,12 +1220,12 @@ def master_form(title, table, fields, allowed_roles=("admin", "super_admin")):
             st.success(f"{title} saved successfully.")
         except sqlite3.IntegrityError:
             st.error("Duplicate value found. Please check unique fields.")
-    show_filtered_df(edit_button_column(fetch_all(f"SELECT * FROM {table} ORDER BY id DESC"), table), f"master_{table}", total=True)
+    show_filtered_df(edit_button_column(fetch_all(f"SELECT * FROM {table} ORDER BY id DESC LIMIT 300"), table), f"master_{table}", total=True)
 
     if st.session_state.user["role"] == "super_admin":
         st.divider()
         st.subheader(f"Edit {title}")
-        rows = fetch_all(f"SELECT * FROM {table} ORDER BY id DESC")
+        rows = fetch_all(f"SELECT * FROM {table} ORDER BY id DESC LIMIT 300")
         if rows:
             row_map = {f'{r["id"]} | ' + str(r.get(fields[0], "")): r for r in rows}
             selected = row_map[st.selectbox(f"Select {title} Entry to Edit", list(row_map.keys()), key=f"edit_select_{table}")]
@@ -1397,11 +1412,11 @@ if "Shipment Entry" in all_items:
     with selected_tabs[all_items.index("Shipment Entry")]:
         require_roles(("admin", "super_admin"))
         show_header("Shipment Entry with Pallet / Product Rows")
-        suppliers = fetch_all("SELECT * FROM suppliers ORDER BY supplier_name")
-        warehouses = fetch_all("SELECT * FROM warehouses ORDER BY warehouse_name")
-        products = fetch_all("SELECT * FROM products ORDER BY product_code")
-        forwarders = fetch_all("SELECT * FROM forwarders ORDER BY forwarder_name")
-        incoterms = fetch_all("SELECT * FROM incoterms ORDER BY incoterm_name")
+        suppliers = fetch_all("SELECT * FROM suppliers ORDER BY supplier_name LIMIT 500")
+        warehouses = fetch_all("SELECT * FROM warehouses ORDER BY warehouse_name LIMIT 500")
+        products = fetch_all("SELECT * FROM products ORDER BY product_code LIMIT 500")
+        forwarders = fetch_all("SELECT * FROM forwarders ORDER BY forwarder_name LIMIT 500")
+        incoterms = fetch_all("SELECT * FROM incoterms ORDER BY incoterm_name LIMIT 500")
         if not suppliers or not warehouses or not products:
             st.warning("Create Supplier, Warehouse, and Product masters first.")
         else:
@@ -1679,8 +1694,8 @@ if "Shipment Entry" in all_items:
                     ship_keys = list(ship_map.keys())
                     default_ship_index = ship_keys.index(default_ship_key) if default_ship_key in ship_keys else 0
                     edit_ship = ship_map[st.selectbox("Select Shipment to Edit", ship_keys, index=default_ship_index, key="edit_shipment_header_select")]
-                    suppliers2 = fetch_all("SELECT * FROM suppliers ORDER BY supplier_name")
-                    warehouses2 = fetch_all("SELECT * FROM warehouses ORDER BY warehouse_name")
+                    suppliers2 = fetch_all("SELECT * FROM suppliers ORDER BY supplier_name LIMIT 500")
+                    warehouses2 = fetch_all("SELECT * FROM warehouses ORDER BY warehouse_name LIMIT 500")
                     supplier_names = [x["supplier_name"] for x in suppliers2]
                     warehouse_names = [x["warehouse_name"] for x in warehouses2]
                     supplier_id_map = {x["supplier_name"]: x["id"] for x in suppliers2}
@@ -1767,8 +1782,8 @@ if "Delivery to Customer" in all_items:
         """, unsafe_allow_html=True)
 
 
-        customers = fetch_all("SELECT * FROM customers ORDER BY customer_name")
-        terms = fetch_all("SELECT * FROM payment_terms ORDER BY days")
+        customers = fetch_all("SELECT * FROM customers ORDER BY customer_name LIMIT 500")
+        terms = fetch_all("SELECT * FROM payment_terms ORDER BY days LIMIT 200")
 
         invoice_shipments = fetch_all("""
             SELECT id, shipment_no, invoice_no, po_number, po_date, shipment_date
@@ -3014,7 +3029,7 @@ if "Overdue Notification" in all_items:
             if rec_email.strip():
                 execute_query("INSERT INTO notification_recipients (event_type, recipient_email, is_active) VALUES (?, ?, 1)", (rec_event, rec_email.strip()))
                 st.success("Recipient added.")
-        show_filtered_df(fetch_all("SELECT * FROM notification_recipients ORDER BY event_type, id DESC"), "notification_recipients", total=False)
+        show_filtered_df(fetch_all("SELECT * FROM notification_recipients ORDER BY event_type, id DESC LIMIT 300"), "notification_recipients", total=False)
 
         st.divider()
         show_header("Overdue Payment Notification")
