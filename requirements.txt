@@ -3,3 +3,8 @@ pandas
 openpyxl
 reportlab
 matplotlib
+python-dotenv
+psycopg2-binary
+matplotlib
+reportlab
+pillow
