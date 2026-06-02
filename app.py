@@ -1747,17 +1747,27 @@ if "Delivery to Customer" in all_items:
             selected_ship = inv_map[selected_invoice]
 
             available_rows = fetch_all("""
-                SELECT b.*, s.shipment_no, s.invoice_no, s.shipment_date, p.product_code, p.product_name, p.po_number, p.po_date,
-                       IFNULL(SUM(d.delivered_qty), 0) delivered_qty,
-                       b.original_qty - IFNULL(SUM(d.delivered_qty), 0) balance_qty
+                SELECT
+                    b.*,
+                    s.shipment_no,
+                    s.invoice_no,
+                    s.shipment_date,
+                    p.product_code,
+                    p.product_name,
+                    p.po_number,
+                    p.po_date,
+                    COALESCE(del.delivered_qty, 0) AS delivered_qty,
+                    b.original_qty - COALESCE(del.delivered_qty, 0) AS balance_qty
                 FROM shipment_boxes b
                 JOIN shipments s ON b.shipment_id = s.id
                 JOIN products p ON b.product_id = p.id
-                LEFT JOIN customer_deliveries d ON b.id = d.box_id
+                LEFT JOIN (
+                    SELECT box_id, SUM(delivered_qty) AS delivered_qty
+                    FROM customer_deliveries
+                    GROUP BY box_id
+                ) del ON b.id = del.box_id
                 WHERE s.id = ?
-                GROUP BY b.id
-                HAVING
-    b.original_qty - COALESCE(SUM(d.delivered_qty), 0) > 0
+                  AND b.original_qty - COALESCE(del.delivered_qty, 0) > 0
                 ORDER BY s.shipment_date ASC, b.pallet_no ASC, b.id ASC
             """, (selected_ship["id"],))
 
