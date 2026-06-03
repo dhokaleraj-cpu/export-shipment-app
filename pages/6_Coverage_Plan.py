@@ -43,6 +43,7 @@ def local_coverage_input_start(title, header_bg="#1A5E99"):
     )
 
 def local_coverage_input_end():
+    # No closing div needed. The Streamlit widget directly below is styled as the card body.
     pass
 
 def local_filter_start(title, header_bg="#1A5E99"):
@@ -312,9 +313,9 @@ else:
 
     k1, k2, k3, k4 = st.columns(4)
     with k1:
-        local_coverage_card('NEXT SHIPMENT DATE', (format_date_ddmmyyyy(next_shipment_date) if next_shipment_date else '-'), '#1A5E99', '#ffffff', '#B91C1C')
+        local_coverage_card('NEXT SHIPMENT DATE', (format_date_ddmmyyyy(next_shipment_date) if next_shipment_date else '-'), '#B91C1C', '#ffffff', '#B91C1C')
     with k2:
-        local_coverage_card('NEXT SHIPMENT QTY', f'{next_shipment_qty:,.0f}', '#1A5E99', '#ffffff', '#FF8C00')
+        local_coverage_card('NEXT SHIPMENT QTY', f'{next_shipment_qty:,.0f}', '#FF8C00', '#ffffff', '#FF8C00')
     with k3:
         local_coverage_card('PRODUCT', selected_product['product_code'], '#1A5E99')
     with k4:
