@@ -902,7 +902,7 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"] span {
 }
 
 
-/* FINAL HEADER UPDATE - centered title and bold user details */
+/* FORCED HEADER FINAL OVERRIDE */
 .main-title-center {
     text-align:center !important;
     font-family:Aptos, Arial, sans-serif !important;
@@ -910,22 +910,12 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"] span {
     line-height:1.10 !important;
     font-weight:950 !important;
     color:#1B6DB5 !important;
-    letter-spacing:1.2px !important;
-    padding-top:10px !important;
-    margin:0 auto !important;
-    width:100% !important;
 }
 .user-clock {
-    text-align:left !important;
     font-family:Aptos, Arial, sans-serif !important;
     font-size:21px !important;
-    line-height:1.55 !important;
     font-weight:900 !important;
     color:#111827 !important;
-    padding-top:18px !important;
-}
-.user-clock b, .user-clock span {
-    font-weight:900 !important;
 }
 
 </style>
@@ -1099,24 +1089,46 @@ def render_kpi_card_in(container, label, value, color_class="blue", value_class=
 def top_layout():
     user = st.session_state.get("user", {"username": "-", "role": "-"})
     c1, c2, c3 = st.columns([2.4, 4.8, 2.4])
+
     with c1:
         if LOGO_PATH.exists():
             st.image(str(LOGO_PATH), use_container_width=False, width=430)
         else:
             st.markdown('<div class="logo-circle">FSI</div>', unsafe_allow_html=True)
+
     with c2:
         st.markdown("""
-        <div class="main-title-center">
+        <div style="
+            width:100%;
+            text-align:center;
+            font-family:Aptos, Arial, sans-serif;
+            font-size:50px;
+            line-height:1.10;
+            font-weight:950;
+            color:#1B6DB5;
+            letter-spacing:1.2px;
+            padding-top:4px;
+            margin:0 auto;
+        ">
             EXPORT SHIPMENT<br>MONITORING SYSTEM
         </div>
         """, unsafe_allow_html=True)
+
     with c3:
         st.markdown(f"""
-        <div class="user-clock">
-            User: {user["username"]}<br>
-            Role: {user["role"]}<br>
-            Module: Export Shipment<br>
-            <span id="liveClock"></span>
+        <div style="
+            text-align:left;
+            font-family:Aptos, Arial, sans-serif;
+            font-size:21px;
+            line-height:1.55;
+            font-weight:900;
+            color:#111827;
+            padding-top:18px;
+        ">
+            <b>User: {user["username"]}</b><br>
+            <b>Role: {user["role"]}</b><br>
+            <b>Module: Export Shipment</b><br>
+            <span id="liveClock" style="font-weight:900;"></span>
         </div>
         <script>
         function updateClock(){{
@@ -1127,8 +1139,10 @@ def top_layout():
         setInterval(updateClock, 1000); updateClock();
         </script>
         """, unsafe_allow_html=True)
+
     st.divider()
     render_top_navigation()
+
 
 def show_header(title, subtitle="EXPORT SHIPMENT MONITORING SYSTEM"):
     st.markdown(f'<div class="topbar"><h1>{title}</h1><div class="subtext">{subtitle}</div></div>', unsafe_allow_html=True)
