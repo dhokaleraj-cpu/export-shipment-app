@@ -313,9 +313,9 @@ else:
 
     k1, k2, k3, k4 = st.columns(4)
     with k1:
-        local_coverage_card('NEXT SHIPMENT DATE', (format_date_ddmmyyyy(next_shipment_date) if next_shipment_date else '-'), '#B91C1C', '#ffffff', '#B91C1C')
+        local_coverage_card('NEXT SHIPMENT DATE', (format_date_ddmmyyyy(next_shipment_date) if next_shipment_date else '-'), '#B72C24', '#ffffff', '#B72C24')
     with k2:
-        local_coverage_card('NEXT SHIPMENT QTY', f'{next_shipment_qty:,.0f}', '#FF8C00', '#ffffff', '#FF8C00')
+        local_coverage_card('NEXT SHIPMENT QTY', f'{next_shipment_qty:,.0f}', '#EE9337', '#ffffff', '#EE9337')
     with k3:
         local_coverage_card('PRODUCT', selected_product['product_code'], '#1A5E99')
     with k4:

@@ -902,18 +902,131 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"] span {
 }
 
 
-/* FORCED HEADER FINAL OVERRIDE */
+/* FINAL OVERRIDES - latest approved UI */
+.user-clock {
+    text-align:right !important;
+    font-weight:900 !important;
+    color:#1f2937 !important;
+    font-family:Aptos, Arial, sans-serif !important;
+    font-size:16px !important;
+    line-height:1.55 !important;
+}
 .main-title-center {
     text-align:center !important;
     font-family:Aptos, Arial, sans-serif !important;
     font-size:50px !important;
-    line-height:1.10 !important;
-    font-weight:950 !important;
+    line-height:1.0 !important;
+    font-weight:900 !important;
     color:#1B6DB5 !important;
+    letter-spacing:.3px !important;
+    padding-top:6px !important;
 }
-.user-clock {
+.top-nav-wrap {
+    background:#ffffff !important;
+    border:2px solid #1B6DB5 !important;
+    border-radius:12px !important;
+    box-shadow:0 2px 8px rgba(27,109,181,.10) !important;
+    padding:12px 14px !important;
+}
+.top-nav-title {
     font-family:Aptos, Arial, sans-serif !important;
-    font-size:21px !important;
+    font-size:20px !important;
+    font-weight:900 !important;
+    color:#1B6DB5 !important;
+    letter-spacing:.02em !important;
+    padding:0 6px 8px 6px !important;
+}
+.top-nav-wrap [data-testid="stPageLink"] a {
+    background:#F4F8FC !important;
+    color:#1B6DB5 !important;
+    border:2px solid #1B6DB5 !important;
+    border-radius:10px !important;
+    min-height:46px !important;
+    font-family:Aptos, Arial, sans-serif !important;
+    font-size:20px !important;
+    font-weight:900 !important;
+    text-decoration:none !important;
+    box-shadow:none !important;
+}
+.top-nav-wrap [data-testid="stPageLink"] a:hover {
+    background:#1B6DB5 !important;
+    color:#ffffff !important;
+}
+/* Dashboard product filter card with select inside the card */
+.dashboard-product-card-header + div[data-testid="stSelectbox"] {
+    margin-top:0 !important;
+    margin-bottom:10px !important;
+}
+.dashboard-product-card-header + div[data-testid="stSelectbox"] label,
+.dashboard-product-card-header + div[data-testid="stSelectbox"] div[data-testid="InputInstructions"] {
+    display:none !important;
+}
+.dashboard-product-card-header + div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+    height:58px !important;
+    min-height:58px !important;
+    border:1px solid #cbd5e1 !important;
+    border-top:0 !important;
+    border-radius:0 0 8px 8px !important;
+    background:#EEF2F7 !important;
+    box-shadow:none !important;
+    font-family:Aptos, Arial, sans-serif !important;
+    font-size:18px !important;
+    font-weight:900 !important;
+    color:#111827 !important;
+}
+.dashboard-product-card-header + div[data-testid="stSelectbox"] div[data-baseweb="select"] span {
+    font-family:Aptos, Arial, sans-serif !important;
+    font-size:18px !important;
+    font-weight:900 !important;
+    color:#111827 !important;
+}
+/* Coverage page input cards with values inside cards */
+.coverage-input-card-header + div[data-testid="stSelectbox"],
+.coverage-input-card-header + div[data-testid="stNumberInput"] {
+    margin-top:0 !important;
+    margin-bottom:10px !important;
+}
+.coverage-input-card-header + div[data-testid="stSelectbox"] label,
+.coverage-input-card-header + div[data-testid="stNumberInput"] label,
+.coverage-input-card-header + div[data-testid="stSelectbox"] div[data-testid="InputInstructions"],
+.coverage-input-card-header + div[data-testid="stNumberInput"] div[data-testid="InputInstructions"] {
+    display:none !important;
+}
+.coverage-input-card-header + div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+.coverage-input-card-header + div[data-testid="stNumberInput"] div[data-baseweb="input"] > div,
+.coverage-input-card-header + div[data-testid="stNumberInput"] input {
+    height:70px !important;
+    min-height:70px !important;
+    border:1px solid #cbd5e1 !important;
+    border-top:0 !important;
+    border-radius:0 0 4px 4px !important;
+    background:#EEF2F7 !important;
+    box-shadow:none !important;
+    font-family:Aptos, Arial, sans-serif !important;
+    font-size:24px !important;
+    font-weight:900 !important;
+    color:#111827 !important;
+}
+.coverage-input-card-header + div[data-testid="stSelectbox"] div[data-baseweb="select"] span {
+    font-family:Aptos, Arial, sans-serif !important;
+    font-size:24px !important;
+    font-weight:900 !important;
+    color:#111827 !important;
+}
+.coverage-input-card-header + div[data-testid="stNumberInput"] input {
+    text-align:left !important;
+    padding-left:16px !important;
+}
+
+
+/* FINAL DELIVERY PAGE LABEL STYLE */
+.stSelectbox label,
+.stTextInput label,
+.stDateInput label,
+.stFileUploader label,
+.stMultiSelect label {
+    font-family:Aptos, Arial, sans-serif !important;
+    font-size:18px !important;
     font-weight:900 !important;
     color:#111827 !important;
 }
@@ -1044,9 +1157,15 @@ def save_upload(file, prefix):
     return str(path)
 
 
+
+
 def render_top_navigation():
-    """Top module navigation so users do not need the Streamlit sidebar."""
+    """Custom top module navigation with no menu-bar border and active page highlight."""
+    import inspect
+    from pathlib import Path as _Path
+
     user_role = st.session_state.get("user", {}).get("role", "")
+
     nav_items = [
         ("Dashboard", "pages/1_Dashboard.py"),
         ("Masters", "pages/2_Masters.py"),
@@ -1057,8 +1176,10 @@ def render_top_navigation():
         ("Reports", "pages/8_Reports.py"),
         ("Overdue", "pages/9_Overdue_Notification.py"),
     ]
+
     if user_role in ("admin", "super_admin"):
         nav_items.insert(6, ("Admin", "pages/7_Admin.py"))
+
     if user_role == "user":
         nav_items = [
             ("Dashboard", "pages/1_Dashboard.py"),
@@ -1066,25 +1187,90 @@ def render_top_navigation():
             ("Coverage Plan", "pages/6_Coverage_Plan.py"),
             ("Reports", "pages/8_Reports.py"),
         ]
-    st.markdown('<div class="top-nav-wrap"><div class="top-nav-title">MODULES</div>', unsafe_allow_html=True)
+
+    # Detect current Streamlit page from the running page script.
+    current_file = ""
+    try:
+        for frame in inspect.stack():
+            file_name = str(frame.filename).replace("\\", "/")
+            if "/pages/" in file_name:
+                current_file = "pages/" + _Path(file_name).name
+                break
+        if not current_file:
+            current_file = "pages/1_Dashboard.py"
+    except Exception:
+        current_file = "pages/1_Dashboard.py"
+
+    st.markdown("""
+    <style>
+    .custom-module-title {
+        font-family:Aptos, Arial, sans-serif;
+        font-size:20px;
+        font-weight:900;
+        color:#1B6DB5;
+        padding:10px 0 10px 0;
+    }
+
+    /* Remove menu bar border/background */
+    .menu-no-border-wrap {
+        background:transparent !important;
+        border:0 !important;
+        box-shadow:none !important;
+        padding:0 !important;
+        margin:8px 0 18px 0 !important;
+    }
+
+    /* Normal module buttons */
+    div[data-testid="stButton"] > button {
+        width:100% !important;
+        min-height:48px !important;
+        background:#F4F8FC !important;
+        color:#1B6DB5 !important;
+        border:0 !important;
+        border-radius:10px !important;
+        font-family:Aptos, Arial, sans-serif !important;
+        font-size:20px !important;
+        font-weight:900 !important;
+        box-shadow:none !important;
+    }
+
+    div[data-testid="stButton"] > button:hover {
+        background:#DCEEFF !important;
+        color:#1B6DB5 !important;
+        border:0 !important;
+    }
+
+    /* Active module button */
+    div[data-testid="stButton"] > button[kind="primary"] {
+        background:#1B6DB5 !important;
+        color:#ffffff !important;
+        border:0 !important;
+        box-shadow:0 2px 8px rgba(27,109,181,.25) !important;
+    }
+
+    div[data-testid="stButton"] > button[kind="primary"]:hover {
+        background:#145A96 !important;
+        color:#ffffff !important;
+        border:0 !important;
+    }
+    </style>
+    <div class="menu-no-border-wrap">
+        <div class="custom-module-title">MODULES</div>
+    </div>
+    """, unsafe_allow_html=True)
+
     cols = st.columns(len(nav_items))
     for col, (label, target) in zip(cols, nav_items):
+        is_active = (target == current_file)
         with col:
-            st.page_link(target, label=label)
-    st.markdown('</div>', unsafe_allow_html=True)
+            if st.button(
+                label,
+                key=f"top_nav_{label}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary"
+            ):
+                st.switch_page(target)
 
-
-def render_kpi_card(label, value, color_class="blue", value_class=""):
-    """Consistent SAP-style KPI card used on dashboards and coverage pages."""
-    st.markdown(
-        f'<div class="sap-kpi-card"><div class="sap-kpi-head {color_class}">{label}</div>'
-        f'<div class="sap-kpi-value {value_class}">{value}</div></div>',
-        unsafe_allow_html=True
-    )
-
-def render_kpi_card_in(container, label, value, color_class="blue", value_class=""):
-    with container:
-        render_kpi_card(label, value, color_class, value_class)
 
 def top_layout():
     user = st.session_state.get("user", {"username": "-", "role": "-"})
@@ -1103,10 +1289,10 @@ def top_layout():
             text-align:center;
             font-family:Aptos, Arial, sans-serif;
             font-size:50px;
-            line-height:1.10;
+            line-height:1.05;
             font-weight:950;
             color:#1B6DB5;
-            letter-spacing:1.2px;
+            letter-spacing:.4px;
             padding-top:4px;
             margin:0 auto;
         ">

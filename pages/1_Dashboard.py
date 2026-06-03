@@ -115,9 +115,9 @@ try:
         shipment_time_days = int(shipment_time_row['shipment_time_days'] or 0)
         next_date_display = format_date_ddmmyyyy(next_date) if next_date else '-'
         with cov_cols[1]:
-            local_coverage_card('NEXT SHIPMENT DATE', next_date_display, '#FF8C00', '#ffffff', '#111827')
+            local_coverage_card('NEXT SHIPMENT DATE', next_date_display, '#B72C24', '#ffffff', '#B72C24')
         with cov_cols[2]:
-            local_coverage_card('NEXT SHIPMENT QTY', f'{next_qty:,.0f}', '#FF8C00')
+            local_coverage_card('NEXT SHIPMENT QTY', f'{next_qty:,.0f}', '#EE9337', '#ffffff', '#EE9337')
         with cov_cols[3]:
             local_coverage_card('PRODUCT', dashboard_product_code, '#1A5E99')
         with cov_cols[4]:
