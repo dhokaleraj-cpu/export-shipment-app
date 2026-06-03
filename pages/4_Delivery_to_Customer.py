@@ -3,6 +3,28 @@ from common import *
 page_setup()
 
 show_header('Delivery Entry', 'Invoice-style FIFO delivery form with multi-pallet selection')
+
+st.markdown("""
+<style>
+/* Delivery Entry sub-headings / field labels */
+.input-section-title,
+[data-testid="stWidgetLabel"] p,
+[data-testid="stFileUploaderDropzoneInstructions"] div,
+.stSelectbox label p,
+.stTextInput label p,
+.stDateInput label p,
+.stFileUploader label p,
+.stMultiSelect label p,
+label p {
+    font-family: Aptos, Arial, sans-serif !important;
+    font-size: 1.2rem !important;
+    font-weight: 800 !important;
+    line-height: 1.35 !important;
+    color: #1f2937 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.markdown('\n        <div class="card" style="margin-bottom:14px;">\n            <b>DELIVERY / COMMERCIAL INVOICE ENTRY</b><br>\n            Select Original Invoice + Shipment, then choose one or more pallets. Pallets are shown FIFO by shipment date and pallet number.\n        </div>\n        ', unsafe_allow_html=True)
 customers = fetch_all('SELECT * FROM customers ORDER BY customer_name')
 terms = fetch_all('SELECT * FROM payment_terms ORDER BY days')
@@ -17,6 +39,11 @@ else:
     with ctop1:
         st.markdown('<div class="input-section-title">Original Invoice Number with Shipment Number</div>', unsafe_allow_html=True)
         selected_invoice = st.selectbox('Original Invoice Number with Shipment Number', list(inv_map.keys()), key='delivery_original_invoice_ship', label_visibility='collapsed')
+    invoice_top_col1, invoice_top_col2 = st.columns(2)
+    with invoice_top_col1:
+        delivery_invoice_no = st.text_input('Delivery Invoice Number', key='delivery_invoice_v10')
+    with invoice_top_col2:
+        delivery_date = st.date_input('Delivery Date', value=date.today(), key='delivery_date_v10')
     selected_ship = inv_map[selected_invoice]
     po_info_cols = st.columns(2)
     with po_info_cols[0]:
@@ -35,8 +62,6 @@ else:
             customer = st.selectbox('Customer', list(customer_map.keys()), key='delivery_customer_v10')
             selected_customer_row = next((x for x in customers if x['customer_name'] == customer), None)
             default_term_id = selected_customer_row.get('payment_term_id') if selected_customer_row else None
-            delivery_date = st.date_input('Delivery Date', value=date.today(), key='delivery_date_v10')
-            delivery_invoice_no = st.text_input('Delivery Invoice Number', key='delivery_invoice_v10')
         with c2:
             term_keys = list(term_map.keys())
             default_term_key = term_keys[0]
