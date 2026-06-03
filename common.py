@@ -902,94 +902,29 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"] span {
 }
 
 
-/* =========================================================
-   FINAL USER REQUEST UI OVERRIDE - Coverage/Dashboard Cards
-   ========================================================= */
-
-.coverage-input-card-header + div[data-testid="stSelectbox"],
-.coverage-input-card-header + div[data-testid="stNumberInput"] {
-    margin-top:0 !important;
-    margin-bottom:10px !important;
-}
-.coverage-input-card-header + div[data-testid="stSelectbox"] label,
-.coverage-input-card-header + div[data-testid="stNumberInput"] label,
-.coverage-input-card-header + div[data-testid="stSelectbox"] div[data-testid="InputInstructions"],
-.coverage-input-card-header + div[data-testid="stNumberInput"] div[data-testid="InputInstructions"] {
-    display:none !important;
-}
-.coverage-input-card-header + div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
-.coverage-input-card-header + div[data-testid="stNumberInput"] div[data-baseweb="input"] > div,
-.coverage-input-card-header + div[data-testid="stNumberInput"] input {
-    height:56px !important;
-    min-height:56px !important;
-    border:1px solid #cbd5e1 !important;
-    border-top:0 !important;
-    border-radius:0 0 4px 4px !important;
-    background:#ffffff !important;
-    box-shadow:none !important;
-    font-family:Aptos, Arial, sans-serif !important;
-    font-size:30px !important;
-    font-weight:900 !important;
-    line-height:1.1 !important;
-    color:#111827 !important;
+/* FINAL HEADER UPDATE - centered title and bold user details */
+.main-title-center {
     text-align:center !important;
-}
-.coverage-input-card-header + div[data-testid="stSelectbox"] div[data-baseweb="select"] span {
     font-family:Aptos, Arial, sans-serif !important;
-    font-size:30px !important;
-    font-weight:900 !important;
-    line-height:1.1 !important;
-    color:#111827 !important;
-    text-align:center !important;
+    font-size:50px !important;
+    line-height:1.10 !important;
+    font-weight:950 !important;
+    color:#1B6DB5 !important;
+    letter-spacing:1.2px !important;
+    padding-top:10px !important;
+    margin:0 auto !important;
+    width:100% !important;
 }
-.coverage-input-card-header + div[data-testid="stNumberInput"] input {
-    text-align:center !important;
-    padding-left:0 !important;
-}
-.dashboard-product-card-header + div[data-testid="stSelectbox"] {
-    margin-top:0 !important;
-    margin-bottom:10px !important;
-}
-.dashboard-product-card-header + div[data-testid="stSelectbox"] label,
-.dashboard-product-card-header + div[data-testid="stSelectbox"] div[data-testid="InputInstructions"] {
-    display:none !important;
-}
-.dashboard-product-card-header + div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
-    height:74px !important;
-    min-height:74px !important;
-    border:1px solid #cbd5e1 !important;
-    border-top:0 !important;
-    border-radius:0 0 8px 8px !important;
-    background:#ffffff !important;
-    box-shadow:0 2px 8px rgba(0,0,0,.10) !important;
+.user-clock {
+    text-align:left !important;
     font-family:Aptos, Arial, sans-serif !important;
-    font-size:30px !important;
+    font-size:21px !important;
+    line-height:1.55 !important;
     font-weight:900 !important;
     color:#111827 !important;
-    text-align:center !important;
+    padding-top:18px !important;
 }
-.dashboard-product-card-header + div[data-testid="stSelectbox"] div[data-baseweb="select"] span {
-    font-family:Aptos, Arial, sans-serif !important;
-    font-size:30px !important;
-    font-weight:900 !important;
-    color:#111827 !important;
-}
-.coverage-input-card-header + div[data-testid="stSelectbox"] div[data-baseweb="select"]:focus-within > div,
-.coverage-input-card-header + div[data-testid="stNumberInput"] div[data-baseweb="input"]:focus-within > div,
-.dashboard-product-card-header + div[data-testid="stSelectbox"] div[data-baseweb="select"]:focus-within > div {
-    background:#ffffff !important;
-    color:#111827 !important;
-}
-.coverage-input-card-header + div[data-testid="stSelectbox"] div[data-baseweb="select"]:focus-within span,
-.dashboard-product-card-header + div[data-testid="stSelectbox"] div[data-baseweb="select"]:focus-within span,
-.coverage-input-card-header + div[data-testid="stNumberInput"] input:focus {
-    color:#111827 !important;
-}
-.coverage-input-card-header > div {
-    background:#1A5E99 !important;
-    color:#ffffff !important;
-    font-family:Aptos, Arial, sans-serif !important;
-    font-size:19px !important;
+.user-clock b, .user-clock span {
     font-weight:900 !important;
 }
 
@@ -1122,7 +1057,6 @@ def save_upload(file, prefix):
 def render_top_navigation():
     """Top module navigation so users do not need the Streamlit sidebar."""
     user_role = st.session_state.get("user", {}).get("role", "")
-
     nav_items = [
         ("Dashboard", "pages/1_Dashboard.py"),
         ("Masters", "pages/2_Masters.py"),
@@ -1133,10 +1067,8 @@ def render_top_navigation():
         ("Reports", "pages/8_Reports.py"),
         ("Overdue", "pages/9_Overdue_Notification.py"),
     ]
-
     if user_role in ("admin", "super_admin"):
         nav_items.insert(6, ("Admin", "pages/7_Admin.py"))
-
     if user_role == "user":
         nav_items = [
             ("Dashboard", "pages/1_Dashboard.py"),
@@ -1144,18 +1076,11 @@ def render_top_navigation():
             ("Coverage Plan", "pages/6_Coverage_Plan.py"),
             ("Reports", "pages/8_Reports.py"),
         ]
-
     st.markdown('<div class="top-nav-wrap"><div class="top-nav-title">MODULES</div>', unsafe_allow_html=True)
-
     cols = st.columns(len(nav_items))
     for col, (label, target) in zip(cols, nav_items):
         with col:
-            try:
-                st.page_link(target, label=label)
-            except Exception:
-                if st.button(label, key=f"nav_{label}"):
-                    st.switch_page(target)
-
+            st.page_link(target, label=label)
     st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -1173,10 +1098,10 @@ def render_kpi_card_in(container, label, value, color_class="blue", value_class=
 
 def top_layout():
     user = st.session_state.get("user", {"username": "-", "role": "-"})
-    c1, c2, c3 = st.columns([1.6, 3.2, 1.4])
+    c1, c2, c3 = st.columns([2.4, 4.8, 2.4])
     with c1:
         if LOGO_PATH.exists():
-            st.image(str(LOGO_PATH), use_container_width=False, width=420)
+            st.image(str(LOGO_PATH), use_container_width=False, width=430)
         else:
             st.markdown('<div class="logo-circle">FSI</div>', unsafe_allow_html=True)
     with c2:
