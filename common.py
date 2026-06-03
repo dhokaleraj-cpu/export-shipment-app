@@ -1122,6 +1122,7 @@ def save_upload(file, prefix):
 def render_top_navigation():
     """Top module navigation so users do not need the Streamlit sidebar."""
     user_role = st.session_state.get("user", {}).get("role", "")
+
     nav_items = [
         ("Dashboard", "pages/1_Dashboard.py"),
         ("Masters", "pages/2_Masters.py"),
@@ -1132,8 +1133,10 @@ def render_top_navigation():
         ("Reports", "pages/8_Reports.py"),
         ("Overdue", "pages/9_Overdue_Notification.py"),
     ]
+
     if user_role in ("admin", "super_admin"):
         nav_items.insert(6, ("Admin", "pages/7_Admin.py"))
+
     if user_role == "user":
         nav_items = [
             ("Dashboard", "pages/1_Dashboard.py"),
@@ -1141,11 +1144,18 @@ def render_top_navigation():
             ("Coverage Plan", "pages/6_Coverage_Plan.py"),
             ("Reports", "pages/8_Reports.py"),
         ]
+
     st.markdown('<div class="top-nav-wrap"><div class="top-nav-title">MODULES</div>', unsafe_allow_html=True)
+
     cols = st.columns(len(nav_items))
     for col, (label, target) in zip(cols, nav_items):
         with col:
-            st.page_link(target, label=label)
+            try:
+                st.page_link(target, label=label)
+            except Exception:
+                if st.button(label, key=f"nav_{label}"):
+                    st.switch_page(target)
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 
