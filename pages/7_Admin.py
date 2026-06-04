@@ -3,8 +3,37 @@ from common import *
 page_setup()
 
 require_roles(('admin', 'super_admin'))
+
+# --- Default View/Edit rules for Admin Page Controls ---
+def _role_default_view(page, role):
+    """Default page view permission by role."""
+    if role == "super_admin":
+        return True
+    if role == "admin":
+        return page.get("key") in [
+            "dashboard", "masters", "shipment", "delivery",
+            "payment", "coverage", "admin", "reports", "overdue"
+        ]
+    if role == "user":
+        return page.get("key") in ["dashboard", "delivery", "coverage", "reports"]
+    return False
+
+def _role_default_edit(page, role):
+    """Default page edit permission by role."""
+    if role == "super_admin":
+        return True
+    if role == "admin":
+        return page.get("key") in [
+            "masters", "shipment", "delivery",
+            "payment", "coverage", "reports", "overdue"
+        ]
+    if role == "user":
+        return page.get("key") in ["delivery"]
+    return False
+
+
 show_header('Admin Control Panel', 'Settings, User Management, Profile and Company Management')
-admin_tabs = st.tabs(['Profile', 'User Management', 'Company Management', 'System Settings'])
+admin_tabs = st.tabs(['Profile', 'User Management', 'Page Controls', 'Company Management', 'System Settings'])
 with admin_tabs[0]:
     st.subheader('Profile')
     current_user = st.session_state.user
@@ -43,6 +72,97 @@ with admin_tabs[1]:
             st.error('User name and password are required.')
     show_filtered_df(fetch_all('SELECT id, username, role, is_active FROM users ORDER BY id'), 'admin_users', total=False)
 with admin_tabs[2]:
+    require_roles(('super_admin',))
+    st.subheader('Page Wise User Controls - View / Edit')
+    st.info('Set View and Edit permission separately for each module/page. Super Admin always has View and Edit access to all pages.')
+    ensure_page_access_table()
+    users_for_access = fetch_all('SELECT username, role, is_active FROM users ORDER BY username')
+    if not users_for_access:
+        st.warning('No users found.')
+    else:
+        user_labels = [f"{u['username']} | {u['role']}" for u in users_for_access]
+        selected_user_label = st.selectbox('Select User for Page Access', user_labels, key='page_access_user_select')
+        selected_username = selected_user_label.split(' | ')[0]
+        selected_user_row = next((u for u in users_for_access if u['username'] == selected_username), None)
+        existing_perms = get_user_page_permissions(selected_username)
+        is_super_selected = bool(selected_user_row and selected_user_row.get('role') == 'super_admin')
+
+        st.markdown('<div class="sap-grid-card"><div class="sap-grid-card-title">Page Wise View / Edit Permissions</div>', unsafe_allow_html=True)
+        selected_view_values = {}
+        selected_edit_values = {}
+
+        header_cols = st.columns([2.4, 1, 1])
+        with header_cols[0]:
+            st.markdown('**Page / Module**')
+        with header_cols[1]:
+            st.markdown('**View**')
+        with header_cols[2]:
+            st.markdown('**Edit**')
+
+        for page in APP_PAGE_DEFINITIONS:
+            existing = existing_perms.get(page['key'], {})
+            if is_super_selected:
+                default_view = True
+                default_edit = True
+            elif isinstance(existing, dict) and page['key'] in existing_perms:
+                default_view = bool(existing.get('can_view', False))
+                default_edit = bool(existing.get('can_edit', False))
+            else:
+                default_view = selected_user_row.get('role') in page.get('default_roles', []) if selected_user_row else False
+                default_edit = _role_default_edit(page, selected_user_row.get('role')) if selected_user_row else False
+
+            row_cols = st.columns([2.4, 1, 1])
+            with row_cols[0]:
+                st.markdown(f"**{page['label']}**")
+            with row_cols[1]:
+                selected_view_values[page['key']] = st.checkbox(
+                    'View',
+                    value=bool(default_view),
+                    key=f"view_{selected_username}_{page['key']}",
+                    disabled=is_super_selected,
+                    label_visibility='collapsed'
+                )
+            with row_cols[2]:
+                selected_edit_values[page['key']] = st.checkbox(
+                    'Edit',
+                    value=bool(default_edit),
+                    key=f"edit_{selected_username}_{page['key']}",
+                    disabled=is_super_selected,
+                    label_visibility='collapsed'
+                )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        csave, creset = st.columns([1, 1])
+        with csave:
+            if st.button('Save View / Edit Controls', type='primary', key='save_page_controls'):
+                for page in APP_PAGE_DEFINITIONS:
+                    can_view = bool(selected_view_values[page['key']])
+                    can_edit = bool(selected_edit_values[page['key']]) and can_view
+                    execute_query("""
+                        INSERT INTO user_page_access (username, page_key, can_access, can_view, can_edit)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT (username, page_key)
+                        DO UPDATE SET
+                            can_access=EXCLUDED.can_view,
+                            can_view=EXCLUDED.can_view,
+                            can_edit=EXCLUDED.can_edit,
+                            updated_at=CURRENT_TIMESTAMP
+                    """, (selected_username, page['key'], can_view, can_view, can_edit))
+                clear_cache_after_write()
+                st.success('Page View / Edit controls saved successfully.')
+                st.rerun()
+        with creset:
+            if st.button('Reset to Role Default', key='reset_page_controls'):
+                execute_query('DELETE FROM user_page_access WHERE username=?', (selected_username,))
+                clear_cache_after_write()
+                st.success('Page controls reset to role defaults.')
+                st.rerun()
+        access_rows = fetch_all('SELECT username, page_key, can_view, can_edit, updated_at FROM user_page_access ORDER BY username, page_key')
+        if access_rows:
+            st.markdown('<div class="sap-grid-card-title">Saved Page Access Records</div>', unsafe_allow_html=True)
+            st.dataframe(pd.DataFrame(access_rows), use_container_width=True, hide_index=True)
+
+with admin_tabs[3]:
     st.subheader('Company Management')
     company_rows = fetch_all('SELECT * FROM company_settings WHERE id=1')
     company = company_rows[0] if company_rows else {}
@@ -59,7 +179,7 @@ with admin_tabs[2]:
     if st.button('Save Company Settings', key='save_company_settings'):
         execute_query('\n  INSERT INTO company_settings\n(id, company_name, address, phone, email, website, tax_id, logo_path)\nVALUES (1, ?, ?, ?, ?, ?, ?, ?)\nON CONFLICT (id)\nDO UPDATE SET\n    company_name = EXCLUDED.company_name,\n    address = EXCLUDED.address,\n    phone = EXCLUDED.phone,\n    email = EXCLUDED.email,\n    website = EXCLUDED.website,\n    tax_id = EXCLUDED.tax_id,\n    logo_path = EXCLUDED.logo_path\n                ', (company_name, company_address, company_phone, company_email, company_website, company_tax, company_logo))
         st.success('Company settings saved.')
-with admin_tabs[3]:
+with admin_tabs[4]:
     st.subheader('System Settings')
     st.info('Use this page for user, profile, and company settings. Email/WhatsApp notification settings remain under the Overdue Notification module.')
     st.write('Database: shipment_app.db')

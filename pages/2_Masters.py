@@ -3,7 +3,7 @@ from common import *
 page_setup()
 
 show_header('Masters')
-mtab = st.tabs(['Customer', 'Supplier', 'Warehouse', 'Product', 'Payment Terms', 'Incoterm', 'Forwarder'])
+mtab = st.tabs(['Customer', 'Supplier', 'Warehouse', 'Product', 'Payment Terms', 'Incoterm', 'Forwarder', 'Ship To'])
 with mtab[0]:
     customer_form()
 with mtab[1]:
@@ -20,3 +20,6 @@ with mtab[6]:
     master_form('Forwarder Master', 'forwarders', ['forwarder_name', 'contact_person', 'email', 'phone', 'remarks'])
 
 st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)
+
+with mtab[7]:
+    ship_to_form()

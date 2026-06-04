@@ -46,6 +46,111 @@ st.set_page_config(page_title="Export Shipment Management", layout="wide", initi
 
 init_db()
 
+
+st.markdown("""
+<style>
+/* LOW RESOLUTION LAPTOP COMFORT UPDATE */
+@media (max-width: 1366px) {
+    .block-container {
+        max-width: 100% !important;
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+        padding-top: 1.0rem !important;
+    }
+    h1 { font-size: 28px !important; }
+    h2 { font-size: 23px !important; }
+    h3 { font-size: 19px !important; }
+    .topbar {
+        padding: 12px 16px !important;
+        margin-top: 10px !important;
+        margin-bottom: 12px !important;
+    }
+    .topbar h1,
+    .main-title-center {
+        font-size: 30px !important;
+        line-height: 1.1 !important;
+    }
+    .top-nav-wrap {
+        padding: 8px !important;
+        margin-bottom: 12px !important;
+    }
+    .top-nav-title {
+        font-size: 15px !important;
+    }
+    .top-nav-wrap [data-testid="stPageLink"] a,
+    div[data-testid="stButton"] > button {
+        min-height: 34px !important;
+        font-size: 13px !important;
+        padding: 4px 8px !important;
+    }
+    label,
+    .stTextInput label,
+    .stSelectbox label,
+    .stNumberInput label,
+    .stDateInput label,
+    .stFileUploader label,
+    .shipment-grid-label {
+        font-size: 13px !important;
+        line-height: 1.15 !important;
+    }
+    div[data-baseweb="input"] > div,
+    div[data-baseweb="select"] > div,
+    .stTextInput input,
+    .stNumberInput input,
+    .stDateInput input,
+    .stTextArea textarea {
+        min-height: 36px !important;
+        font-size: 13px !important;
+    }
+    .card, .sap-grid-card, .sap-section-card {
+        padding: 10px !important;
+        margin-bottom: 10px !important;
+    }
+    div[data-testid="stDataFrame"],
+    div[data-testid="stDataEditor"] {
+        overflow-x: auto !important;
+    }
+}
+@media (max-width: 1100px) {
+    .block-container {
+        padding-left: 0.45rem !important;
+        padding-right: 0.45rem !important;
+    }
+    div[data-testid="column"] {
+        min-width: 0 !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+st.markdown("""
+<style>
+/* FINAL RESPONSIVE UI COMFORT FOR ALL PAGES */
+@media (min-width: 1280px) {
+    .block-container { max-width: 1540px !important; margin-left: auto !important; margin-right: auto !important; padding-left: 2rem !important; padding-right: 2rem !important; }
+}
+@media (min-width: 1920px) { .block-container { max-width: 1720px !important; } }
+@media (max-width: 900px) {
+    .block-container { padding-left: 0.8rem !important; padding-right: 0.8rem !important; padding-top: 1rem !important; }
+    .topbar { padding: 14px 16px !important; margin-top: 10px !important; }
+    .topbar h1 { font-size: 24px !important; }
+    .main-title-center { font-size: 30px !important; }
+    .user-clock { font-size: 14px !important; text-align:center !important; }
+    div[data-testid="stDataFrame"], div[data-testid="stDataEditor"] { overflow-x:auto !important; }
+}
+@media (max-width: 520px) {
+    .main-title-center { font-size: 24px !important; }
+    h1 { font-size: 26px !important; }
+    h2 { font-size: 22px !important; }
+    h3 { font-size: 19px !important; }
+    .top-nav-wrap [data-testid="stPageLink"] a, div[data-testid="stButton"] > button { font-size: 15px !important; min-height: 42px !important; }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 st.markdown("""
 <style>
 /* WIDE SCREEN COMFORT FIX */
@@ -1170,116 +1275,181 @@ def save_upload(file, prefix):
 
 
 
-def render_top_navigation():
-    """Custom top module navigation with no menu-bar border and active page highlight."""
+
+# --- Page-wise access controls ---
+APP_PAGE_DEFINITIONS = [
+    {"label": "Dashboard", "target": "pages/1_Dashboard.py", "key": "dashboard", "default_roles": ["user", "admin", "super_admin"]},
+    {"label": "Masters", "target": "pages/2_Masters.py", "key": "masters", "default_roles": ["admin", "super_admin"]},
+    {"label": "Shipment Entry", "target": "pages/3_Shipment_Entry.py", "key": "shipment", "default_roles": ["admin", "super_admin"]},
+    {"label": "Delivery", "target": "pages/4_Delivery_to_Customer.py", "key": "delivery", "default_roles": ["user", "admin", "super_admin"]},
+    {"label": "Payment", "target": "pages/5_Payment_Entry.py", "key": "payment", "default_roles": ["admin", "super_admin"]},
+    {"label": "Coverage Plan", "target": "pages/6_Coverage_Plan.py", "key": "coverage", "default_roles": ["user", "admin", "super_admin"]},
+    {"label": "Admin", "target": "pages/7_Admin.py", "key": "admin", "default_roles": ["admin", "super_admin"]},
+    {"label": "Reports", "target": "pages/8_Reports.py", "key": "reports", "default_roles": ["user", "admin", "super_admin"]},
+    {"label": "Overdue", "target": "pages/9_Overdue_Notification.py", "key": "overdue", "default_roles": ["admin", "super_admin"]},
+]
+
+def ensure_page_access_table():
+    """Create/upgrade page-wise permissions.
+
+    can_view controls whether a module is visible/openable.
+    can_edit is stored for page-wise edit control and can be used by pages to disable save/update/delete actions.
+    """
+    try:
+        execute_query("""
+            CREATE TABLE IF NOT EXISTS user_page_access (
+                id SERIAL PRIMARY KEY,
+                username TEXT NOT NULL,
+                page_key TEXT NOT NULL,
+                can_access BOOLEAN DEFAULT TRUE,
+                can_view BOOLEAN DEFAULT TRUE,
+                can_edit BOOLEAN DEFAULT TRUE,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(username, page_key)
+            )
+        """)
+    except Exception:
+        pass
+    for sql in [
+        "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_view BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_edit BOOLEAN DEFAULT TRUE",
+        "UPDATE user_page_access SET can_view=COALESCE(can_view, can_access, TRUE), can_edit=COALESCE(can_edit, can_access, TRUE)",
+    ]:
+        try:
+            execute_query(sql)
+        except Exception:
+            pass
+
+def get_page_definition_by_target(target):
+    target = str(target or '').replace('\\', '/')
+    for item in APP_PAGE_DEFINITIONS:
+        if item['target'] == target:
+            return item
+    return None
+
+def get_page_definition_by_key(page_key):
+    for item in APP_PAGE_DEFINITIONS:
+        if item['key'] == page_key:
+            return item
+    return None
+
+def get_user_page_permissions(username):
+    ensure_page_access_table()
+    try:
+        rows = fetch_all('SELECT page_key, can_view, can_edit, can_access FROM user_page_access WHERE username=?', (username,))
+        result = {}
+        for r in rows:
+            can_view = r.get('can_view')
+            can_edit = r.get('can_edit')
+            legacy = r.get('can_access')
+            result[str(r.get('page_key'))] = {
+                'can_view': bool(legacy if can_view is None else can_view),
+                'can_edit': bool(legacy if can_edit is None else can_edit),
+            }
+        return result
+    except Exception:
+        return {}
+
+def _role_default_view(page_def, role):
+    return role in page_def.get('default_roles', [])
+
+def _role_default_edit(page_def, role):
+    # User role can view assigned operational pages, but edit permissions default to admin/super_admin.
+    if role == 'super_admin':
+        return True
+    if role == 'admin':
+        return page_def['key'] != 'admin'
+    return False
+
+def can_user_access_page(page_def, user=None):
+    if not page_def:
+        return True
+    user = user or st.session_state.get('user', {})
+    role = user.get('role', '')
+    username = user.get('username', '')
+    if role == 'super_admin':
+        return True
+    perms = get_user_page_permissions(username)
+    if page_def['key'] in perms:
+        item = perms[page_def['key']]
+        if isinstance(item, dict):
+            return bool(item.get('can_view', False))
+        return bool(item)
+    return _role_default_view(page_def, role)
+
+def can_user_edit_page(page_def, user=None):
+    if not page_def:
+        return True
+    user = user or st.session_state.get('user', {})
+    role = user.get('role', '')
+    username = user.get('username', '')
+    if role == 'super_admin':
+        return True
+    perms = get_user_page_permissions(username)
+    if page_def['key'] in perms:
+        item = perms[page_def['key']]
+        if isinstance(item, dict):
+            return bool(item.get('can_edit', False))
+        return bool(item)
+    return _role_default_edit(page_def, role)
+
+def current_user_can_edit(page_key=None):
+    if page_key:
+        page_def = get_page_definition_by_key(page_key)
+    else:
+        page_def = get_page_definition_by_target(detect_current_page_target())
+    return can_user_edit_page(page_def)
+
+def get_allowed_nav_items(user=None):
+    user = user or st.session_state.get('user', {})
+    return [(p['label'], p['target']) for p in APP_PAGE_DEFINITIONS if can_user_access_page(p, user)]
+
+def detect_current_page_target():
     import inspect
     from pathlib import Path as _Path
-
-    user_role = st.session_state.get("user", {}).get("role", "")
-
-    nav_items = [
-        ("Dashboard", "pages/1_Dashboard.py"),
-        ("Masters", "pages/2_Masters.py"),
-        ("Shipment Entry", "pages/3_Shipment_Entry.py"),
-        ("Delivery", "pages/4_Delivery_to_Customer.py"),
-        ("Payment", "pages/5_Payment_Entry.py"),
-        ("Coverage Plan", "pages/6_Coverage_Plan.py"),
-        ("Reports", "pages/8_Reports.py"),
-        ("Overdue", "pages/9_Overdue_Notification.py"),
-    ]
-
-    if user_role in ("admin", "super_admin"):
-        nav_items.insert(6, ("Admin", "pages/7_Admin.py"))
-
-    if user_role == "user":
-        nav_items = [
-            ("Dashboard", "pages/1_Dashboard.py"),
-            ("Delivery", "pages/4_Delivery_to_Customer.py"),
-            ("Coverage Plan", "pages/6_Coverage_Plan.py"),
-            ("Reports", "pages/8_Reports.py"),
-        ]
-
-    # Detect current Streamlit page from the running page script.
-    current_file = ""
     try:
         for frame in inspect.stack():
-            file_name = str(frame.filename).replace("\\", "/")
-            if "/pages/" in file_name:
-                current_file = "pages/" + _Path(file_name).name
-                break
-        if not current_file:
-            current_file = "pages/1_Dashboard.py"
+            file_name = str(frame.filename).replace('\\', '/')
+            if '/pages/' in file_name:
+                return 'pages/' + _Path(file_name).name
     except Exception:
-        current_file = "pages/1_Dashboard.py"
+        pass
+    return ''
 
+def require_page_access_for_current_page():
+    target = detect_current_page_target()
+    if not target:
+        return
+    page_def = get_page_definition_by_target(target)
+    if page_def and not can_user_access_page(page_def):
+        st.error('You do not have permission to view this page. Contact the super admin.')
+        st.stop()
+
+def render_top_navigation():
+    """Custom top module navigation with page-wise user controls."""
+    user = st.session_state.get("user", {})
+    nav_items = get_allowed_nav_items(user)
+    current_file = detect_current_page_target() or "pages/1_Dashboard.py"
     st.markdown("""
     <style>
-    .custom-module-title {
-        font-family:Aptos, Arial, sans-serif;
-        font-size:20px;
-        font-weight:900;
-        color:#1B6DB5;
-        padding:10px 0 10px 0;
-    }
-
-    /* Remove menu bar border/background */
-    .menu-no-border-wrap {
-        background:transparent !important;
-        border:0 !important;
-        box-shadow:none !important;
-        padding:0 !important;
-        margin:8px 0 18px 0 !important;
-    }
-
-    /* Normal module buttons */
-    div[data-testid="stButton"] > button {
-        width:100% !important;
-        min-height:48px !important;
-        background:#F4F8FC !important;
-        color:#1B6DB5 !important;
-        border:0 !important;
-        border-radius:10px !important;
-        font-family:Aptos, Arial, sans-serif !important;
-        font-size:20px !important;
-        font-weight:900 !important;
-        box-shadow:none !important;
-    }
-
-    div[data-testid="stButton"] > button:hover {
-        background:#DCEEFF !important;
-        color:#1B6DB5 !important;
-        border:0 !important;
-    }
-
-    /* Active module button */
-    div[data-testid="stButton"] > button[kind="primary"] {
-        background:#1B6DB5 !important;
-        color:#ffffff !important;
-        border:0 !important;
-        box-shadow:0 2px 8px rgba(27,109,181,.25) !important;
-    }
-
-    div[data-testid="stButton"] > button[kind="primary"]:hover {
-        background:#145A96 !important;
-        color:#ffffff !important;
-        border:0 !important;
-    }
+    .custom-module-title {font-family:Aptos, Arial, sans-serif;font-size:20px;font-weight:900;color:#1B6DB5;padding:10px 0 10px 0;}
+    .menu-no-border-wrap {background:transparent !important;border:0 !important;box-shadow:none !important;padding:0 !important;margin:8px 0 18px 0 !important;}
+    div[data-testid="stButton"] > button {width:100% !important;min-height:48px !important;background:#F4F8FC !important;color:#1B6DB5 !important;border:0 !important;border-radius:10px !important;font-family:Aptos, Arial, sans-serif !important;font-size:20px !important;font-weight:900 !important;box-shadow:none !important;}
+    div[data-testid="stButton"] > button:hover {background:#DCEEFF !important;color:#1B6DB5 !important;border:0 !important;}
+    div[data-testid="stButton"] > button[kind="primary"] {background:#1B6DB5 !important;color:#ffffff !important;border:0 !important;box-shadow:0 2px 8px rgba(27,109,181,.25) !important;}
+    div[data-testid="stButton"] > button[kind="primary"]:hover {background:#145A96 !important;color:#ffffff !important;border:0 !important;}
+    @media (max-width: 760px) {.custom-module-title {font-size:17px !important;} div[data-testid="stButton"] > button {font-size:14px !important; min-height:40px !important;}}
     </style>
-    <div class="menu-no-border-wrap">
-        <div class="custom-module-title">MODULES</div>
-    </div>
+    <div class="menu-no-border-wrap"><div class="custom-module-title">MODULES</div></div>
     """, unsafe_allow_html=True)
-
+    if not nav_items:
+        st.warning('No pages are assigned to your user. Contact the super admin.')
+        return
     cols = st.columns(len(nav_items))
     for col, (label, target) in zip(cols, nav_items):
         is_active = (target == current_file)
         with col:
-            if st.button(
-                label,
-                key=f"top_nav_{label}",
-                use_container_width=True,
-                type="primary" if is_active else "secondary"
-            ):
+            if st.button(label, key=f"top_nav_{label}", use_container_width=True, type="primary" if is_active else "secondary"):
                 st.switch_page(target)
 
 
@@ -1597,9 +1767,11 @@ def parse_date_for_input(value):
     return date.today()
 
 def delivery_note_html(data):
+    """Commercial invoice print layout inspired by the attached Excel delivery invoice sheet."""
     delivery_date = format_date_ddmmyyyy(data.get("delivery_date", ""))
     due_date = format_date_ddmmyyyy(data.get("payment_due_date", ""))
     po_date = format_date_ddmmyyyy(data.get("po_date", ""))
+
     items = data.get("items") or []
     if not items:
         qty = float(data.get("qty") or 0)
@@ -1626,119 +1798,170 @@ def delivery_note_html(data):
     po_number = data.get("po_number", "") or (items[0].get("po_number", "") if items else "")
     po_date = format_date_ddmmyyyy(data.get("po_date", "") or (items[0].get("po_date", "") if items else ""))
 
+    try:
+        company_rows = fetch_all("SELECT * FROM company_settings WHERE id=1")
+        company = company_rows[0] if company_rows else {}
+    except Exception:
+        company = {}
+
+    company_name = company.get("company_name") or "Four Star Industries Private Limited"
+    company_addr = company.get("address") or "Plant Address"
+    company_phone = company.get("phone") or ""
+    company_email = company.get("email") or ""
+    bank_details = [
+        "BANK DETAILS:",
+        "BANK ACCOUNT NO : 004330150000003",
+        "BANK IFSC CODE : BKID0000043",
+        "BANK MICR CODE : 400013080",
+        "BANK SWIFT CODE : BKIDINBBPPD",
+    ]
+
     item_rows = ""
     for idx, item in enumerate(items, start=1):
         qty = float(item.get("qty") or 0)
         unit_price = float(item.get("unit_price") or 0)
         amount = float(item.get("amount") or 0)
+        desc = f"{item.get('product_code', '')} {item.get('product_name', '')}".strip()
         item_rows += f"""
         <tr>
-          <td>{idx}</td>
-          <td>{item.get("original_invoice_no", original_invoice_no)}</td>
-          <td>{item.get("po_number", po_number)}</td>
-          <td>{format_date_ddmmyyyy(item.get("po_date", po_date))}</td>
-          <td>{item.get("product_code", "")}</td>
-          <td>{item.get("product_name", "")}</td>
-          <td>{item.get("pallet_no", "")}</td>
-          <td>{item.get("box_no", "")}</td>
-          <td class="right">{qty:,.2f}</td>
-          <td class="right">{unit_price:,.4f}</td>
-          <td>{item.get("currency", currency)}</td>
-          <td class="right">{amount:,.2f}</td>
+            <td class="center">{idx}</td>
+            <td>{html.escape(desc)}</td>
+            <td class="center">{html.escape(str(item.get("original_invoice_no", original_invoice_no)))}</td>
+            <td class="right">{qty:,.2f}</td>
+            <td class="right">{unit_price:,.4f}</td>
+            <td class="right">{amount:,.2f}</td>
         </tr>
         """
 
     logo_src = logo_data_uri()
-    logo_html = f'<img src="{logo_src}" style="max-width:180px;max-height:70px;">' if logo_src else ''
+    logo_html = f'<img src="{logo_src}" class="logo">' if logo_src else '<div class="logo-text">FSI</div>'
+    ship_to = data.get("ship_to", "") or "As per delivery instruction / purchase order"
+    buyer = data.get("customer_name", "")
+
     return f"""
     <html>
     <head>
     <style>
-    @page {{ size: A4 portrait; margin: 12mm; }}
-    body {{ font-family: Aptos, Arial, sans-serif; color:#111827; padding: 0; }}
-    .invoice-title {{ font-size:28px; font-weight:900; color:#003B73; text-align:right; }}
-    .company {{ font-size:22px; font-weight:900; color:#003B73; }}
-    .small {{ font-size:12px; color:#374151; }}
-    .box {{ border:1px solid #111827; padding:9px; margin-top:9px; }}
-    .grid {{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }}
-    .detail-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:5px 12px; }}
-    .detail-cell {{ border-bottom:1px dotted #9ca3af; padding:2px 0; }}
-    table {{ width:100%; border-collapse:collapse; margin-top:14px; font-size:10.5px; }}
-    th {{ background:#e5e7eb; color:#111827; font-weight:900; border:1px solid #111827; padding:5px; }}
-    td {{ border:1px solid #111827; padding:5px; }}
+    @page {{ size: A4 portrait; margin: 10mm; }}
+    body {{ font-family: Aptos, Arial, sans-serif; color:#111827; margin:0; padding:0; font-size:11px; }}
+    .sheet {{ width:100%; border-collapse:collapse; }}
+    .sheet td, .sheet th {{ border:1px solid #111827; padding:6px; vertical-align:top; }}
+    .no-border td {{ border:0; }}
+    .title {{ font-size:22px; font-weight:900; text-align:right; color:#111827; }}
+    .section-title {{ font-weight:900; background:#f3f4f6; color:#111827; }}
+    .logo {{ max-width:155px; max-height:62px; }}
+    .logo-text {{ font-size:32px; font-weight:900; color:#003B73; }}
+    .bold {{ font-weight:900; }}
+    .center {{ text-align:center; }}
     .right {{ text-align:right; }}
-    .total-row td {{ font-weight:900; background:#fef3c7; }}
-    .footer {{ margin-top:35px; display:grid; grid-template-columns:1fr 1fr; gap:25px; }}
-    .sign {{ border-top:1px solid #111827; padding-top:8px; text-align:center; font-weight:900; }}
-    
-.coverage-vertical-grid-note {
-    background:#f4f8fc;
-    border:1px solid #c9d7e3;
-    border-radius:6px;
-    padding:10px 12px;
-    color:#0a3f7a;
-    font-weight:800;
-    margin-bottom:10px;
-}
-</style>
+    .small {{ font-size:10px; line-height:1.35; }}
+    .items th {{ background:#f3f4f6; font-weight:900; text-align:center; }}
+    .total {{ font-weight:900; background:#fef3c7; }}
+    .bank {{ line-height:1.55; }}
+    .signature {{ height:54px; text-align:right; vertical-align:bottom !important; font-weight:900; }}
+    .print-btn {{ position:fixed; top:10px; right:10px; padding:8px 12px; background:#1B6DB5; color:white; border:0; border-radius:6px; font-weight:800; }}
+    @media print {{ .print-btn {{ display:none; }} body {{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }} }}
+    </style>
     </head>
     <body>
-      <div class="grid">
-        <div>
-          {logo_html}
-          <div class="company">FOUR STAR INDUSTRIES PVT. LTD.</div>
-          <div class="small">Export Shipment Monitoring System</div>
-        </div>
-        <div class="invoice-title">COMMERCIAL INVOICE</div>
-      </div>
+    <button class="print-btn" onclick="window.print()">Print</button>
 
-      <div class="grid">
-        <div class="box">
-          <b>BILL TO / CUSTOMER</b><br>
-          {data.get("customer_name", "")}<br>
-          <span class="small">Ship To / Customer delivery location as per purchase order</span>
-        </div>
-        <div class="box">
-          <b>INVOICE DETAILS</b><br>
-          <div class="detail-grid">
-            <div class="detail-cell">Delivery Invoice No: <b>{data.get("delivery_invoice_no", "")}</b></div>
-            <div class="detail-cell">Delivery Date: <b>{delivery_date}</b></div>
-            <div class="detail-cell">Original Invoice No: <b>{original_invoice_no}</b></div>
-            <div class="detail-cell">Shipment No: <b>{data.get("shipment_no", "")}</b></div>
-            <div class="detail-cell">PO Number: <b>{po_number}</b></div>
-            <div class="detail-cell">PO Date: <b>{po_date}</b></div>
-            <div class="detail-cell">Payment Term: <b>{data.get("payment_term", "")}</b></div>
-            <div class="detail-cell">Due Date: <b>{due_date}</b></div>
-          </div>
-        </div>
-      </div>
-
-      <table>
+    <table class="sheet">
         <tr>
-          <th>Item</th><th>Original Invoice No</th><th>PO No</th><th>PO Date</th><th>Product Code</th><th>Description</th>
-          <th>Pallet No</th><th>Box No</th><th class="right">Qty</th>
-          <th class="right">Unit Price</th><th>Currency</th><th class="right">Amount</th>
+            <td colspan="4" rowspan="2">{logo_html}<br><span class="bold">{html.escape(company_name)}</span><br><span class="small">{html.escape(str(company_addr))}<br>{html.escape(str(company_phone))} {html.escape(str(company_email))}</span></td>
+            <td colspan="3" class="title">COMMERCIAL INVOICE</td>
+        </tr>
+        <tr>
+            <td colspan="2" class="section-title">VOUCHER #</td>
+            <td class="bold">{html.escape(str(data.get("delivery_invoice_no", "")))}</td>
+        </tr>
+        <tr>
+            <td colspan="4" class="section-title">PLANT ADDRESS</td>
+            <td colspan="2" class="section-title">DATE</td>
+            <td>{delivery_date}</td>
+        </tr>
+        <tr>
+            <td colspan="4">{html.escape(str(company_addr))}</td>
+            <td colspan="2" class="section-title">PURCHASE ORDER #</td>
+            <td>{html.escape(str(po_number))}</td>
+        </tr>
+        <tr>
+            <td colspan="4"></td>
+            <td colspan="2" class="section-title">PURCHASE ORDER DATE</td>
+            <td>{po_date}</td>
+        </tr>
+        <tr>
+            <td colspan="4" class="section-title">BUYER / BILL TO</td>
+            <td colspan="3" class="section-title">SHIP TO</td>
+        </tr>
+        <tr>
+            <td colspan="4" style="height:70px;"><span class="bold">{html.escape(str(buyer))}</span><br><span class="small">Customer address as per master / PO</span></td>
+            <td colspan="3" style="height:70px;">{html.escape(str(ship_to))}</td>
+        </tr>
+        <tr>
+            <td class="section-title">VEHICLE #</td>
+            <td colspan="2" class="section-title">SHIP VIA</td>
+            <td class="section-title">PAYMENT TERM</td>
+            <td class="section-title">DUE DATE</td>
+            <td colspan="2" class="section-title">ASN #</td>
+        </tr>
+        <tr>
+            <td>{html.escape(str(data.get("vehicle_no", "")))}</td>
+            <td colspan="2">{html.escape(str(data.get("ship_via", "Road")))}</td>
+            <td>{html.escape(str(data.get("payment_term", "")))}</td>
+            <td>{due_date}</td>
+            <td colspan="2">{html.escape(str(data.get("asn_no", "")))}</td>
+        </tr>
+    </table>
+
+    <table class="sheet items" style="margin-top:8px;">
+        <tr>
+            <th style="width:7%;">ITEM #</th>
+            <th>DESCRIPTION</th>
+            <th style="width:18%;">FSI ORIGINAL INVOICE #</th>
+            <th style="width:12%;">QUANTITY<br>(PCS)</th>
+            <th style="width:12%;">PRICE</th>
+            <th style="width:14%;">AMOUNT</th>
         </tr>
         {item_rows}
-        <tr class="total-row">
-          <td colspan="8" class="right">TOTAL</td>
-          <td class="right">{total_qty:,.2f}</td>
-          <td></td><td>{currency}</td>
-          <td class="right">{total_amount:,.2f}</td>
+        <tr>
+            <td colspan="3" class="right total">SUBTOTAL</td>
+            <td class="right total">{total_qty:,.2f}</td>
+            <td></td>
+            <td class="right total">{total_amount:,.2f}</td>
         </tr>
-      </table>
+        <tr>
+            <td colspan="5" class="right bold">TAX</td>
+            <td class="right">0.00</td>
+        </tr>
+        <tr>
+            <td colspan="5" class="right bold">OTHER</td>
+            <td class="right">0.00</td>
+        </tr>
+        <tr>
+            <td colspan="5" class="right total">TOTAL ({html.escape(str(currency))})</td>
+            <td class="right total">{total_amount:,.2f}</td>
+        </tr>
+    </table>
 
-      <div class="box">
-        <b>References:</b><br>
-        Original Invoice Number: <b>{original_invoice_no}</b><br>
-        Shipment Number: <b>{data.get("shipment_no", "")}</b><br>
-        PO Number / Date: <b>{po_number}</b> / <b>{po_date}</b>
-      </div>
-
-      <div class="footer">
-        <div class="sign">Prepared By</div>
-        <div class="sign">Authorized Signatory</div>
-      </div>
+    <table class="sheet" style="margin-top:8px;">
+        <tr>
+            <td colspan="4" class="section-title">PACKAGING DETAILS:</td>
+            <td colspan="3" class="section-title">REFERENCES</td>
+        </tr>
+        <tr>
+            <td colspan="4">{html.escape(str(data.get("packaging_details", "As per shipment packing details")))}</td>
+            <td colspan="3">
+                Original Invoice: <b>{html.escape(str(original_invoice_no))}</b><br>
+                Shipment No: <b>{html.escape(str(data.get("shipment_no", "")))}</b><br>
+                PO: <b>{html.escape(str(po_number))}</b> / <b>{po_date}</b>
+            </td>
+        </tr>
+        <tr>
+            <td colspan="4" class="bank">{'<br>'.join(html.escape(x) for x in bank_details)}</td>
+            <td colspan="3" class="signature">Authorised Signatory</td>
+        </tr>
+    </table>
     </body>
     </html>
     """
@@ -2495,6 +2718,7 @@ def require_login():
 
 def page_setup(title=None, cleanup=False):
     require_login()
+    require_page_access_for_current_page()
     top_layout()
     if "filter_key_counter" not in st.session_state:
         st.session_state.filter_key_counter = {}
@@ -2746,3 +2970,94 @@ def render_coverage_table_title(title="Coverage Plan Table"):
     )
 # === END FINAL KPI CARD UI HELPERS ===
 
+
+
+def ship_to_form():
+    """Ship To Master form used for Delivery Invoice print details."""
+    st.subheader("Ship To Master")
+    st.markdown(
+        '<div class="sap-grid-note">Create Ship To addresses for delivery invoices. These fields are used in Delivery print layout.</div>',
+        unsafe_allow_html=True
+    )
+
+    with st.form("ship_to_master_form", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            ship_to_name = st.text_input("Ship To Name", key="ship_to_name")
+            ship_to_id = st.text_input("Ship To ID", key="ship_to_id")
+            addressline1 = st.text_input("Addressline1", key="ship_to_addressline1")
+            addressline2 = st.text_input("Addressline2", key="ship_to_addressline2")
+        with c2:
+            addressline3 = st.text_input("Addressline3", key="ship_to_addressline3")
+            vendor_gstin = st.text_input("vendorGSTIN", key="ship_to_vendor_gstin")
+            vendor_phone = st.text_input("vendorphone", key="ship_to_vendor_phone")
+            vendor_email = st.text_input("vendoremail", key="ship_to_vendor_email")
+            is_active = st.checkbox("Active", value=True, key="ship_to_is_active")
+
+        submitted = st.form_submit_button("Save Ship To Master", type="primary")
+        if submitted:
+            if not ship_to_name.strip():
+                st.error("Ship To Name is mandatory.")
+            else:
+                existing = fetch_all(
+                    "SELECT id FROM ship_to_masters WHERE ship_to_name=? AND COALESCE(ship_to_id,'')=COALESCE(?, '') LIMIT 1",
+                    (ship_to_name.strip(), ship_to_id.strip())
+                )
+                if existing:
+                    execute_query("""
+                        UPDATE ship_to_masters
+                        SET addressline1=?, addressline2=?, addressline3=?, vendor_gstin=?,
+                            vendor_phone=?, vendor_email=?, is_active=?
+                        WHERE id=?
+                    """, (
+                        addressline1.strip(), addressline2.strip(), addressline3.strip(),
+                        vendor_gstin.strip(), vendor_phone.strip(), vendor_email.strip(),
+                        bool(is_active), existing[0]["id"]
+                    ))
+                    st.success("Ship To Master updated.")
+                else:
+                    execute_query("""
+                        INSERT INTO ship_to_masters
+                        (ship_to_name, ship_to_id, addressline1, addressline2, addressline3,
+                         vendor_gstin, vendor_phone, vendor_email, is_active)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        ship_to_name.strip(), ship_to_id.strip(), addressline1.strip(), addressline2.strip(),
+                        addressline3.strip(), vendor_gstin.strip(), vendor_phone.strip(), vendor_email.strip(),
+                        bool(is_active)
+                    ))
+                    st.success("Ship To Master saved.")
+                clear_cache_after_write()
+                st.rerun()
+
+    rows = fetch_all("""
+        SELECT id, ship_to_name, ship_to_id, addressline1, addressline2, addressline3,
+               vendor_gstin, vendor_phone, vendor_email, is_active
+        FROM ship_to_masters
+        ORDER BY ship_to_name, ship_to_id
+    """)
+    if rows:
+        show_filtered_df(rows, "ship_to_master_records", total=False)
+    else:
+        st.info("No Ship To records created yet.")
+
+
+def user_can_edit_page(page_key):
+    """Return True if current user can edit the given page. Super admin always can edit."""
+    user = st.session_state.get("user") or {}
+    username = user.get("username")
+    role = user.get("role")
+    if role == "super_admin":
+        return True
+    try:
+        rows = fetch_all("SELECT can_edit FROM user_page_access WHERE username=? AND page_key=? LIMIT 1", (username, page_key))
+        if rows:
+            return bool(rows[0].get("can_edit"))
+    except Exception:
+        pass
+    # default fallback
+    if role == "admin":
+        return page_key in ["masters", "shipment", "delivery", "payment", "coverage", "reports", "overdue"]
+    if role == "user":
+        return page_key in ["delivery"]
+    return False

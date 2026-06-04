@@ -2,6 +2,7 @@ import os
 import hashlib
 import time
 import psycopg2
+import psycopg2.pool
 import streamlit as st
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import SimpleConnectionPool
@@ -41,11 +42,17 @@ def reset_pool():
     _POOL = None
 
 def get_pool():
+    """Create/reuse PostgreSQL pool.
+
+    maxconn increased because Streamlit can rerun pages quickly and multiple
+    cached/dashboard queries may overlap. Pool exhaustion is also handled below
+    by reset-and-retry.
+    """
     global _POOL
     if _POOL is None:
         _POOL = SimpleConnectionPool(
             minconn=1,
-            maxconn=5,
+            maxconn=15,
             dsn=DATABASE_URL,
             cursor_factory=RealDictCursor,
             sslmode="require",
@@ -58,7 +65,15 @@ def get_pool():
     return _POOL
 
 def get_connection():
-    conn = get_pool().getconn()
+    """Get a connection with recovery from pool exhaustion/stale pool."""
+    conn = None
+    try:
+        conn = get_pool().getconn()
+    except psycopg2.pool.PoolError:
+        reset_pool()
+        time.sleep(0.5)
+        conn = get_pool().getconn()
+
     try:
         with conn.cursor() as cur:
             cur.execute("SET statement_timeout = '45s'")
@@ -82,7 +97,8 @@ def release_connection(conn, close=False):
 def _is_connection_error(exc):
     text = str(exc).lower()
     return (
-        isinstance(exc, (psycopg2.OperationalError, psycopg2.InterfaceError))
+        isinstance(exc, (psycopg2.OperationalError, psycopg2.InterfaceError, psycopg2.pool.PoolError))
+        or "connection pool exhausted" in text
         or "ssl syscall" in text
         or "operation timed out" in text
         or "server closed the connection" in text
@@ -95,7 +111,7 @@ def fetch_all(query, params=()):
     query = convert_sqlite_to_postgres(query)
     last_error = None
 
-    for attempt in range(2):
+    for attempt in range(3):
         conn = None
         released = False
         try:
@@ -112,7 +128,7 @@ def fetch_all(query, params=()):
             except Exception:
                 pass
 
-            if _is_connection_error(e) and attempt == 0:
+            if _is_connection_error(e) and attempt < 2:
                 release_connection(conn, close=True)
                 released = True
                 reset_pool()
@@ -130,7 +146,7 @@ def execute_query(query, params=()):
     query = convert_sqlite_to_postgres(query)
     last_error = None
 
-    for attempt in range(2):
+    for attempt in range(3):
         conn = None
         released = False
         try:
@@ -147,7 +163,7 @@ def execute_query(query, params=()):
             except Exception:
                 pass
 
-            if _is_connection_error(e) and attempt == 0:
+            if _is_connection_error(e) and attempt < 2:
                 release_connection(conn, close=True)
                 released = True
                 reset_pool()
@@ -172,5 +188,94 @@ def verify_user(username, password):
     return rows[0] if rows else None
 
 def init_db():
+    """Lightweight migrations for existing Supabase/PostgreSQL database."""
+    try:
+        execute_query("ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS po_number TEXT")
+    except Exception:
+        pass
+    try:
+        execute_query("ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS po_date DATE")
+    except Exception:
+        pass
+    try:
+        execute_query("ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS fifo_row_id INTEGER")
+    except Exception:
+        pass
+    try:
+        execute_query("CREATE INDEX IF NOT EXISTS idx_shipment_boxes_fifo_row_id ON shipment_boxes(fifo_row_id)")
+    except Exception:
+        pass
+    try:
+        execute_query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS customer_id INTEGER")
+    except Exception:
+        pass
+    try:
+        execute_query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER")
+    except Exception:
+        pass
+    try:
+        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER")
+    except Exception:
+        pass
+    try:
+        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS po_number TEXT")
+    except Exception:
+        pass
+    try:
+        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS po_date DATE")
+    except Exception:
+        pass
+    try:
+        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS vehicle_number TEXT")
+    except Exception:
+        pass
+    try:
+        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS asn_number TEXT")
+    except Exception:
+        pass
+    try:
+        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS asn_date DATE")
+    except Exception:
+        pass
+    try:
+        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS packaging_details TEXT")
+    except Exception:
+        pass
+
+    # SHIP_TO_MASTER_SCHEMA_PATCH
+    execute_query("""
+        CREATE TABLE IF NOT EXISTS ship_to_masters (
+            id SERIAL PRIMARY KEY,
+            ship_to_name TEXT NOT NULL,
+            ship_to_id TEXT,
+            addressline1 TEXT,
+            addressline2 TEXT,
+            addressline3 TEXT,
+            vendor_gstin TEXT,
+            vendor_phone TEXT,
+            vendor_email TEXT,
+            is_active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    try:
+        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER")
+    except Exception:
+        pass
+    execute_query('''
+    CREATE TABLE IF NOT EXISTS ship_to_masters (
+        id SERIAL PRIMARY KEY,
+        ship_to_name TEXT NOT NULL,
+        ship_to_id TEXT,
+        addressline1 TEXT,
+        addressline2 TEXT,
+        addressline3 TEXT,
+        vendor_gstin TEXT,
+        vendor_phone TEXT,
+        vendor_email TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+''')
     # Tables are already created in Supabase.
     pass
