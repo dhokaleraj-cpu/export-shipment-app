@@ -104,6 +104,70 @@ from common import *
 
 page_setup()
 
+
+st.markdown("""
+<style>
+/* DELIVERY MODULE FONT + SPACING UPDATE */
+/* Reduce heading, subheading and title font sizes by 20% on Delivery page only */
+.delivery-page-scope h1,
+.delivery-page-scope h2,
+.delivery-page-scope h3 {
+    font-size: 80% !important;
+}
+
+.delivery-page-scope .sap-grid-card-title,
+.delivery-page-scope .sap-subtitle,
+.delivery-page-scope .sap-section-title,
+.delivery-page-scope .section-title,
+.delivery-page-scope .stMarkdown h1,
+.delivery-page-scope .stMarkdown h2,
+.delivery-page-scope .stMarkdown h3 {
+    font-size: 80% !important;
+}
+
+/* Streamlit rendered headings on this page */
+h1, h2, h3 {
+    font-size: 80% !important;
+}
+
+/* App custom card titles on Delivery page */
+.sap-grid-card-title {
+    font-size: 18px !important;
+    line-height: 1.18 !important;
+}
+
+.sap-subtitle {
+    font-size: 18px !important;
+    line-height: 1.18 !important;
+}
+
+/* Add little space above Original Invoice Number with Shipment Number section */
+.delivery-original-invoice-space {
+    height: 18px !important;
+}
+
+/* Low-resolution readability */
+@media (max-width: 1366px) {
+    .sap-grid-card-title {
+        font-size: 16px !important;
+    }
+    .sap-subtitle {
+        font-size: 16px !important;
+    }
+    h1 {
+        font-size: 24px !important;
+    }
+    h2 {
+        font-size: 20px !important;
+    }
+    h3 {
+        font-size: 17px !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 show_header('Delivery Entry', 'Invoice-style FIFO delivery form with multi-pallet selection')
 
 st.markdown("""
@@ -142,7 +206,8 @@ else:
     ctop1, ctop2 = st.columns(2)
     with ctop1:
         st.markdown('<div class="input-section-title">Original Invoice Number with Shipment Number</div>', unsafe_allow_html=True)
-        selected_invoice = st.selectbox('Original Invoice Number with Shipment Number', list(inv_map.keys()), key='delivery_original_invoice_ship', label_visibility='collapsed')
+        st.markdown('<div class="delivery-original-invoice-space"></div>', unsafe_allow_html=True)  # DELIVERY_ORIGINAL_INVOICE_SPACING_MARKER
+    selected_invoice = st.selectbox('Original Invoice Number with Shipment Number', list(inv_map.keys()), key='delivery_original_invoice_ship', label_visibility='collapsed')
     invoice_top_col1, invoice_top_col2 = st.columns(2)
     with invoice_top_col1:
         delivery_invoice_no = st.text_input('Delivery Invoice Number', key='delivery_invoice_v10')

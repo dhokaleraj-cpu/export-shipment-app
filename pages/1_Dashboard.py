@@ -72,6 +72,165 @@ def local_table_title(title="Coverage Plan Table"):
 
 page_setup(cleanup=False)
 
+
+# --- Dashboard Coverage Cards: same calculation concept as Coverage Plan module ---
+def dash_safe_float(value, default=0.0):
+    try:
+        if value is None or value == "":
+            return default
+        if pd.isna(value):
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+def dash_coverage_kpi_card(title, value, header_bg="#1A5E99", value_bg="#ffffff", value_color="#111827"):
+    """Same size/style as final Coverage Plan KPI cards."""
+    st.markdown(
+        f"""
+        <div style="width:100%;border:1px solid #cbd5e1;border-radius:4px;overflow:hidden;background:white;margin-bottom:10px;box-shadow:none;">
+            <div style="height:48px;background:{header_bg};color:white;display:flex;align-items:center;justify-content:center;text-align:center;font-family:Aptos,Arial,sans-serif;font-size:19px;font-weight:900;line-height:1.12;text-transform:uppercase;padding:6px;">
+                {title}
+            </div>
+            <div style="height:56px;background:{value_bg};color:{value_color};display:flex;align-items:center;justify-content:center;text-align:center;font-family:Aptos,Arial,sans-serif;font-size:26px;font-weight:900;line-height:1.12;padding:6px;">
+                {value}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+def dash_get_week_qty_maps(product_id, shipment_time_days):
+    delivered_week_rows = fetch_all("""
+        SELECT date_trunc('week', d.delivery_date::date)::date AS week_start,
+               COALESCE(SUM(d.delivered_qty),0) AS delivered_qty
+        FROM customer_deliveries d
+        JOIN shipment_boxes b ON d.box_id = b.id
+        WHERE b.product_id=?
+          AND d.delivery_date IS NOT NULL
+        GROUP BY date_trunc('week', d.delivery_date::date)::date
+    """, (product_id,))
+    delivered_by_week = {}
+    for rr in delivered_week_rows:
+        wk = parse_db_date(rr.get("week_start"))
+        if wk:
+            delivered_by_week[wk.isoformat()] = dash_safe_float(rr.get("delivered_qty"))
+
+    shipment_week_rows = fetch_all("""
+        SELECT date_trunc('week', (s.shipment_date::date + (?::int * INTERVAL '1 day')))::date AS week_start,
+               COALESCE(SUM(b.original_qty),0) AS shipment_delivery_qty
+        FROM shipment_boxes b
+        JOIN shipments s ON b.shipment_id = s.id
+        WHERE b.product_id=?
+          AND s.shipment_date IS NOT NULL
+        GROUP BY date_trunc('week', (s.shipment_date::date + (?::int * INTERVAL '1 day')))::date
+    """, (int(shipment_time_days), product_id, int(shipment_time_days)))
+    shipment_by_week = {}
+    for rr in shipment_week_rows:
+        wk = parse_db_date(rr.get("week_start"))
+        if wk:
+            shipment_by_week[wk.isoformat()] = dash_safe_float(rr.get("shipment_delivery_qty"))
+
+    return shipment_by_week, delivered_by_week
+
+def dash_calculate_coverage_kpis(product_id, shipment_time_days, two_months_inventory):
+    """Calculate Dashboard Coverage KPIs.
+
+    NEXT SHIPMENT DATE / QTY: first future shortage after demand starts.
+    STOCK AT WH / WH BANK / BANK STATUS: values from CURRENT WEEK row,
+    matching the Coverage Plan table calculation.
+    """
+    raw_rows = fetch_all("""
+        SELECT id, week_no, plan_date, customer_forecast, stock_at_wh,
+               shipment_delivery_qty, delivered_to_customer, wh_bank, bank_status,
+               suggested_shipment_qty, next_shipment_date
+        FROM coverage_plan_lines
+        WHERE product_id=?
+        ORDER BY date(plan_date), week_no, id
+    """, (product_id,))
+
+    shipment_by_week, delivered_by_week = dash_get_week_qty_maps(product_id, shipment_time_days)
+
+    current_week_start = datetime.strptime(monday_of_date(date.today()), "%Y-%m-%d").date()
+
+    previous_wh_bank = 0.0
+    shipment_receipt_started = False
+    demand_started = False
+
+    next_shipment_date = ""
+    next_shipment_qty = 0.0
+
+    current_week_found = False
+    current_stock_at_wh = 0.0
+    current_wh_bank = 0.0
+    current_bank_status = 0.0
+
+    for r in raw_rows:
+        week_start = parse_db_date(r.get("plan_date"))
+        if not week_start:
+            continue
+        week_key = week_start.isoformat()
+
+        shipment_delivery_qty = dash_safe_float(shipment_by_week.get(week_key, 0))
+        customer_forecast = dash_safe_float(r.get("customer_forecast"))
+        delivered_to_customer = dash_safe_float(delivered_by_week.get(week_key, 0))
+        stored_stock = dash_safe_float(r.get("stock_at_wh"))
+
+        if shipment_delivery_qty > 0:
+            shipment_receipt_started = True
+
+        if customer_forecast > 0 or delivered_to_customer > 0:
+            demand_started = True
+
+        # Same rule as Coverage Plan module:
+        # Stock at WH remains 0 until first shipment receipt and never rolls negative.
+        if not shipment_receipt_started:
+            stock_at_wh = 0.0
+        else:
+            if stored_stock > 0:
+                stock_at_wh = stored_stock
+            else:
+                stock_at_wh = max(previous_wh_bank, 0.0)
+
+        wh_bank = stock_at_wh + shipment_delivery_qty - customer_forecast - delivered_to_customer
+        bank_status = wh_bank - two_months_inventory
+
+        # Suggested shipment starts only after demand starts.
+        # For dashboard, only consider current week and future weeks.
+        if week_start >= current_week_start and demand_started and bank_status < 0:
+            suggested_qty = abs(bank_status)
+            suggested_date = (week_start - timedelta(days=int(shipment_time_days))).isoformat()
+        else:
+            suggested_qty = 0.0
+            suggested_date = ""
+
+        if week_start >= current_week_start and demand_started and suggested_qty > 0 and not next_shipment_date:
+            next_shipment_date = suggested_date
+            next_shipment_qty = suggested_qty
+
+        # Dashboard current week cards must come from current week row.
+        if week_start == current_week_start:
+            current_week_found = True
+            current_stock_at_wh = stock_at_wh
+            current_wh_bank = wh_bank
+            current_bank_status = bank_status
+
+        previous_wh_bank = wh_bank if shipment_receipt_started else 0.0
+
+    # If current week row was not seeded in coverage_plan_lines, keep zero instead of taking last row.
+    if not current_week_found:
+        current_stock_at_wh = 0.0
+        current_wh_bank = 0.0
+        current_bank_status = 0.0
+
+    return {
+        "next_shipment_date": next_shipment_date,
+        "next_shipment_qty": next_shipment_qty,
+        "stock_at_wh": current_stock_at_wh,
+        "wh_bank": current_wh_bank,
+        "bank_status": current_bank_status,
+    }
+
 show_header('Dashboard')
 total_shipments = fetch_all('SELECT COUNT(*) c FROM shipments')[0]['c']
 total_boxes = fetch_all('SELECT COUNT(*) c FROM shipment_boxes')[0]['c']
@@ -96,38 +255,101 @@ for col, (lab, val, cls) in zip(cols, labels):
         )
         local_dash_card(lab, val, card_color)
 ui_spacer(60)
+
 st.divider()
-st.markdown('<div class="coverage-dashboard-title">Coverage Plan Dashboard</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div style="font-family:Aptos,Arial,sans-serif;font-size:32px;font-weight:900;color:#003B73;padding:12px 0 14px 0;line-height:1.2;">Coverage Plan Dashboard</div>',
+    unsafe_allow_html=True
+)
+
 try:
-    dashboard_products = cached_fetch_all('\n            SELECT id, product_code, product_name\n            FROM products\n            ORDER BY product_code\n        ')
-    if dashboard_products:
-        product_options = [p['product_code'] for p in dashboard_products]
-        default_index = product_options.index('40257237') if '40257237' in product_options else 0
-        cov_cols = st.columns([1.05, 1, 1, 1, 1])
-        with cov_cols[0]:
-            local_dashboard_filter_header('PRODUCT', '#FF8C00')
-            dashboard_product_code = st.selectbox('Product', product_options, index=default_index, key='dashboard_coverage_product_filter', label_visibility='collapsed')
-        dashboard_product = next((p for p in dashboard_products if p['product_code'] == dashboard_product_code))
-        coverage_kpi = fetch_all('\n                SELECT next_shipment_date, suggested_shipment_qty\n                FROM coverage_plan_lines\n                WHERE product_id = ?\n                  AND suggested_shipment_qty > 0\n                  AND (COALESCE(customer_forecast,0) > 0 OR COALESCE(delivered_to_customer,0) > 0)\n                ORDER BY date(next_shipment_date), date(plan_date), week_no\n                LIMIT 1\n            ', (dashboard_product['id'],))
-        shipment_time_row = cached_fetch_all('\n                SELECT IFNULL(MAX(shipment_time_days),0) AS shipment_time_days\n                FROM warehouses\n            ')[0]
-        next_date = coverage_kpi[0]['next_shipment_date'] if coverage_kpi else ''
-        next_qty = float(coverage_kpi[0]['suggested_shipment_qty'] or 0) if coverage_kpi else 0
-        shipment_time_days = int(shipment_time_row['shipment_time_days'] or 0)
-        next_date_display = format_date_ddmmyyyy(next_date) if next_date else '-'
-        with cov_cols[1]:
-            local_coverage_card('NEXT SHIPMENT DATE', next_date_display, '#B72C24', '#ffffff', '#B72C24')
-        with cov_cols[2]:
-            local_coverage_card('NEXT SHIPMENT QTY', f'{next_qty:,.0f}', '#EE9337', '#ffffff', '#EE9337')
-        with cov_cols[3]:
-            local_coverage_card('PRODUCT', dashboard_product_code, '#1A5E99')
-        with cov_cols[4]:
-            local_coverage_card('SHIPMENT TIME', f'{shipment_time_days} Days', '#1A5E99')
+    dash_products = fetch_all("""
+        SELECT id, product_code, product_name, lcr_weekly, mcr_weekly, two_months_inventory
+        FROM products
+        ORDER BY product_code
+    """)
+    dash_warehouses = fetch_all("""
+        SELECT id, warehouse_name, shipment_time_days
+        FROM warehouses
+        ORDER BY warehouse_name
+    """)
+
+    if not dash_products:
+        st.info("Create Product Master to view Coverage Plan Dashboard.")
     else:
-        st.info('Coverage dashboard will appear after product master is available.')
-except Exception:
-    st.info('Coverage Plan dashboard will appear after coverage data is available.')
-st.divider()
-st.subheader('Recent Shipments')
-show_filtered_df(fetch_all('\n        SELECT s.shipment_no, s.invoice_no, s.shipment_date, sup.supplier_name, w.warehouse_name, s.currency, s.invoice_amount\n        FROM shipments s\n        LEFT JOIN suppliers sup ON s.supplier_id = sup.id\n        LEFT JOIN warehouses w ON s.warehouse_id = w.id\n        ORDER BY s.id DESC LIMIT 10\n    '), 'dashboard_recent_shipments', total=True)
+        dash_product_map = {f"{p['product_code']} | {p['product_name']}": p for p in dash_products}
+        dash_product_labels = list(dash_product_map.keys())
+        dash_default_index = 0
+        for i, label in enumerate(dash_product_labels):
+            if str(dash_product_map[label].get("product_code") or "") == "40257237":
+                dash_default_index = i
+                break
+
+        dfilter1, dfilter2 = st.columns([1.4, 0.9])
+        with dfilter1:
+            selected_dash_product_label = st.selectbox(
+                "Coverage Product",
+                dash_product_labels,
+                index=dash_default_index,
+                key="dashboard_coverage_product_select"
+            )
+        selected_dash_product = dash_product_map[selected_dash_product_label]
+
+        with dfilter2:
+            if dash_warehouses:
+                dash_warehouse_map = {w["warehouse_name"]: w for w in dash_warehouses}
+                selected_dash_wh = st.selectbox(
+                    "Coverage Warehouse",
+                    list(dash_warehouse_map.keys()),
+                    key="dashboard_coverage_warehouse_select"
+                )
+                dash_shipment_time_days = int(dash_warehouse_map[selected_dash_wh].get("shipment_time_days") or 0)
+            else:
+                dash_shipment_time_days = 0
+                st.warning("Create Warehouse Master to show Shipment Time.")
+
+        dash_two_months_inventory = dash_safe_float(selected_dash_product.get("two_months_inventory"))
+        dash_kpis = dash_calculate_coverage_kpis(
+            selected_dash_product["id"],
+            dash_shipment_time_days,
+            dash_two_months_inventory
+        )
+
+        dk1, dk2, dk3, dk4 = st.columns(4)
+        with dk1:
+            dash_coverage_kpi_card(
+                "NEXT SHIPMENT DATE",
+                format_date_ddmmyyyy(dash_kpis["next_shipment_date"]) if dash_kpis["next_shipment_date"] else "-",
+                "#B72C24",
+                "#ffffff",
+                "#B72C24"
+            )
+        with dk2:
+            dash_coverage_kpi_card(
+                "NEXT SHIPMENT QTY",
+                f"{dash_kpis['next_shipment_qty']:,.0f}",
+                "#EE9337",
+                "#ffffff",
+                "#EE9337"
+            )
+        with dk3:
+            dash_coverage_kpi_card("PRODUCT", selected_dash_product["product_code"], "#1A5E99")
+        with dk4:
+            dash_coverage_kpi_card("SHIPMENT TIME", f"{dash_shipment_time_days} Days", "#1A5E99")
+
+        dk5, dk6, dk7, dk8 = st.columns(4)
+        with dk5:
+            dash_coverage_kpi_card("STOCK AT WH", f"{dash_kpis['stock_at_wh']:,.0f}", "#1A5E99")
+        with dk6:
+            dash_coverage_kpi_card("WH BANK", f"{dash_kpis['wh_bank']:,.0f}", "#1A5E99")
+        with dk7:
+            bank_color = "#B72C24" if dash_kpis["bank_status"] < 0 else "#15803D"
+            dash_coverage_kpi_card("BANK STATUS", f"{dash_kpis['bank_status']:,.0f}", bank_color, "#ffffff", bank_color)
+        with dk8:
+            dash_coverage_kpi_card("TWO MONTHS INVENTORY", f"{dash_two_months_inventory:,.0f}", "#1A5E99")
+
+except Exception as coverage_dash_error:
+    st.warning(f"Coverage Plan Dashboard could not load: {coverage_dash_error}")
+
 
 st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)
