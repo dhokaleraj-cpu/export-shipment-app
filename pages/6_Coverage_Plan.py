@@ -63,6 +63,19 @@ def local_table_title(title="Coverage Plan Table"):
 
 page_setup()
 
+st.markdown("""
+<style>
+/* COVERAGE WIDE SCREEN COMFORT */
+@media (min-width: 1400px) {
+    .block-container {
+        max-width: 1680px !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
 show_header('Coverage Plan', 'Weekly customer forecast, warehouse stock and shipment planning')
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -115,6 +128,7 @@ else:
         )
         local_filter_end()
     selected_product = product_map[selected_product_label]
+    selected_product_id_for_import = selected_product['id']  # FORECAST IMPORT PRODUCT MASTER LINK FIX
 
     with filter_col2:
         local_filter_start('WAREHOUSE', '#1A5E99')
@@ -464,6 +478,7 @@ else:
     st.markdown('<div class="sap-subtitle">Import Customer Forecast / Stock at WH</div>', unsafe_allow_html=True)
     forecast_template_df = pd.DataFrame({'product_code': [selected_product['product_code']], 'plan_date': [date.today().isoformat()], 'stock_at_wh': [0], 'customer_forecast': [0]})
     st.download_button('Download Customer Forecast Template', to_excel_bytes(forecast_template_df), 'customer_forecast_template.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='download_customer_forecast_template')
+    st.info('Customer Forecast Import uses selected Product Master product from the Coverage Plan KPI/filter card.')
     forecast_file = st.file_uploader('Import Customer Forecast Excel', type=['xlsx'], key='coverage_import_forecast_excel')
     if forecast_file is not None:
         try:

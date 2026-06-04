@@ -48,6 +48,30 @@ init_db()
 
 st.markdown("""
 <style>
+/* WIDE SCREEN COMFORT FIX */
+@media (min-width: 1400px) {
+    .block-container {
+        max-width: 1480px !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+    }
+}
+@media (min-width: 1900px) {
+    .block-container {
+        max-width: 1680px !important;
+    }
+}
+.topbar, .sap-section-card, .sap-grid-card, .card {
+    max-width: 100% !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+st.markdown("""
+<style>
 @import url('https://fonts.googleapis.com/css2?family=Aptos:wght@400;600;700;800&display=swap');
 html, body, [class*="css"], .stApp, div, span, p, label, input, button, textarea, select {
     font-family: Aptos, Arial, sans-serif !important;
@@ -1018,19 +1042,6 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"] span {
     padding-left:16px !important;
 }
 
-
-/* FINAL DELIVERY PAGE LABEL STYLE */
-.stSelectbox label,
-.stTextInput label,
-.stDateInput label,
-.stFileUploader label,
-.stMultiSelect label {
-    font-family:Aptos, Arial, sans-serif !important;
-    font-size:18px !important;
-    font-weight:900 !important;
-    color:#111827 !important;
-}
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -1805,31 +1816,290 @@ def require_roles(allowed):
         st.error("You do not have permission to access this module.")
         st.stop()
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def login_page():
-    st.markdown("<br>", unsafe_allow_html=True)
-    c_logo1, c_logo2, c_logo3 = st.columns([1, 2, 1])
-    with c_logo2:
-        if LOGO_PATH.exists():
-            st.image(str(LOGO_PATH), use_container_width=True)
-        st.markdown("""
-        <div style="text-align:center; color:#003b73; font-size:34px; font-weight:900; margin-top:0px; margin-bottom:8px;">
-            EXPORT SHIPMENT<br>MONITORING SYSTEM
-        </div>
-        """, unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 1.2, 1])
-    with c2:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        username = st.text_input("User Name", key="login_username")
-        password = st.text_input("Password", type="password", key="login_password")
-        if st.button("Login", type="primary", use_container_width=True, key="login_button"):
+    """Top-aligned login page with logo and title centered on the same axis."""
+    st.markdown("""
+    <style>
+    /* LOGIN PAGE - TOP ALIGNED CLEAN DESIGN */
+    html, body, .stApp, [data-testid="stAppViewContainer"], .main {
+        background: #ffffff !important;
+    }
+
+    .block-container {
+        padding-top: 0rem !important;
+        padding-bottom: 0.5rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        max-width: 100% !important;
+        background: #ffffff !important;
+    }
+
+    header[data-testid="stHeader"] {
+        display: none !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        background: transparent !important;
+    }
+
+    [data-testid="collapsedControl"],
+    section[data-testid="stSidebar"],
+    div[data-testid="stSidebar"] {
+        display: none !important;
+    }
+
+    div[data-testid="stVerticalBlock"] {
+        gap: 0rem !important;
+    }
+
+    .login-page-top-wrap {
+        width: 100% !important;
+        min-height: auto !important;
+        display: flex !important;
+        align-items: flex-start !important;
+        justify-content: center !important;
+        padding-top: 42px !important;
+        box-sizing: border-box !important;
+    }
+
+    .login-card-top {
+        width: min(460px, 94vw) !important;
+        background: #ffffff !important;
+        border-radius: 18px !important;
+        padding: 0 28px 28px 28px !important;
+        text-align: center !important;
+        box-shadow: none !important;
+        border: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+    }
+
+    .login-logo-row {
+        width: 100% !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        margin: 0 auto 18px auto !important;
+        text-align: center !important;
+    }
+
+    .login-logo-img {
+        width: 310px !important;
+        max-width: 100% !important;
+        height: auto !important;
+        display: block !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+
+    .login-title-final {
+        width: 100% !important;
+        font-family: Aptos, Arial, sans-serif !important;
+        font-size: 17px !important;      /* increased by 20% from 14px */
+        line-height: 1.35 !important;
+        font-weight: 950 !important;
+        color: #003B73 !important;
+        text-align: center !important;
+        margin: 0 auto 30px auto !important;
+        letter-spacing: .55px !important;
+        text-transform: uppercase !important;
+    }
+
+    .login-fields-area {
+        width: 100% !important;
+        max-width: 440px !important;
+        margin: 0 auto !important;
+        text-align: center !important;
+    }
+
+    .login-side-label {
+        font-family: Aptos, Arial, sans-serif !important;
+        font-size: 16px !important;
+        font-weight: 850 !important;
+        color: #2f3542 !important;
+        text-align: right !important;
+        padding-top: 11px !important;
+        white-space: nowrap !important;
+    }
+
+    .login-row-gap {
+        height: 20px !important;
+    }
+
+    div[data-testid="stTextInput"] label,
+    div[data-testid="stTextInput"] label p,
+    div[data-testid="stWidgetLabel"] p {
+        display: none !important;
+    }
+
+    div[data-testid="stTextInput"] {
+        width: 208px !important;
+        max-width: 208px !important;
+        min-width: 208px !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        text-align: center !important;
+    }
+
+    div[data-testid="stTextInput"] div[data-baseweb="input"],
+    div[data-testid="stTextInput"] div[data-baseweb="input"] > div,
+    div[data-testid="stTextInput"] input {
+        width: 208px !important;
+        max-width: 208px !important;
+        min-width: 208px !important;
+        min-height: 46px !important;
+        border: 0 !important;
+        border-radius: 12px !important;
+        background: #EEF2F7 !important;
+        box-shadow: inset 0 0 0 1px rgba(203, 213, 225, 0.35) !important;
+        font-family: Aptos, Arial, sans-serif !important;
+        font-size: 14px !important;
+        font-weight: 800 !important;
+        color: #111827 !important;
+        text-align: center !important;
+    }
+
+    div[data-testid="stTextInput"] div[data-baseweb="input"]:focus-within > div,
+    div[data-testid="stTextInput"] input:focus {
+        border: 2px solid #1B6DB5 !important;
+        background: #ffffff !important;
+        color: #111827 !important;
+        box-shadow: 0 0 0 3px rgba(27,109,181,.14) !important;
+    }
+
+    div[data-testid="stButton"] {
+        width: 208px !important;
+        max-width: 208px !important;
+        min-width: 208px !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        margin-top: 26px !important;
+    }
+
+    div[data-testid="stButton"] > button {
+        width: 208px !important;
+        max-width: 208px !important;
+        min-height: 50px !important;
+        border-radius: 12px !important;
+        background: #FF4B4B !important;
+        color: #ffffff !important;
+        border: none !important;
+        font-family: Aptos, Arial, sans-serif !important;
+        font-size: 16px !important;
+        font-weight: 900 !important;
+        box-shadow: 0 6px 16px rgba(255, 75, 75, 0.22) !important;
+    }
+
+    div[data-testid="stButton"] > button:hover {
+        background: #E53E3E !important;
+        color: #ffffff !important;
+    }
+
+    @media (max-width: 640px) {
+        .login-page-top-wrap {
+            padding-top: 28px !important;
+        }
+
+        .login-card-top {
+            width: 94vw !important;
+            padding: 0 14px 24px 14px !important;
+            border: 0 !important;
+        }
+
+        .login-title-final {
+            font-size: 15px !important;
+            margin-bottom: 24px !important;
+        }
+
+        .login-fields-area {
+            max-width: 280px !important;
+        }
+
+        .login-side-label {
+            text-align: center !important;
+            padding-top: 0 !important;
+            padding-bottom: 6px !important;
+            font-size: 15px !important;
+        }
+
+        div[data-testid="stTextInput"],
+        div[data-testid="stTextInput"] div[data-baseweb="input"],
+        div[data-testid="stTextInput"] div[data-baseweb="input"] > div,
+        div[data-testid="stTextInput"] input,
+        div[data-testid="stButton"],
+        div[data-testid="stButton"] > button {
+            width: 80vw !important;
+            max-width: 280px !important;
+            min-width: 0 !important;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="login-page-top-wrap"><div class="login-card-top">', unsafe_allow_html=True)
+
+    if LOGO_PATH.exists():
+        logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
+        st.markdown(
+            f'<div class="login-logo-row"><img class="login-logo-img" src="data:image/png;base64,{logo_b64}" /></div>',
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(
+            '<div class="login-logo-row"><div style="font-size:36px;font-weight:950;color:#003B73;text-align:center;">FSI</div></div>',
+            unsafe_allow_html=True
+        )
+
+    st.markdown(
+        '<div class="login-title-final">EXPORT SHIPMENT<br>MONITORING SYSTEM</div>',
+        unsafe_allow_html=True
+    )
+
+    st.markdown('<div class="login-fields-area">', unsafe_allow_html=True)
+
+    u_sp1, u_label_col, u_input_col, u_sp2 = st.columns([0.50, 0.46, 0.70, 0.50])
+    with u_label_col:
+        st.markdown('<div class="login-side-label">User Name</div>', unsafe_allow_html=True)
+    with u_input_col:
+        username = st.text_input("User Name", key="login_username", label_visibility="collapsed")
+
+    st.markdown('<div class="login-row-gap"></div>', unsafe_allow_html=True)
+
+    p_sp1, p_label_col, p_input_col, p_sp2 = st.columns([0.50, 0.46, 0.70, 0.50])
+    with p_label_col:
+        st.markdown('<div class="login-side-label">Password</div>', unsafe_allow_html=True)
+    with p_input_col:
+        password = st.text_input("Password", type="password", key="login_password", label_visibility="collapsed")
+
+    b_sp1, b_mid, b_sp2 = st.columns([1, 0.70, 1])
+    with b_mid:
+        if st.button("Login", type="primary", key="login_button"):
             user = verify_user(username, password)
             if user:
-                st.session_state.user = user
+                st.session_state["user"] = user
                 st.rerun()
             else:
-                st.error("Invalid user name or password.")
-        st.info("Default login: superadmin/super123, admin/admin123, user/user123")
-        st.markdown('</div>', unsafe_allow_html=True)
+                st.error("Invalid username or password.")
+
+    st.markdown('</div></div></div>', unsafe_allow_html=True)
+
+
 
 def overdue_rows():
     return fetch_all("""
@@ -2217,9 +2487,11 @@ def deduplicate_coverage_plan_dates(product_id):
 
 
 def require_login():
-    if "user" not in st.session_state:
+    if "user" not in st.session_state or not st.session_state.get("user"):
         login_page()
         st.stop()
+
+
 
 def page_setup(title=None, cleanup=False):
     require_login()

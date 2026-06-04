@@ -34,10 +34,10 @@ with admin_tabs[1]:
         if new_username and new_user_password:
             existing = fetch_all('SELECT id FROM users WHERE username=?', (new_username,))
             if existing:
-                execute_query('UPDATE users SET password_hash=?, role=?, is_active=? WHERE username=?', (hash_password(new_user_password), new_user_role, int(new_user_active), new_username))
+                execute_query('UPDATE users SET password_hash=?, role=?, is_active=? WHERE username=?', (hash_password(new_user_password), new_user_role, bool(new_user_active), new_username))
                 st.success('User updated.')
             else:
-                execute_query('INSERT INTO users (username, password_hash, role, is_active) VALUES (?, ?, ?, ?)', (new_username, hash_password(new_user_password), new_user_role, int(new_user_active)))
+                execute_query('INSERT INTO users (username, password_hash, role, is_active) VALUES (?, ?, ?, ?)', (new_username, hash_password(new_user_password), new_user_role, bool(new_user_active)))
                 st.success('User created.')
         else:
             st.error('User name and password are required.')
