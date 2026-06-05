@@ -53,7 +53,7 @@ st.markdown("""
 
 /* GLOBAL DEVICE FRIENDLY UI - COVERAGE PLAN STYLE */
 html, body, .stApp, [class*="css"] {
-    font-family: Aptos, Arial, sans-serif !important;
+    font-family: Montserrat, Aptos, Arial, sans-serif !important;
 }
 
 .block-container {
@@ -317,7 +317,7 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Aptos:wght@400;600;700;800&display=swap');
 html, body, [class*="css"], .stApp, div, span, p, label, input, button, textarea, select {
-    font-family: Aptos, Arial, sans-serif !important;
+    font-family: Montserrat, Aptos, Arial, sans-serif !important;
 }
 .stApp {background:#f4f6f8;}
 .block-container {padding-top: 3.2rem; max-width: 100%;}
@@ -371,7 +371,7 @@ label, .stTextInput label, .stSelectbox label, .stNumberInput label, .stDateInpu
 
 .main-title-center {
     text-align:center;
-    font-family:Aptos, Arial, sans-serif !important;
+    font-family:Montserrat, Aptos, Arial, sans-serif !important;
     font-size:38px;
     line-height:1.1;
     font-weight:900;
@@ -384,7 +384,7 @@ h1, h2, h3, h4, h5, h6,
 div[data-testid="stMarkdownContainer"] h1,
 div[data-testid="stMarkdownContainer"] h2,
 div[data-testid="stMarkdownContainer"] h3 {
-    font-family:Aptos, Arial, sans-serif !important;
+    font-family:Montserrat, Aptos, Arial, sans-serif !important;
     font-weight:900 !important;
 }
 .subtext, .topbar h1, .kpi-head, .total-box {
@@ -1564,93 +1564,89 @@ def require_page_access_for_current_page():
         st.stop()
 
 def render_top_navigation():
-    """Custom top module navigation with page-wise user controls."""
+    """Exact top module navigation with page-wise user controls.
+
+    Supports both dict navigation items:
+        {"target": "...", "label": "..."}
+    and tuple/list navigation items:
+        ("Label", "target") or ("target", "Label")
+    """
+    inject_exact_ui_css()
     user = st.session_state.get("user", {})
     nav_items = get_allowed_nav_items(user)
-    current_file = detect_current_page_target() or "pages/1_Dashboard.py"
-    st.markdown("""
-    <style>
-    .custom-module-title {font-family:Aptos, Arial, sans-serif;font-size:20px;font-weight:900;color:#1B6DB5;padding:10px 0 10px 0;}
-    .menu-no-border-wrap {background:transparent !important;border:0 !important;box-shadow:none !important;padding:0 !important;margin:8px 0 18px 0 !important;}
-    div[data-testid="stButton"] > button {width:100% !important;min-height:48px !important;background:#F4F8FC !important;color:#1B6DB5 !important;border:0 !important;border-radius:10px !important;font-family:Aptos, Arial, sans-serif !important;font-size:20px !important;font-weight:900 !important;box-shadow:none !important;}
-    div[data-testid="stButton"] > button:hover {background:#DCEEFF !important;color:#1B6DB5 !important;border:0 !important;}
-    div[data-testid="stButton"] > button[kind="primary"] {background:#1B6DB5 !important;color:#ffffff !important;border:0 !important;box-shadow:0 2px 8px rgba(27,109,181,.25) !important;}
-    div[data-testid="stButton"] > button[kind="primary"]:hover {background:#145A96 !important;color:#ffffff !important;border:0 !important;}
-    @media (max-width: 760px) {.custom-module-title {font-size:17px !important;} div[data-testid="stButton"] > button {font-size:14px !important; min-height:40px !important;}}
-    </style>
-    <div class="menu-no-border-wrap"><div class="custom-module-title">MODULES</div></div>
-    """, unsafe_allow_html=True)
+    st.markdown('<div class="exact-nav-card"><div class="exact-nav-title">MODULES</div>', unsafe_allow_html=True)
+
     if not nav_items:
-        st.warning('No pages are assigned to your user. Contact the super admin.')
+        st.warning("No module access assigned. Contact Super Admin.")
+        st.markdown('</div>', unsafe_allow_html=True)
         return
-    cols = st.columns(len(nav_items))
-    for col, (label, target) in zip(cols, nav_items):
-        is_active = (target == current_file)
-        with col:
-            if st.button(label, key=f"top_nav_{label}", use_container_width=True, type="primary" if is_active else "secondary"):
-                st.switch_page(target)
+
+    def _nav_label_target(item):
+        if isinstance(item, dict):
+            return item.get("label") or item.get("name") or str(item.get("target") or ""), item.get("target") or item.get("page") or ""
+        if isinstance(item, (tuple, list)):
+            if len(item) >= 2:
+                first = str(item[0])
+                second = str(item[1])
+                # Detect which side is target
+                if first.endswith(".py") or first.startswith("pages/") or first == "app.py":
+                    return second, first
+                return first, second
+            if len(item) == 1:
+                return str(item[0]), str(item[0])
+        return str(item), str(item)
+
+    cols = st.columns(min(len(nav_items), 9))
+    for i, item in enumerate(nav_items):
+        label, target = _nav_label_target(item)
+        with cols[i % len(cols)]:
+            try:
+                st.page_link(target, label=label)
+            except Exception:
+                # Fallback to a disabled-looking button if Streamlit cannot resolve a page target.
+                st.button(label, disabled=True, key=f"nav_disabled_{i}_{label}")
+    st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 def top_layout():
+    inject_exact_ui_css()
     user = st.session_state.get("user", {"username": "-", "role": "-"})
-    c1, c2, c3 = st.columns([2.4, 4.8, 2.4])
+    if LOGO_PATH.exists():
+        logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
+        logo_html = f'<img src="data:image/png;base64,{logo_b64}" />'
+    else:
+        logo_html = '<div class="exact-app-logo-fallback">FSI</div>'
 
-    with c1:
-        if LOGO_PATH.exists():
-            st.image(str(LOGO_PATH), use_container_width=False, width=430)
-        else:
-            st.markdown('<div class="logo-circle">FSI</div>', unsafe_allow_html=True)
-
-    with c2:
-        st.markdown("""
-        <div class="fsi-app-title" style="
-            width:100%;
-            text-align:center;
-            font-family:Montserrat, Aptos, Arial, sans-serif;
-            font-size:40px;
-            line-height:1.05;
-            font-weight:900;
-            color:#1B6DB5;
-            letter-spacing:.25px;
-            padding-top:4px;
-            margin:0 auto;
-        ">
-            EXPORT SHIPMENT<br>MONITORING SYSTEM
+    st.markdown(
+        f"""
+        <div class="exact-app-header">
+            <div class="exact-app-logo">{logo_html}</div>
+            <div class="exact-title">EXPORT SHIPMENT<br>MONITORING SYSTEM</div>
+            <div class="exact-user-box">
+                User: {user.get('username', '-')}<br>
+                Role: {user.get('role', '-')}<br>
+                <span id="liveClock">{datetime.now().strftime('%d-%m-%Y %H:%M')}</span>
+            </div>
         </div>
-        """, unsafe_allow_html=True)
-
-    with c3:
-        st.markdown(f"""
-        <div style="
-            text-align:left;
-            font-family:Aptos, Arial, sans-serif;
-            font-size:21px;
-            line-height:1.55;
-            font-weight:900;
-            color:#111827;
-            padding-top:18px;
-        ">
-            <b>User: {user["username"]}</b><br>
-            <b>Role: {user["role"]}</b><br>
-            <b>Module: Export Shipment</b><br>
-            <span id="liveClock" style="font-weight:900;"></span>
-        </div>
-        <script>
-        function updateClock(){{
-            const now = new Date();
-            const els = window.parent.document.querySelectorAll('#liveClock');
-            els.forEach(el => el.innerHTML = now.toLocaleString());
-        }}
-        setInterval(updateClock, 1000); updateClock();
-        </script>
-        """, unsafe_allow_html=True)
-
-    st.divider()
+        """,
+        unsafe_allow_html=True
+    )
     render_top_navigation()
 
 
 def show_header(title, subtitle="EXPORT SHIPMENT MONITORING SYSTEM"):
-    st.markdown(f'<div class="topbar"><h1>{title}</h1><div class="subtext">{subtitle}</div></div>', unsafe_allow_html=True)
+    inject_exact_ui_css()
+    st.markdown(
+        f"""
+        <div class="exact-page-title-card">
+            <h1>{title}</h1>
+            <div class="exact-page-subtitle">{subtitle}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 
 def add_total_row(df):
     if df.empty:
@@ -2193,273 +2189,37 @@ def require_roles(allowed):
 
 
 def login_page():
-    """Top-aligned login page with logo and title centered on the same axis."""
-    st.markdown("""
-    <style>
-    /* LOGIN PAGE - TOP ALIGNED CLEAN DESIGN */
-    html, body, .stApp, [data-testid="stAppViewContainer"], .main {
-        background: #ffffff !important;
-    }
-
-    .block-container {
-        padding-top: 0rem !important;
-        padding-bottom: 0.5rem !important;
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
-        max-width: 100% !important;
-        background: #ffffff !important;
-    }
-
-    header[data-testid="stHeader"] {
-        display: none !important;
-        height: 0 !important;
-        min-height: 0 !important;
-        background: transparent !important;
-    }
-
-    [data-testid="collapsedControl"],
-    section[data-testid="stSidebar"],
-    div[data-testid="stSidebar"] {
-        display: none !important;
-    }
-
-    div[data-testid="stVerticalBlock"] {
-        gap: 0rem !important;
-    }
-
-    .login-page-top-wrap {
-        width: 100% !important;
-        min-height: auto !important;
-        display: flex !important;
-        align-items: flex-start !important;
-        justify-content: center !important;
-        padding-top: 42px !important;
-        box-sizing: border-box !important;
-    }
-
-    .login-card-top {
-        width: min(460px, 94vw) !important;
-        background: #ffffff !important;
-        border-radius: 18px !important;
-        padding: 0 28px 28px 28px !important;
-        text-align: center !important;
-        box-shadow: none !important;
-        border: 0 !important;
-        display: flex !important;
-        flex-direction: column !important;
-        align-items: center !important;
-        justify-content: flex-start !important;
-    }
-
-    .login-logo-row {
-        width: 100% !important;
-        display: flex !important;
-        justify-content: center !important;
-        align-items: center !important;
-        margin: 0 auto 18px auto !important;
-        text-align: center !important;
-    }
-
-    .login-logo-img {
-        width: 310px !important;
-        max-width: 100% !important;
-        height: auto !important;
-        display: block !important;
-        margin-left: auto !important;
-        margin-right: auto !important;
-    }
-
-    .login-title-final {
-        width: 100% !important;
-        font-family: Aptos, Arial, sans-serif !important;
-        font-size: 17px !important;      /* increased by 20% from 14px */
-        line-height: 1.35 !important;
-        font-weight: 950 !important;
-        color: #003B73 !important;
-        text-align: center !important;
-        margin: 0 auto 30px auto !important;
-        letter-spacing: .55px !important;
-        text-transform: uppercase !important;
-    }
-
-    .login-fields-area {
-        width: 100% !important;
-        max-width: 440px !important;
-        margin: 0 auto !important;
-        text-align: center !important;
-    }
-
-    .login-side-label {
-        font-family: Aptos, Arial, sans-serif !important;
-        font-size: 16px !important;
-        font-weight: 850 !important;
-        color: #2f3542 !important;
-        text-align: right !important;
-        padding-top: 11px !important;
-        white-space: nowrap !important;
-    }
-
-    .login-row-gap {
-        height: 20px !important;
-    }
-
-    div[data-testid="stTextInput"] label,
-    div[data-testid="stTextInput"] label p,
-    div[data-testid="stWidgetLabel"] p {
-        display: none !important;
-    }
-
-    div[data-testid="stTextInput"] {
-        width: 208px !important;
-        max-width: 208px !important;
-        min-width: 208px !important;
-        margin-left: auto !important;
-        margin-right: auto !important;
-        text-align: center !important;
-    }
-
-    div[data-testid="stTextInput"] div[data-baseweb="input"],
-    div[data-testid="stTextInput"] div[data-baseweb="input"] > div,
-    div[data-testid="stTextInput"] input {
-        width: 208px !important;
-        max-width: 208px !important;
-        min-width: 208px !important;
-        min-height: 46px !important;
-        border: 0 !important;
-        border-radius: 12px !important;
-        background: #EEF2F7 !important;
-        box-shadow: inset 0 0 0 1px rgba(203, 213, 225, 0.35) !important;
-        font-family: Aptos, Arial, sans-serif !important;
-        font-size: 14px !important;
-        font-weight: 800 !important;
-        color: #111827 !important;
-        text-align: center !important;
-    }
-
-    div[data-testid="stTextInput"] div[data-baseweb="input"]:focus-within > div,
-    div[data-testid="stTextInput"] input:focus {
-        border: 2px solid #1B6DB5 !important;
-        background: #ffffff !important;
-        color: #111827 !important;
-        box-shadow: 0 0 0 3px rgba(27,109,181,.14) !important;
-    }
-
-    div[data-testid="stButton"] {
-        width: 208px !important;
-        max-width: 208px !important;
-        min-width: 208px !important;
-        margin-left: auto !important;
-        margin-right: auto !important;
-        margin-top: 26px !important;
-    }
-
-    div[data-testid="stButton"] > button {
-        width: 208px !important;
-        max-width: 208px !important;
-        min-height: 50px !important;
-        border-radius: 12px !important;
-        background: #FF4B4B !important;
-        color: #ffffff !important;
-        border: none !important;
-        font-family: Aptos, Arial, sans-serif !important;
-        font-size: 16px !important;
-        font-weight: 900 !important;
-        box-shadow: 0 6px 16px rgba(255, 75, 75, 0.22) !important;
-    }
-
-    div[data-testid="stButton"] > button:hover {
-        background: #E53E3E !important;
-        color: #ffffff !important;
-    }
-
-    @media (max-width: 640px) {
-        .login-page-top-wrap {
-            padding-top: 28px !important;
-        }
-
-        .login-card-top {
-            width: 94vw !important;
-            padding: 0 14px 24px 14px !important;
-            border: 0 !important;
-        }
-
-        .login-title-final {
-            font-size: 15px !important;
-            margin-bottom: 24px !important;
-        }
-
-        .login-fields-area {
-            max-width: 280px !important;
-        }
-
-        .login-side-label {
-            text-align: center !important;
-            padding-top: 0 !important;
-            padding-bottom: 6px !important;
-            font-size: 15px !important;
-        }
-
-        div[data-testid="stTextInput"],
-        div[data-testid="stTextInput"] div[data-baseweb="input"],
-        div[data-testid="stTextInput"] div[data-baseweb="input"] > div,
-        div[data-testid="stTextInput"] input,
-        div[data-testid="stButton"],
-        div[data-testid="stButton"] > button {
-            width: 80vw !important;
-            max-width: 280px !important;
-            min-width: 0 !important;
-        }
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-    st.markdown('<div class="login-page-top-wrap"><div class="login-card-top">', unsafe_allow_html=True)
-
+    """Exact UI login page with fields directly under app title."""
+    inject_exact_ui_css()
     if LOGO_PATH.exists():
         logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
-        st.markdown(
-            f'<div class="login-logo-row"><img class="login-logo-img" src="data:image/png;base64,{logo_b64}" /></div>',
-            unsafe_allow_html=True
-        )
+        logo_html = f'<img src="data:image/png;base64,{logo_b64}" />'
     else:
-        st.markdown(
-            '<div class="login-logo-row"><div style="font-size:36px;font-weight:950;color:#003B73;text-align:center;">FSI</div></div>',
-            unsafe_allow_html=True
-        )
+        logo_html = '<div class="exact-app-logo-fallback" style="margin:0 auto 8px auto;">FSI</div>'
 
     st.markdown(
-        '<div class="login-title-final">EXPORT SHIPMENT<br>MONITORING SYSTEM</div>',
+        f"""
+        <div class="exact-login-shell">
+            <div class="exact-login-card">
+                <div class="exact-login-logo">{logo_html}</div>
+                <div class="exact-login-title">EXPORT SHIPMENT<br>MONITORING SYSTEM</div>
+                <div style="height:4px;"></div>
+        """,
         unsafe_allow_html=True
     )
 
-    st.markdown('<div class="login-fields-area">', unsafe_allow_html=True)
+    username = st.text_input("User Name", key="login_username")
+    password = st.text_input("Password", type="password", key="login_password")
 
-    u_sp1, u_label_col, u_input_col, u_sp2 = st.columns([0.50, 0.46, 0.70, 0.50])
-    with u_label_col:
-        st.markdown('<div class="login-side-label">User Name</div>', unsafe_allow_html=True)
-    with u_input_col:
-        username = st.text_input("User Name", key="login_username", label_visibility="collapsed")
+    if st.button("Login", type="primary", key="login_button"):
+        user = verify_user(username, password)
+        if user:
+            st.session_state["user"] = user
+            st.rerun()
+        else:
+            st.error("Invalid username or password.")
 
-    st.markdown('<div class="login-row-gap"></div>', unsafe_allow_html=True)
-
-    p_sp1, p_label_col, p_input_col, p_sp2 = st.columns([0.50, 0.46, 0.70, 0.50])
-    with p_label_col:
-        st.markdown('<div class="login-side-label">Password</div>', unsafe_allow_html=True)
-    with p_input_col:
-        password = st.text_input("Password", type="password", key="login_password", label_visibility="collapsed")
-
-    b_sp1, b_mid, b_sp2 = st.columns([1, 0.70, 1])
-    with b_mid:
-        if st.button("Login", type="primary", key="login_button"):
-            user = verify_user(username, password)
-            if user:
-                st.session_state["user"] = user
-                st.rerun()
-            else:
-                st.error("Invalid username or password.")
-
-    st.markdown('</div></div></div>', unsafe_allow_html=True)
-
+    st.markdown("</div></div>", unsafe_allow_html=True)
 
 
 def overdue_rows():
@@ -2855,6 +2615,7 @@ def require_login():
 
 
 def page_setup(title=None, cleanup=False):
+    inject_exact_ui_css()
     require_login()
     require_page_access_for_current_page()
     top_layout()
@@ -3248,3 +3009,728 @@ def searchable_selectbox(label, options, key, default_index=0, help_text=None):
         filtered = options
     safe_index = default_index if 0 <= int(default_index or 0) < len(filtered) else 0
     return st.selectbox(label, filtered, index=safe_index, key=key)
+
+
+
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=swap');
+
+/* =========================================================
+   EXACT UI VERSION - ALL PAGES
+   ========================================================= */
+:root{
+    --fsi-blue:#1B6DB5;
+    --fsi-blue-dark:#003B73;
+    --fsi-bg:#F6F8FB;
+    --fsi-card:#FFFFFF;
+    --fsi-border:#CBD5E1;
+    --fsi-soft:#EEF2F7;
+    --fsi-text:#111827;
+    --fsi-muted:#64748B;
+    --fsi-green:#15803D;
+    --fsi-red:#B72C24;
+    --fsi-orange:#EE9337;
+}
+
+html, body, .stApp {
+    background: var(--fsi-bg) !important;
+}
+
+html, body, .stApp, div, span, p, label, input, textarea, select, button {
+    font-family: Aptos, Arial, sans-serif !important;
+}
+
+.block-container {
+    max-width: 100% !important;
+    padding-top: 0.80rem !important;
+    padding-left: clamp(0.50rem, 1.3vw, 1.25rem) !important;
+    padding-right: clamp(0.50rem, 1.3vw, 1.25rem) !important;
+    padding-bottom: 1rem !important;
+}
+
+/* Hide sidebar for same clean app view */
+section[data-testid="stSidebar"], div[data-testid="stSidebar"], div[data-testid="collapsedControl"]{
+    display:none !important;
+}
+
+/* App title exact style */
+.fsi-app-title,
+.main-title-center,
+.topbar-title-main {
+    font-family: Montserrat, Aptos, Arial, sans-serif !important;
+    font-size: 40px !important;
+    line-height: 1.05 !important;
+    font-weight: 900 !important;
+    color: var(--fsi-blue) !important;
+    letter-spacing: .25px !important;
+    text-align:center !important;
+}
+
+/* Top header area */
+.topbar,
+.app-header-card,
+.top-strip {
+    background: var(--fsi-card) !important;
+    border: 1px solid var(--fsi-border) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 1px 4px rgba(15,23,42,.08) !important;
+    padding: 14px 18px !important;
+    margin: 8px 0 14px 0 !important;
+    color: var(--fsi-text) !important;
+}
+
+.topbar h1 {
+    font-size: 28px !important;
+    line-height: 1.15 !important;
+    font-weight: 900 !important;
+    color: var(--fsi-blue-dark) !important;
+    margin: 0 !important;
+}
+
+.subtext {
+    color: var(--fsi-muted) !important;
+    font-size: 14px !important;
+    font-weight: 800 !important;
+}
+
+/* Module menu exact card style */
+.top-nav-wrap,
+.modules-card {
+    background: var(--fsi-card) !important;
+    border: 1px solid var(--fsi-border) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 1px 4px rgba(15,23,42,.08) !important;
+    padding: 12px !important;
+    margin: 8px 0 18px 0 !important;
+}
+
+.top-nav-title,
+.custom-module-title {
+    color: var(--fsi-blue) !important;
+    font-size: 20px !important;
+    font-weight: 900 !important;
+    letter-spacing: .02em !important;
+    margin-bottom: 8px !important;
+}
+
+.top-nav-wrap [data-testid="stPageLink"] a,
+.modules-card a,
+div[data-testid="stButton"] > button {
+    background: var(--fsi-soft) !important;
+    color: var(--fsi-blue) !important;
+    border: 1px solid var(--fsi-border) !important;
+    border-radius: 10px !important;
+    min-height: 42px !important;
+    font-size: 15px !important;
+    font-weight: 900 !important;
+    text-decoration: none !important;
+    box-shadow: none !important;
+    white-space: normal !important;
+}
+
+.top-nav-wrap [data-testid="stPageLink"] a:hover,
+div[data-testid="stButton"] > button:hover {
+    background: var(--fsi-blue) !important;
+    color: white !important;
+}
+
+/* Page heading card */
+.page-title-card,
+.sap-section-card,
+.sap-grid-card,
+.card {
+    background: var(--fsi-card) !important;
+    border: 1px solid var(--fsi-border) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 1px 4px rgba(15,23,42,.08) !important;
+    padding: clamp(10px, 1.2vw, 16px) !important;
+    margin-bottom: 14px !important;
+    overflow-x: auto !important;
+}
+
+h1, h2, h3, h4, h5, h6,
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+div[data-testid="stMarkdownContainer"] h1,
+div[data-testid="stMarkdownContainer"] h2,
+div[data-testid="stMarkdownContainer"] h3,
+.sap-grid-card-title,
+.sap-subtitle,
+.input-section-title,
+.section-title {
+    font-family: Aptos, Arial, sans-serif !important;
+    font-weight: 900 !important;
+    color: var(--fsi-blue-dark) !important;
+}
+
+h1 { font-size: clamp(24px, 2.0vw, 30px) !important; }
+h2 { font-size: clamp(20px, 1.7vw, 26px) !important; }
+h3 { font-size: clamp(17px, 1.35vw, 22px) !important; }
+
+.sap-grid-card-title,
+.sap-subtitle,
+.input-section-title,
+.section-title {
+    font-size: clamp(16px, 1.35vw, 22px) !important;
+    line-height: 1.18 !important;
+    padding: 4px 0 8px 0 !important;
+}
+
+/* Labels and controls */
+label,
+[data-testid="stWidgetLabel"] p,
+.stSelectbox label p,
+.stTextInput label p,
+.stNumberInput label p,
+.stDateInput label p,
+.stTextArea label p,
+.stFileUploader label p,
+.stMultiSelect label p {
+    font-size: clamp(12px, 1vw, 15px) !important;
+    line-height: 1.15 !important;
+    font-weight: 900 !important;
+    color: var(--fsi-blue-dark) !important;
+}
+
+div[data-baseweb="input"] > div,
+div[data-baseweb="select"] > div,
+.stTextInput input,
+.stNumberInput input,
+.stDateInput input,
+.stTextArea textarea {
+    min-height: clamp(36px, 3.2vw, 44px) !important;
+    font-size: clamp(12px, 1vw, 15px) !important;
+    font-weight: 800 !important;
+    color: var(--fsi-text) !important;
+    background: var(--fsi-card) !important;
+    border: 1px solid var(--fsi-border) !important;
+    border-radius: 10px !important;
+    box-shadow: none !important;
+}
+
+div[data-baseweb="select"] span {
+    font-weight: 800 !important;
+    color: var(--fsi-text) !important;
+}
+
+/* Search fields must look clear */
+input[placeholder*="search" i],
+input[placeholder*="Type to search" i] {
+    background: #FFFFFF !important;
+    border: 2px solid #D9E2EC !important;
+}
+
+/* Tables */
+div[data-testid="stDataFrame"],
+div[data-testid="stDataEditor"] {
+    border: 1px solid var(--fsi-border) !important;
+    border-radius: 10px !important;
+    overflow-x: auto !important;
+}
+
+/* KPI exact cards */
+.kpi-head, .metric-head {
+    background: var(--fsi-blue) !important;
+    color: white !important;
+    min-height: 48px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    text-align:center !important;
+    font-size: 18px !important;
+    line-height: 1.12 !important;
+    font-weight: 900 !important;
+    border-radius: 4px 4px 0 0 !important;
+}
+
+.kpi-value, .metric-value {
+    min-height: 56px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    text-align:center !important;
+    font-size: 24px !important;
+    line-height: 1.12 !important;
+    font-weight: 900 !important;
+    background: white !important;
+    color: var(--fsi-text) !important;
+    border: 1px solid var(--fsi-border) !important;
+    border-top:0 !important;
+    border-radius: 0 0 4px 4px !important;
+}
+
+/* Prevent cramped columns */
+div[data-testid="column"] {
+    min-width: 0 !important;
+}
+
+/* File upload consistent */
+div[data-testid="stFileUploader"] section {
+    background:#FFFFFF !important;
+    border:1px dashed var(--fsi-border) !important;
+    border-radius:10px !important;
+}
+
+/* Footer */
+.footer {
+    text-align:center !important;
+    color: var(--fsi-muted) !important;
+    font-size: 12px !important;
+    font-weight: 900 !important;
+    margin-top: 26px !important;
+}
+
+/* Low resolution laptop */
+@media (max-width: 1366px) {
+    .block-container {
+        padding-left: 0.60rem !important;
+        padding-right: 0.60rem !important;
+    }
+    .fsi-app-title,
+    .main-title-center,
+    .topbar-title-main {
+        font-size: 32px !important;
+    }
+    .top-nav-title,
+    .custom-module-title {
+        font-size: 17px !important;
+    }
+    .top-nav-wrap [data-testid="stPageLink"] a,
+    div[data-testid="stButton"] > button {
+        min-height: 36px !important;
+        font-size: 13px !important;
+        padding: 4px 8px !important;
+    }
+    .topbar h1 {
+        font-size: 24px !important;
+    }
+}
+
+/* Tablet and mobile */
+@media (max-width: 760px) {
+    .block-container {
+        padding-left: 0.42rem !important;
+        padding-right: 0.42rem !important;
+    }
+    .fsi-app-title,
+    .main-title-center,
+    .topbar-title-main {
+        font-size: 24px !important;
+    }
+    .topbar, .top-nav-wrap, .sap-grid-card, .sap-section-card, .card {
+        padding: 8px !important;
+        margin-bottom: 10px !important;
+    }
+    h1 { font-size: 22px !important; }
+    h2 { font-size: 19px !important; }
+    h3 { font-size: 17px !important; }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+def inject_exact_ui_css():
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=swap');
+
+    :root{
+        --fsi-blue:#1B6DB5;
+        --fsi-blue-dark:#003B73;
+        --fsi-bg:#F6F8FB;
+        --fsi-card:#FFFFFF;
+        --fsi-border:#CBD5E1;
+        --fsi-soft:#EEF2F7;
+        --fsi-text:#111827;
+        --fsi-muted:#64748B;
+        --fsi-green:#15803D;
+        --fsi-red:#B72C24;
+        --fsi-orange:#EE9337;
+    }
+
+    html, body, .stApp, [data-testid="stAppViewContainer"], .main {
+        background: var(--fsi-bg) !important;
+    }
+
+    html, body, .stApp, div, span, p, label, input, textarea, select, button {
+        font-family: Aptos, Arial, sans-serif !important;
+    }
+
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        height: 0 !important;
+    }
+
+    section[data-testid="stSidebar"], div[data-testid="stSidebar"], div[data-testid="collapsedControl"]{
+        display:none !important;
+    }
+
+    .block-container {
+        max-width: 100% !important;
+        padding-top: 0.75rem !important;
+        padding-left: clamp(0.50rem, 1.3vw, 1.25rem) !important;
+        padding-right: clamp(0.50rem, 1.3vw, 1.25rem) !important;
+        padding-bottom: 1rem !important;
+    }
+
+    .exact-app-header {
+        width:100%;
+        background:#FFFFFF;
+        border:1px solid #CBD5E1;
+        border-radius:10px;
+        box-shadow:0 1px 4px rgba(15,23,42,.08);
+        padding:14px 18px;
+        margin:8px 0 14px 0;
+        display:grid;
+        grid-template-columns: 240px 1fr 260px;
+        gap:12px;
+        align-items:center;
+        box-sizing:border-box;
+    }
+
+    .exact-app-logo {
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        min-width:0;
+    }
+
+    .exact-app-logo img {
+        max-width:190px !important;
+        width:190px !important;
+        height:auto !important;
+        display:block;
+        object-fit:contain;
+    }
+
+    .exact-app-logo-fallback {
+        width:130px;
+        height:42px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        border-radius:8px;
+        border:1px solid #CBD5E1;
+        background:#EAF3FC;
+        color:#1B6DB5;
+        font-weight:900;
+        font-size:24px;
+        font-family:Montserrat, Aptos, Arial, sans-serif !important;
+    }
+
+    .fsi-app-title,
+    .main-title-center,
+    .exact-title {
+        font-family: Montserrat, Aptos, Arial, sans-serif !important;
+        font-size: 40px !important;
+        line-height: 1.05 !important;
+        font-weight: 900 !important;
+        color: #1B6DB5 !important;
+        letter-spacing: .25px !important;
+        text-align:center !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .exact-user-box {
+        text-align:right;
+        font-size:16px;
+        line-height:1.35;
+        font-weight:900;
+        color:#111827;
+        white-space:nowrap;
+    }
+
+    .exact-nav-card {
+        background:#FFFFFF;
+        border:1px solid #CBD5E1;
+        border-radius:10px;
+        box-shadow:0 1px 4px rgba(15,23,42,.08);
+        padding:12px;
+        margin:8px 0 18px 0;
+    }
+
+    .exact-nav-title,
+    .top-nav-title,
+    .custom-module-title {
+        color:#1B6DB5 !important;
+        font-size:20px !important;
+        font-weight:900 !important;
+        letter-spacing:.02em !important;
+        margin:0 0 8px 0 !important;
+        padding:0 !important;
+        font-family:Aptos, Arial, sans-serif !important;
+    }
+
+    .exact-nav-card [data-testid="stPageLink"] a,
+    .top-nav-wrap [data-testid="stPageLink"] a,
+    div[data-testid="stButton"] > button {
+        background:#EEF2F7 !important;
+        color:#1B6DB5 !important;
+        border:1px solid #CBD5E1 !important;
+        border-radius:10px !important;
+        min-height:42px !important;
+        font-size:15px !important;
+        font-weight:900 !important;
+        text-decoration:none !important;
+        box-shadow:none !important;
+        white-space:normal !important;
+        font-family:Aptos, Arial, sans-serif !important;
+    }
+
+    .exact-nav-card [data-testid="stPageLink"] a:hover,
+    .top-nav-wrap [data-testid="stPageLink"] a:hover,
+    div[data-testid="stButton"] > button:hover {
+        background:#1B6DB5 !important;
+        color:#FFFFFF !important;
+    }
+
+    .exact-page-title-card,
+    .topbar {
+        background:#FFFFFF !important;
+        border:1px solid #CBD5E1 !important;
+        border-radius:10px !important;
+        box-shadow:0 1px 4px rgba(15,23,42,.08) !important;
+        padding:14px 18px !important;
+        margin:8px 0 14px 0 !important;
+    }
+
+    .exact-page-title-card h1,
+    .topbar h1 {
+        font-family:Aptos, Arial, sans-serif !important;
+        font-size:30px !important;
+        line-height:1.15 !important;
+        font-weight:900 !important;
+        color:#003B73 !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .exact-page-subtitle,
+    .subtext {
+        color:#64748B !important;
+        font-size:14px !important;
+        font-weight:800 !important;
+        margin-top:4px !important;
+    }
+
+    .sap-grid-card,
+    .sap-section-card,
+    .card,
+    .total-box {
+        background:#FFFFFF !important;
+        border:1px solid #CBD5E1 !important;
+        border-radius:10px !important;
+        box-shadow:0 1px 4px rgba(15,23,42,.08) !important;
+        padding:clamp(10px, 1.2vw, 16px) !important;
+        margin-bottom:14px !important;
+        overflow-x:auto !important;
+    }
+
+    h1, h2, h3, h4, h5, h6,
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+    div[data-testid="stMarkdownContainer"] h1,
+    div[data-testid="stMarkdownContainer"] h2,
+    div[data-testid="stMarkdownContainer"] h3,
+    .sap-grid-card-title,
+    .sap-subtitle,
+    .input-section-title,
+    .section-title {
+        font-family:Aptos, Arial, sans-serif !important;
+        font-weight:900 !important;
+        color:#003B73 !important;
+    }
+
+    h1 { font-size:clamp(24px, 2.0vw, 30px) !important; }
+    h2 { font-size:clamp(20px, 1.7vw, 26px) !important; }
+    h3 { font-size:clamp(17px, 1.35vw, 22px) !important; }
+
+    .sap-grid-card-title,
+    .sap-subtitle,
+    .input-section-title,
+    .section-title {
+        font-size:clamp(16px, 1.35vw, 22px) !important;
+        line-height:1.18 !important;
+        padding:4px 0 8px 0 !important;
+        margin:0 0 8px 0 !important;
+    }
+
+    label,
+    [data-testid="stWidgetLabel"] p,
+    .stSelectbox label p,
+    .stTextInput label p,
+    .stNumberInput label p,
+    .stDateInput label p,
+    .stTextArea label p,
+    .stFileUploader label p,
+    .stMultiSelect label p {
+        font-size:clamp(12px, 1vw, 15px) !important;
+        line-height:1.15 !important;
+        font-weight:900 !important;
+        color:#003B73 !important;
+    }
+
+    div[data-baseweb="input"] > div,
+    div[data-baseweb="select"] > div,
+    .stTextInput input,
+    .stNumberInput input,
+    .stDateInput input,
+    .stTextArea textarea {
+        min-height:clamp(36px, 3.2vw, 44px) !important;
+        font-size:clamp(12px, 1vw, 15px) !important;
+        font-weight:800 !important;
+        color:#111827 !important;
+        background:#FFFFFF !important;
+        border:1px solid #CBD5E1 !important;
+        border-radius:10px !important;
+        box-shadow:none !important;
+    }
+
+    div[data-baseweb="select"] span {
+        font-weight:800 !important;
+        color:#111827 !important;
+    }
+
+    div[data-testid="stDataFrame"],
+    div[data-testid="stDataEditor"] {
+        border:1px solid #CBD5E1 !important;
+        border-radius:10px !important;
+        overflow-x:auto !important;
+    }
+
+    div[data-testid="column"] {
+        min-width:0 !important;
+    }
+
+    .footer {
+        text-align:center !important;
+        color:#64748B !important;
+        font-size:12px !important;
+        font-weight:900 !important;
+        margin-top:26px !important;
+    }
+
+    /* Exact login page */
+    .exact-login-shell {
+        min-height:100vh;
+        background:#F6F8FB;
+        display:flex;
+        align-items:flex-start;
+        justify-content:center;
+        padding-top:28px;
+        box-sizing:border-box;
+    }
+
+    .exact-login-card {
+        width:min(520px, 94vw);
+        background:#FFFFFF;
+        border:1px solid #CBD5E1;
+        border-radius:16px;
+        box-shadow:0 8px 28px rgba(15,23,42,.08);
+        padding:22px 32px 28px 32px;
+        text-align:center;
+        box-sizing:border-box;
+    }
+
+    .exact-login-logo img {
+        width:190px !important;
+        max-width:72% !important;
+        height:auto !important;
+        object-fit:contain;
+        margin:0 auto 8px auto;
+        display:block;
+    }
+
+    .exact-login-title {
+        font-family:Montserrat, Aptos, Arial, sans-serif !important;
+        font-size:30px !important;
+        line-height:1.08 !important;
+        font-weight:900 !important;
+        color:#1B6DB5 !important;
+        letter-spacing:.20px !important;
+        margin:0 0 8px 0 !important;
+    }
+
+    .exact-login-card div[data-testid="stTextInput"] {
+        max-width:280px !important;
+        margin-left:auto !important;
+        margin-right:auto !important;
+    }
+
+    .exact-login-card div[data-testid="stButton"] {
+        max-width:280px !important;
+        margin-left:auto !important;
+        margin-right:auto !important;
+    }
+
+    .exact-login-card div[data-testid="stButton"] > button {
+        width:100% !important;
+        background:#1B6DB5 !important;
+        color:white !important;
+        border-radius:10px !important;
+        min-height:46px !important;
+    }
+
+    @media (max-width:1366px) {
+        .exact-app-header {
+            grid-template-columns: 190px 1fr 220px;
+            padding:12px 14px;
+        }
+        .exact-app-logo img { width:155px !important; }
+        .fsi-app-title, .main-title-center, .exact-title {
+            font-size:32px !important;
+        }
+        .exact-user-box {
+            font-size:14px;
+        }
+        .exact-nav-title, .top-nav-title, .custom-module-title {
+            font-size:17px !important;
+        }
+        .exact-nav-card [data-testid="stPageLink"] a,
+        div[data-testid="stButton"] > button {
+            min-height:36px !important;
+            font-size:13px !important;
+            padding:4px 8px !important;
+        }
+        .exact-page-title-card h1,
+        .topbar h1 {
+            font-size:24px !important;
+        }
+    }
+
+    @media (max-width:760px) {
+        .exact-app-header {
+            grid-template-columns:1fr;
+            text-align:center;
+            gap:8px;
+        }
+        .exact-app-logo {
+            justify-content:center;
+        }
+        .exact-app-logo img {
+            width:130px !important;
+        }
+        .fsi-app-title, .main-title-center, .exact-title {
+            font-size:24px !important;
+        }
+        .exact-user-box {
+            text-align:center;
+            font-size:13px;
+        }
+        .sap-grid-card, .sap-section-card, .card, .topbar, .exact-page-title-card, .exact-nav-card {
+            padding:8px !important;
+            margin-bottom:10px !important;
+        }
+        .exact-login-shell {
+            padding-top:24px;
+        }
+        .exact-login-card {
+            padding:20px 18px 24px 18px;
+        }
+        .exact-login-title {
+            font-size:24px !important;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
