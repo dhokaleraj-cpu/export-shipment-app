@@ -72,6 +72,8 @@ def local_table_title(title="Coverage Plan Table"):
 
 page_setup(cleanup=False)
 
+require_page_view('dashboard')
+
 
 # --- Dashboard Coverage Cards: same calculation concept as Coverage Plan module ---
 def dash_safe_float(value, default=0.0):

@@ -2,6 +2,9 @@ from common import *
 
 page_setup()
 
+require_page_view('reports')
+show_edit_permission_status('reports')
+
 show_header('Reports with Export')
 report = st.selectbox('Select Report', ['Pallet Wise Balance Quantity', 'Original Invoice Wise Balance Quantity', 'Payment Due Summary Invoice Wise', 'Delivery Invoice Wise Summary Report', 'Monthly Sales Report - Product and Customer', 'Monthly Payment Receipt Report'])
 if report == 'Pallet Wise Balance Quantity':

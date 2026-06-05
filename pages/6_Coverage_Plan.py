@@ -336,6 +336,9 @@ def style_vertical_coverage_grid(df):
 
 page_setup()
 
+require_page_view('coverage')
+show_edit_permission_status('coverage')
+
 st.markdown("""
 <style>
 /* COVERAGE PAGE UI UPDATE */

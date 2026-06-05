@@ -2,7 +2,9 @@ from common import *
 
 page_setup()
 
-require_roles(('admin', 'super_admin'))
+require_page_edit('shipment')
+show_edit_permission_status('shipment')
+
 show_header('Shipment Entry with Pallet / Product Rows')
 suppliers = fetch_all('SELECT * FROM suppliers ORDER BY supplier_name')
 customers = fetch_all('SELECT * FROM customers ORDER BY customer_name')
@@ -208,7 +210,8 @@ else:
                 default_ship_key = next((k for k, v in ship_map.items() if v['id'] == st.session_state.edit_shipment_id), None)
             ship_keys = list(ship_map.keys())
             default_ship_index = ship_keys.index(default_ship_key) if default_ship_key in ship_keys else 0
-            edit_ship = ship_map[st.selectbox('Select Shipment to Edit', ship_keys, index=default_ship_index, key='edit_shipment_header_select')]
+            selected_ship_key = searchable_selectbox('Select Shipment to Edit', ship_keys, key='edit_shipment_header_select', default_index=default_ship_index)
+            edit_ship = ship_map[selected_ship_key]
             suppliers2 = fetch_all('SELECT * FROM suppliers ORDER BY supplier_name')
             warehouses2 = fetch_all('SELECT * FROM warehouses ORDER BY warehouse_name')
             customers2 = fetch_all('SELECT * FROM customers ORDER BY customer_name')
@@ -252,7 +255,8 @@ else:
         old_rows = fetch_all('\n                    SELECT b.id, b.fifo_row_id, s.shipment_no, s.invoice_no, b.pallet_no, b.box_no,\n                           p.product_code, p.product_name, b.po_number, b.po_date, b.po_number, b.po_date, b.original_qty, b.unit_price, b.currency, b.amount\n                    FROM shipment_boxes b\n                    JOIN shipments s ON b.shipment_id = s.id\n                    JOIN products p ON b.product_id = p.id\n                    ORDER BY b.id DESC\n                ')
         if old_rows:
             row_map = {f"{r['id']} | {r['shipment_no']} | Pallet {r['pallet_no']} | {r['product_code']} | Qty {r['original_qty']}": r for r in old_rows}
-            selected_old = row_map[st.selectbox('Select Old Row to Edit', list(row_map.keys()), key='super_edit_old_row')]
+            selected_old_key = searchable_selectbox('Select Old Row to Edit', list(row_map.keys()), key='super_edit_old_row')
+            selected_old = row_map[selected_old_key]
             e1, e2, e3, e4, e5, e6 = st.columns(6)
             with e1:
                 edit_fifo_row_id = st.number_input('Edit FIFO ID', min_value=1, value=int(selected_old.get('fifo_row_id') or selected_old.get('id') or 1), step=1)

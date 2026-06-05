@@ -49,6 +49,144 @@ init_db()
 
 st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=swap');
+
+/* GLOBAL DEVICE FRIENDLY UI - COVERAGE PLAN STYLE */
+html, body, .stApp, [class*="css"] {
+    font-family: Aptos, Arial, sans-serif !important;
+}
+
+.block-container {
+    max-width: 100% !important;
+    padding-left: clamp(0.55rem, 1.5vw, 1.25rem) !important;
+    padding-right: clamp(0.55rem, 1.5vw, 1.25rem) !important;
+    padding-top: 1.2rem !important;
+}
+
+h1, h2, h3, h4, h5, h6,
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+div[data-testid="stMarkdownContainer"] h1,
+div[data-testid="stMarkdownContainer"] h2,
+div[data-testid="stMarkdownContainer"] h3,
+.sap-grid-card-title, .sap-subtitle, .input-section-title,
+label, .stTextInput label, .stTextArea label, .stNumberInput label,
+.stDateInput label, .stSelectbox label, .stFileUploader label {
+    font-weight: 900 !important;
+}
+
+h1 { font-size: clamp(24px, 2.2vw, 34px) !important; }
+h2 { font-size: clamp(21px, 1.8vw, 28px) !important; }
+h3 { font-size: clamp(18px, 1.45vw, 23px) !important; }
+
+.sap-grid-card, .sap-section-card, .card, .topbar {
+    border-radius: 8px !important;
+    padding: clamp(10px, 1.2vw, 16px) !important;
+    margin-bottom: clamp(10px, 1.2vw, 16px) !important;
+    overflow-x: auto !important;
+}
+
+.sap-grid-card-title, .sap-subtitle, .input-section-title {
+    font-size: clamp(16px, 1.35vw, 22px) !important;
+    line-height: 1.18 !important;
+    font-weight: 900 !important;
+    color: #003B73 !important;
+}
+
+div[data-testid="stDataFrame"], div[data-testid="stDataEditor"] {
+    overflow-x: auto !important;
+}
+
+div[data-testid="column"] {
+    min-width: 0 !important;
+}
+
+div[data-baseweb="input"] > div,
+div[data-baseweb="select"] > div,
+.stTextInput input,
+.stNumberInput input,
+.stDateInput input,
+.stTextArea textarea {
+    min-height: clamp(34px, 3.2vw, 44px) !important;
+    font-size: clamp(12px, 1vw, 15px) !important;
+}
+
+div[data-testid="stButton"] > button {
+    min-height: clamp(34px, 3.2vw, 44px) !important;
+    font-size: clamp(12px, 1vw, 15px) !important;
+    font-weight: 900 !important;
+}
+
+/* App title on every page: 20% smaller, bold Montserrat */
+.fsi-app-title,
+.main-title-center {
+    font-family: Montserrat, Aptos, Arial, sans-serif !important;
+    font-size: 40px !important; /* reduced 20% from 50px */
+    line-height: 1.05 !important;
+    font-weight: 900 !important;
+    color: #1B6DB5 !important;
+    letter-spacing: .25px !important;
+}
+
+/* Top module menu responsive */
+.custom-module-title {
+    font-size: clamp(15px, 1.5vw, 20px) !important;
+    font-weight: 900 !important;
+}
+.menu-no-border-wrap + div button,
+div[data-testid="stButton"] > button {
+    white-space: normal !important;
+}
+
+/* Tablet and low-resolution laptop */
+@media (max-width: 1366px) {
+    .block-container {
+        padding-left: 0.65rem !important;
+        padding-right: 0.65rem !important;
+    }
+    .fsi-app-title,
+    .main-title-center {
+        font-size: 32px !important;
+    }
+    .topbar h1 {
+        font-size: 24px !important;
+    }
+    .user-clock, .top-user-details {
+        font-size: 14px !important;
+        line-height: 1.35 !important;
+    }
+    .sap-grid-card-title, .sap-subtitle, .input-section-title {
+        font-size: 16px !important;
+    }
+}
+
+/* Mobile / narrow tablet */
+@media (max-width: 760px) {
+    .block-container {
+        padding-left: 0.45rem !important;
+        padding-right: 0.45rem !important;
+    }
+    .fsi-app-title,
+    .main-title-center {
+        font-size: 24px !important;
+        line-height: 1.1 !important;
+    }
+    h1 { font-size: 22px !important; }
+    h2 { font-size: 20px !important; }
+    h3 { font-size: 17px !important; }
+    .topbar {
+        padding: 10px !important;
+    }
+    .sap-grid-card, .sap-section-card, .card {
+        padding: 8px !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+st.markdown("""
+<style>
 /* LOW RESOLUTION LAPTOP COMFORT UPDATE */
 @media (max-width: 1366px) {
     .block-container {
@@ -1465,15 +1603,15 @@ def top_layout():
 
     with c2:
         st.markdown("""
-        <div style="
+        <div class="fsi-app-title" style="
             width:100%;
             text-align:center;
-            font-family:Aptos, Arial, sans-serif;
-            font-size:50px;
+            font-family:Montserrat, Aptos, Arial, sans-serif;
+            font-size:40px;
             line-height:1.05;
-            font-weight:950;
+            font-weight:900;
             color:#1B6DB5;
-            letter-spacing:.4px;
+            letter-spacing:.25px;
             padding-top:4px;
             margin:0 auto;
         ">
@@ -3061,3 +3199,52 @@ def user_can_edit_page(page_key):
     if role == "user":
         return page_key in ["delivery"]
     return False
+
+
+def require_page_view(page_key):
+    """Allow page access based on Page Controls View rights, not only role."""
+    page_def = get_page_definition_by_key(page_key)
+    if page_def and not can_user_access_page(page_def):
+        st.error("You do not have View permission for this module. Contact Super Admin.")
+        st.stop()
+
+def require_page_edit(page_key):
+    """Allow data entry/edit based on Page Controls Edit rights."""
+    page_def = get_page_definition_by_key(page_key)
+    if page_def and not can_user_access_page(page_def):
+        st.error("You do not have View permission for this module. Contact Super Admin.")
+        st.stop()
+    if page_def and not can_user_edit_page(page_def):
+        st.error("You have View permission but not Edit permission for this module. Contact Super Admin.")
+        st.stop()
+
+def show_edit_permission_status(page_key):
+    """Small helper to show whether current user can edit the module."""
+    if current_user_can_edit(page_key):
+        st.caption("Edit permission: Enabled for this user.")
+    else:
+        st.caption("Edit permission: View only.")
+
+
+def searchable_selectbox(label, options, key, default_index=0, help_text=None):
+    """Visible search box + selectbox for long edit lists."""
+    options = list(options or [])
+    if not options:
+        st.warning(f"No options available for {label}.")
+        return None
+    search_value = st.text_input(
+        f"Search {label}",
+        key=f"{key}_search",
+        placeholder="Type to search...",
+        help=help_text,
+    )
+    if search_value:
+        terms = [t.strip().lower() for t in str(search_value).split() if t.strip()]
+        filtered = [opt for opt in options if all(term in str(opt).lower() for term in terms)]
+    else:
+        filtered = options
+    if not filtered:
+        st.warning("No matching records found. Showing all records.")
+        filtered = options
+    safe_index = default_index if 0 <= int(default_index or 0) < len(filtered) else 0
+    return st.selectbox(label, filtered, index=safe_index, key=key)

@@ -2,7 +2,9 @@ from common import *
 
 page_setup()
 
-require_roles(('admin', 'super_admin'))
+require_page_edit('overdue')
+show_edit_permission_status('overdue')
+
 show_header('Email Notification Settings')
 st.info('Use Gmail App Password, not your normal Gmail password. Google Account → Security → 2-Step Verification → App Passwords.')
 settings = get_notification_settings()

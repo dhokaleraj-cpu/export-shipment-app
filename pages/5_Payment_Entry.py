@@ -2,14 +2,17 @@ from common import *
 
 page_setup()
 
-require_roles(('admin', 'super_admin'))
+require_page_edit('payment')
+show_edit_permission_status('payment')
+
 show_header('Payment Entry')
 deliveries = fetch_all('\n            SELECT\n                MIN(d.id) AS id,\n                d.delivery_invoice_no,\n                s.invoice_no AS original_invoice_no,\n                s.shipment_no,\n                c.customer_name,\n                d.currency,\n                MAX(d.payment_due_date) AS payment_due_date,\n                SUM(d.sale_amount) AS total_invoice_amount,\n                COALESCE((\n                    SELECT SUM(p.payment_amount)\n                    FROM payments p\n                    JOIN customer_deliveries d2 ON p.delivery_id = d2.id\n                    WHERE d2.delivery_invoice_no = d.delivery_invoice_no\n                ), 0) AS paid_amount,\n                SUM(d.sale_amount) - COALESCE((\n                    SELECT SUM(p.payment_amount)\n                    FROM payments p\n                    JOIN customer_deliveries d2 ON p.delivery_id = d2.id\n                    WHERE d2.delivery_invoice_no = d.delivery_invoice_no\n                ), 0) AS pending_amount\n            FROM customer_deliveries d\n            JOIN customers c ON d.customer_id = c.id\n            JOIN shipments s ON d.shipment_id = s.id\n            GROUP BY d.delivery_invoice_no, s.invoice_no, s.shipment_no, c.customer_name, d.currency\n            HAVING\n    SUM(d.sale_amount) - COALESCE((\n        SELECT SUM(p.payment_amount)\n        FROM payments p\n        JOIN customer_deliveries d2 ON p.delivery_id = d2.id\n        WHERE d2.delivery_invoice_no = d.delivery_invoice_no\n    ), 0) > 0\n            ORDER BY payment_due_date\n        ')
 if not deliveries:
     st.warning('No pending delivery invoices available.')
 else:
     delivery_map = {f"Original Inv {d['original_invoice_no']} | Delivery Inv {d['delivery_invoice_no']} | {d['customer_name']} | Pending {d['pending_amount']} {d['currency']}": d for d in deliveries}
-    selected_delivery = delivery_map[st.selectbox('Select Pending Delivery Invoice', list(delivery_map.keys()), key='payment_delivery_select')]
+    selected_delivery_key = searchable_selectbox('Select Pending Delivery Invoice', list(delivery_map.keys()), key='payment_delivery_select')
+    selected_delivery = delivery_map[selected_delivery_key]
     st.markdown(f"""\n            <div class="card" style="margin-bottom:16px;">\n                <h3 style="margin:0;color:#003B73;">Payment Summary</h3>\n                <table style="width:100%;font-family:Aptos,Arial,sans-serif;font-weight:700;margin-top:10px;">\n                    <tr>\n                        <td><b>Original Invoice</b></td><td>{selected_delivery['original_invoice_no']}</td>\n                        <td><b>Delivery Invoice</b></td><td>{selected_delivery['delivery_invoice_no']}</td>\n                    </tr>\n                    <tr>\n                        <td><b>Customer</b></td><td>{selected_delivery['customer_name']}</td>\n                        <td><b>Due Date</b></td><td>{selected_delivery['payment_due_date']}</td>\n                    </tr>\n                    <tr>\n                        <td><b>Invoice Amount</b></td><td>{selected_delivery['total_invoice_amount']:,.2f} {selected_delivery['currency']}</td>\n                        <td><b style="color:#047857;">Received Amount</b></td><td style="color:#047857;font-weight:900;">{selected_delivery['paid_amount']:,.2f}</td>\n                    </tr>\n                    <tr>\n                        <td><b style="color:#b91c1c;">Pending Amount</b></td><td style="color:#b91c1c;font-weight:900;">{selected_delivery['pending_amount']:,.2f}</td>\n                        <td><b>Shipment No</b></td><td>{selected_delivery['shipment_no']}</td>\n                    </tr>\n                </table>\n            </div>\n            """, unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
@@ -50,7 +53,8 @@ if st.session_state.user['role'] == 'super_admin':
     old_payments = fetch_all('\n                SELECT p.*, d.delivery_invoice_no, c.customer_name, s.invoice_no AS original_invoice_no\n                FROM payments p\n                JOIN customer_deliveries d ON p.delivery_id = d.id\n                JOIN customers c ON d.customer_id = c.id\n                JOIN shipments s ON d.shipment_id = s.id\n                ORDER BY p.id DESC\n            ')
     if old_payments:
         pmap = {f"{p['id']} | {p['delivery_invoice_no']} | Amount {p['payment_amount']}": p for p in old_payments}
-        ep = pmap[st.selectbox('Select Payment to Edit', list(pmap.keys()), key='edit_payment_select')]
+        selected_payment_key = searchable_selectbox('Select Payment to Edit', list(pmap.keys()), key='edit_payment_select')
+        ep = pmap[selected_payment_key]
         pc1, pc2 = st.columns(2)
         with pc1:
             ep_date = st.text_input('Edit Payment Date YYYY-MM-DD', ep['payment_received_date'] or '', key='edit_payment_date')

@@ -104,69 +104,8 @@ from common import *
 
 page_setup()
 
-
-st.markdown("""
-<style>
-/* DELIVERY MODULE FONT + SPACING UPDATE */
-/* Reduce heading, subheading and title font sizes by 20% on Delivery page only */
-.delivery-page-scope h1,
-.delivery-page-scope h2,
-.delivery-page-scope h3 {
-    font-size: 80% !important;
-}
-
-.delivery-page-scope .sap-grid-card-title,
-.delivery-page-scope .sap-subtitle,
-.delivery-page-scope .sap-section-title,
-.delivery-page-scope .section-title,
-.delivery-page-scope .stMarkdown h1,
-.delivery-page-scope .stMarkdown h2,
-.delivery-page-scope .stMarkdown h3 {
-    font-size: 80% !important;
-}
-
-/* Streamlit rendered headings on this page */
-h1, h2, h3 {
-    font-size: 80% !important;
-}
-
-/* App custom card titles on Delivery page */
-.sap-grid-card-title {
-    font-size: 18px !important;
-    line-height: 1.18 !important;
-}
-
-.sap-subtitle {
-    font-size: 18px !important;
-    line-height: 1.18 !important;
-}
-
-/* Add little space above Original Invoice Number with Shipment Number section */
-.delivery-original-invoice-space {
-    height: 18px !important;
-}
-
-/* Low-resolution readability */
-@media (max-width: 1366px) {
-    .sap-grid-card-title {
-        font-size: 16px !important;
-    }
-    .sap-subtitle {
-        font-size: 16px !important;
-    }
-    h1 {
-        font-size: 24px !important;
-    }
-    h2 {
-        font-size: 20px !important;
-    }
-    h3 {
-        font-size: 17px !important;
-    }
-}
-</style>
-""", unsafe_allow_html=True)
-
+require_page_edit('delivery')
+show_edit_permission_status('delivery')
 
 show_header('Delivery Entry', 'Invoice-style FIFO delivery form with multi-pallet selection')
 
@@ -206,8 +145,7 @@ else:
     ctop1, ctop2 = st.columns(2)
     with ctop1:
         st.markdown('<div class="input-section-title">Original Invoice Number with Shipment Number</div>', unsafe_allow_html=True)
-        st.markdown('<div class="delivery-original-invoice-space"></div>', unsafe_allow_html=True)  # DELIVERY_ORIGINAL_INVOICE_SPACING_MARKER
-    selected_invoice = st.selectbox('Original Invoice Number with Shipment Number', list(inv_map.keys()), key='delivery_original_invoice_ship', label_visibility='collapsed')
+        selected_invoice = st.selectbox('Original Invoice Number with Shipment Number', list(inv_map.keys()), key='delivery_original_invoice_ship', label_visibility='collapsed')
     invoice_top_col1, invoice_top_col2 = st.columns(2)
     with invoice_top_col1:
         delivery_invoice_no = st.text_input('Delivery Invoice Number', key='delivery_invoice_v10')
@@ -342,7 +280,7 @@ if not delivery_invoice_rows:
 else:
     invoice_options = [f"{r['delivery_invoice_no']} | Qty {r['total_qty']:,.2f} | Amount {r['total_amount']:,.2f} {r['currency']} | Due {format_date_ddmmyyyy(r['payment_due_date'])}" for r in delivery_invoice_rows]
     option_to_invoice = {opt: r['delivery_invoice_no'] for opt, r in zip(invoice_options, delivery_invoice_rows)}
-    selected_delivery_invoice_label = st.selectbox('Select Delivery Invoice No', invoice_options, key='selected_delivery_invoice_for_details')
+    selected_delivery_invoice_label = searchable_selectbox('Select Delivery Invoice No', invoice_options, key='selected_delivery_invoice_for_details')
     selected_delivery_invoice_no = option_to_invoice[selected_delivery_invoice_label]
     summary_rows = []
     for r in delivery_invoice_rows:
@@ -422,6 +360,133 @@ if st.session_state.user['role'] == 'super_admin':
             execute_query('\n                        UPDATE customer_deliveries\n                        SET delivery_invoice_no=?, delivery_date=?, delivered_qty=?, unit_price=?, currency=?, sale_amount=?, payment_due_date=?, vehicle_number=?, asn_number=?, asn_date=?, packaging_details=?\n                        WHERE id=?\n                    ', (ed_inv, ed_date, ed_qty, ed_price, ed_currency, ed_amount, ed_due, ed_vehicle, ed_asn_no, ed_asn_date or None, ed_packaging, ed['id']))
             st.success('Delivery updated successfully.')
             st.rerun()
+
+
+
+st.divider()
+st.markdown('<div class="sap-subtitle">Export Saved Delivery Invoice</div>', unsafe_allow_html=True)
+try:
+    saved_delivery_invoices = fetch_all("""
+        SELECT d.delivery_invoice_no,
+               MIN(d.id) AS first_id,
+               MAX(d.delivery_date) AS delivery_date,
+               MAX(d.payment_due_date) AS payment_due_date,
+               MAX(d.vehicle_number) AS vehicle_number,
+               MAX(d.asn_number) AS asn_number,
+               MAX(d.asn_date) AS asn_date,
+               MAX(d.packaging_details) AS packaging_details,
+               c.customer_name,
+               s.invoice_no AS original_invoice_no,
+               s.shipment_no,
+               d.currency,
+               SUM(d.delivered_qty) AS total_qty,
+               SUM(d.sale_amount) AS total_amount,
+               COUNT(*) AS product_rows
+        FROM customer_deliveries d
+        JOIN customers c ON d.customer_id = c.id
+        JOIN shipments s ON d.shipment_id = s.id
+        GROUP BY d.delivery_invoice_no, c.customer_name, s.invoice_no, s.shipment_no, d.currency
+        ORDER BY first_id DESC
+        LIMIT 100
+    """)
+    if not saved_delivery_invoices:
+        st.info("No saved delivery invoices available for export.")
+    else:
+        saved_invoice_map = {
+            f"{r['delivery_invoice_no']} | Original {r['original_invoice_no']} | {r['customer_name']} | Qty {r['total_qty']}": r
+            for r in saved_delivery_invoices
+        }
+        selected_saved_invoice_key = searchable_selectbox(
+            "Select Saved Delivery Invoice for Export",
+            list(saved_invoice_map.keys()),
+            key="saved_delivery_invoice_export_select",
+        )
+        selected_saved_invoice = saved_invoice_map[selected_saved_invoice_key]
+
+        saved_line_rows = fetch_all("""
+            SELECT d.*, b.pallet_no, b.box_no, b.fifo_row_id, p.product_code, p.product_name,
+                   COALESCE(d.po_number, b.po_number, s.po_number) AS po_number_linked,
+                   COALESCE(d.po_date, b.po_date, s.po_date) AS po_date_linked,
+                   stm.ship_to_name, stm.ship_to_id, stm.addressline1, stm.addressline2, stm.addressline3,
+                   stm.vendor_gstin, stm.vendor_phone, stm.vendor_email
+            FROM customer_deliveries d
+            JOIN shipment_boxes b ON d.box_id = b.id
+            JOIN shipments s ON d.shipment_id = s.id
+            JOIN products p ON b.product_id = p.id
+            LEFT JOIN ship_to_masters stm ON d.ship_to_master_id = stm.id
+            WHERE d.delivery_invoice_no=?
+            ORDER BY COALESCE(b.fifo_row_id, b.id), b.pallet_no
+        """, (selected_saved_invoice["delivery_invoice_no"],))
+
+        if saved_line_rows:
+            first_line = saved_line_rows[0]
+            export_invoice = {
+                "delivery_invoice_no": selected_saved_invoice.get("delivery_invoice_no", ""),
+                "delivery_date": str(selected_saved_invoice.get("delivery_date") or ""),
+                "payment_due_date": str(selected_saved_invoice.get("payment_due_date") or ""),
+                "customer_name": selected_saved_invoice.get("customer_name", ""),
+                "original_invoice_no": selected_saved_invoice.get("original_invoice_no", ""),
+                "shipment_no": selected_saved_invoice.get("shipment_no", ""),
+                "vehicle_number": selected_saved_invoice.get("vehicle_number", ""),
+                "asn_number": selected_saved_invoice.get("asn_number", ""),
+                "asn_date": str(selected_saved_invoice.get("asn_date") or ""),
+                "packaging_details": selected_saved_invoice.get("packaging_details", ""),
+                "ship_to_name": first_line.get("ship_to_name", ""),
+                "ship_to_id": first_line.get("ship_to_id", ""),
+                "ship_to_addressline1": first_line.get("addressline1", ""),
+                "ship_to_addressline2": first_line.get("addressline2", ""),
+                "ship_to_addressline3": first_line.get("addressline3", ""),
+                "ship_to_vendor_gstin": first_line.get("vendor_gstin", ""),
+                "ship_to_vendor_phone": first_line.get("vendor_phone", ""),
+                "ship_to_vendor_email": first_line.get("vendor_email", ""),
+            }
+
+            export_line_items = []
+            for row in saved_line_rows:
+                export_line_items.append({
+                    "fifo_row_id": row.get("fifo_row_id"),
+                    "product_code": row.get("product_code", ""),
+                    "product_name": row.get("product_name", ""),
+                    "pallet_no": row.get("pallet_no", ""),
+                    "box_no": row.get("box_no", ""),
+                    "po_number": row.get("po_number_linked", ""),
+                    "po_date": format_date_ddmmyyyy(row.get("po_date_linked")) if row.get("po_date_linked") else "",
+                    "qty": row.get("delivered_qty") or 0,
+                    "price": row.get("unit_price") or 0,
+                    "currency": row.get("currency") or "",
+                    "amount": row.get("sale_amount") or 0,
+                })
+
+            exp1, exp2, exp3 = st.columns(3)
+            with exp1:
+                st.download_button(
+                    "Export Delivery Invoice PDF",
+                    delivery_invoice_pdf_bytes(export_invoice, export_line_items),
+                    file_name=f"delivery_invoice_{selected_saved_invoice['delivery_invoice_no']}.pdf",
+                    mime="application/pdf",
+                    key="saved_delivery_invoice_pdf_export",
+                )
+            with exp2:
+                st.download_button(
+                    "Export Delivery Invoice Excel",
+                    delivery_invoice_excel_bytes(export_invoice, export_line_items),
+                    file_name=f"delivery_invoice_{selected_saved_invoice['delivery_invoice_no']}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="saved_delivery_invoice_excel_export",
+                )
+            with exp3:
+                st.download_button(
+                    "Export HTML for Print/JPEG",
+                    delivery_invoice_print_html(export_invoice, export_line_items).encode("utf-8"),
+                    file_name=f"delivery_invoice_{selected_saved_invoice['delivery_invoice_no']}.html",
+                    mime="text/html",
+                    key="saved_delivery_invoice_html_export",
+                )
+            with st.expander("Preview Selected Delivery Invoice", expanded=False):
+                components.html(delivery_invoice_print_html(export_invoice, export_line_items), height=900, scrolling=True)
+except Exception as export_error:
+    st.warning(f"Saved delivery invoice export could not load: {export_error}")
+
 
 st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)
 

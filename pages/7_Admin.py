@@ -2,7 +2,9 @@ from common import *
 
 page_setup()
 
-require_roles(('admin', 'super_admin'))
+require_page_view('admin')
+show_edit_permission_status('admin')
+
 
 # --- Default View/Edit rules for Admin Page Controls ---
 def _role_default_view(page, role):
@@ -81,7 +83,7 @@ with admin_tabs[2]:
         st.warning('No users found.')
     else:
         user_labels = [f"{u['username']} | {u['role']}" for u in users_for_access]
-        selected_user_label = st.selectbox('Select User for Page Access', user_labels, key='page_access_user_select')
+        selected_user_label = searchable_selectbox('Select User for Page Access', user_labels, key='page_access_user_select')
         selected_username = selected_user_label.split(' | ')[0]
         selected_user_row = next((u for u in users_for_access if u['username'] == selected_username), None)
         existing_perms = get_user_page_permissions(selected_username)

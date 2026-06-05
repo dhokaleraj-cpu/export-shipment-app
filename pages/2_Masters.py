@@ -2,6 +2,9 @@ from common import *
 
 page_setup()
 
+require_page_edit('masters')
+show_edit_permission_status('masters')
+
 show_header('Masters')
 mtab = st.tabs(['Customer', 'Supplier', 'Warehouse', 'Product', 'Payment Terms', 'Incoterm', 'Forwarder', 'Ship To'])
 with mtab[0]:
