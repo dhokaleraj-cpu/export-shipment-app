@@ -6,19 +6,306 @@ require_page_view('reports')
 show_edit_permission_status('reports')
 
 show_header('Reports with Export')
-report = st.selectbox('Select Report', ['Pallet Wise Balance Quantity', 'Original Invoice Wise Balance Quantity', 'Payment Due Summary Invoice Wise', 'Delivery Invoice Wise Summary Report', 'Monthly Sales Report - Product and Customer', 'Monthly Payment Receipt Report'])
-if report == 'Pallet Wise Balance Quantity':
-    rows = fetch_all('\n                SELECT s.shipment_no, s.invoice_no, b.pallet_no, b.box_no, p.product_code, p.product_name,\n                       b.original_qty, b.unit_price, b.currency, b.amount,\n                       IFNULL(SUM(d.delivered_qty),0) delivered_qty,\n                       b.original_qty - IFNULL(SUM(d.delivered_qty),0) balance_qty\n                FROM shipment_boxes b\n                JOIN shipments s ON b.shipment_id = s.id\n                JOIN products p ON b.product_id = p.id\n                LEFT JOIN customer_deliveries d ON b.id = d.box_id\n               GROUP BY\n    b.id,\n    s.shipment_no,\n    s.invoice_no,\n    b.pallet_no,\n    b.box_no,\n    p.product_code,\n    p.product_name,\n    b.original_qty,\n    b.unit_price,\n    b.currency,\n    b.amount\n                ORDER BY s.shipment_no, b.pallet_no, b.box_no\n            ')
+
+report_options = [
+    'Product Wise and Delivery Invoice Wise Report for Original Invoice Number',
+    'Product Wise Stock Report',
+    'Product Wise Sale Report',
+    'Original Invoice Wise Sale Report',
+    'Warehouse Wise Sale Report',
+    'Balance Quantity Report Product Wise',
+    'Original Invoice Number Wise Payment Due',
+    'Original Invoice Number Wise Balance Quantity Product Wise',
+    'Pallet Wise Balance Quantity',
+    'Original Invoice Wise Balance Quantity',
+    'Payment Due Summary Invoice Wise',
+    'Delivery Invoice Wise Summary Report',
+    'Monthly Sales Report - Product and Customer',
+    'Monthly Payment Receipt Report',
+]
+
+report = searchable_selectbox('Select Report', report_options, key='reports_select_report')
+
+st.markdown('<div class="sap-grid-card"><div class="sap-grid-card-title">Report Filters</div>', unsafe_allow_html=True)
+f1, f2, f3 = st.columns(3)
+with f1:
+    product_filter = st.text_input('Search Product Code / Name', key='reports_product_filter')
+with f2:
+    invoice_filter = st.text_input('Search Original Invoice Number', key='reports_invoice_filter')
+with f3:
+    customer_filter = st.text_input('Search Customer / Warehouse', key='reports_customer_filter')
+st.markdown('</div>', unsafe_allow_html=True)
+
+rows = []
+
+if report == 'Product Wise and Delivery Invoice Wise Report for Original Invoice Number':
+    rows = fetch_all("""
+        SELECT s.invoice_no AS original_invoice_no,
+               d.delivery_invoice_no,
+               p.product_code,
+               p.product_name,
+               c.customer_name,
+               d.currency,
+               SUM(d.delivered_qty) AS delivered_qty,
+               SUM(d.sale_amount) AS sale_amount,
+               MIN(d.delivery_date) AS first_delivery_date,
+               MAX(d.delivery_date) AS last_delivery_date
+        FROM customer_deliveries d
+        JOIN shipments s ON d.shipment_id = s.id
+        JOIN shipment_boxes b ON d.box_id = b.id
+        JOIN products p ON b.product_id = p.id
+        JOIN customers c ON d.customer_id = c.id
+        WHERE (? = '' OR LOWER(p.product_code || ' ' || p.product_name) LIKE LOWER(CONCAT('%', ?, '%')))
+          AND (? = '' OR LOWER(s.invoice_no) LIKE LOWER(CONCAT('%', ?, '%')))
+          AND (? = '' OR LOWER(c.customer_name) LIKE LOWER(CONCAT('%', ?, '%')))
+        GROUP BY s.invoice_no, d.delivery_invoice_no, p.product_code, p.product_name, c.customer_name, d.currency
+        ORDER BY s.invoice_no, d.delivery_invoice_no, p.product_code
+    """, (product_filter, product_filter, invoice_filter, invoice_filter, customer_filter, customer_filter))
+
+elif report == 'Product Wise Stock Report':
+    rows = fetch_all("""
+        SELECT p.product_code,
+               p.product_name,
+               COALESCE(SUM(b.original_qty),0) AS shipment_qty,
+               COALESCE(SUM(d.delivered_qty),0) AS delivered_qty,
+               COALESCE(SUM(b.original_qty),0) - COALESCE(SUM(d.delivered_qty),0) AS stock_balance_qty,
+               b.currency,
+               COALESCE(SUM((b.original_qty - COALESCE(d.delivered_qty,0)) * COALESCE(b.unit_price,0)),0) AS stock_balance_amount
+        FROM shipment_boxes b
+        JOIN products p ON b.product_id = p.id
+        LEFT JOIN (
+            SELECT box_id, SUM(delivered_qty) AS delivered_qty
+            FROM customer_deliveries
+            GROUP BY box_id
+        ) d ON b.id = d.box_id
+        WHERE (? = '' OR LOWER(p.product_code || ' ' || p.product_name) LIKE LOWER(CONCAT('%', ?, '%')))
+        GROUP BY p.product_code, p.product_name, b.currency
+        ORDER BY p.product_code
+    """, (product_filter, product_filter))
+
+elif report == 'Product Wise Sale Report':
+    rows = fetch_all("""
+        SELECT p.product_code,
+               p.product_name,
+               c.customer_name,
+               d.currency,
+               SUM(d.delivered_qty) AS sold_qty,
+               SUM(d.sale_amount) AS sale_amount
+        FROM customer_deliveries d
+        JOIN shipment_boxes b ON d.box_id = b.id
+        JOIN products p ON b.product_id = p.id
+        JOIN customers c ON d.customer_id = c.id
+        WHERE (? = '' OR LOWER(p.product_code || ' ' || p.product_name) LIKE LOWER(CONCAT('%', ?, '%')))
+          AND (? = '' OR LOWER(c.customer_name) LIKE LOWER(CONCAT('%', ?, '%')))
+        GROUP BY p.product_code, p.product_name, c.customer_name, d.currency
+        ORDER BY p.product_code, c.customer_name
+    """, (product_filter, product_filter, customer_filter, customer_filter))
+
+elif report == 'Original Invoice Wise Sale Report':
+    rows = fetch_all("""
+        SELECT s.invoice_no AS original_invoice_no,
+               s.shipment_no,
+               c.customer_name,
+               d.currency,
+               SUM(d.delivered_qty) AS sold_qty,
+               SUM(d.sale_amount) AS sale_amount,
+               COUNT(DISTINCT d.delivery_invoice_no) AS delivery_invoice_count
+        FROM customer_deliveries d
+        JOIN shipments s ON d.shipment_id = s.id
+        JOIN customers c ON d.customer_id = c.id
+        WHERE (? = '' OR LOWER(s.invoice_no) LIKE LOWER(CONCAT('%', ?, '%')))
+          AND (? = '' OR LOWER(c.customer_name) LIKE LOWER(CONCAT('%', ?, '%')))
+        GROUP BY s.invoice_no, s.shipment_no, c.customer_name, d.currency
+        ORDER BY s.invoice_no
+    """, (invoice_filter, invoice_filter, customer_filter, customer_filter))
+
+elif report == 'Warehouse Wise Sale Report':
+    rows = fetch_all("""
+        SELECT w.warehouse_name,
+               c.customer_name,
+               d.currency,
+               SUM(d.delivered_qty) AS sold_qty,
+               SUM(d.sale_amount) AS sale_amount
+        FROM customer_deliveries d
+        JOIN shipments s ON d.shipment_id = s.id
+        LEFT JOIN warehouses w ON s.warehouse_id = w.id
+        JOIN customers c ON d.customer_id = c.id
+        WHERE (? = '' OR LOWER(COALESCE(w.warehouse_name,'') || ' ' || c.customer_name) LIKE LOWER(CONCAT('%', ?, '%')))
+        GROUP BY w.warehouse_name, c.customer_name, d.currency
+        ORDER BY w.warehouse_name, c.customer_name
+    """, (customer_filter, customer_filter))
+
+elif report == 'Balance Quantity Report Product Wise':
+    rows = fetch_all("""
+        SELECT p.product_code,
+               p.product_name,
+               b.currency,
+               COALESCE(SUM(b.original_qty),0) AS original_qty,
+               COALESCE(SUM(d.delivered_qty),0) AS delivered_qty,
+               COALESCE(SUM(b.original_qty),0) - COALESCE(SUM(d.delivered_qty),0) AS balance_qty
+        FROM shipment_boxes b
+        JOIN products p ON b.product_id = p.id
+        LEFT JOIN (
+            SELECT box_id, SUM(delivered_qty) AS delivered_qty
+            FROM customer_deliveries
+            GROUP BY box_id
+        ) d ON b.id = d.box_id
+        WHERE (? = '' OR LOWER(p.product_code || ' ' || p.product_name) LIKE LOWER(CONCAT('%', ?, '%')))
+        GROUP BY p.product_code, p.product_name, b.currency
+        ORDER BY p.product_code
+    """, (product_filter, product_filter))
+
+elif report == 'Original Invoice Number Wise Payment Due':
+    rows = fetch_all("""
+        SELECT s.invoice_no AS original_invoice_no,
+               s.shipment_no,
+               c.customer_name,
+               d.currency,
+               MIN(d.delivery_date) AS first_delivery_date,
+               MAX(d.payment_due_date) AS payment_due_date,
+               SUM(d.sale_amount) AS sale_amount,
+               COALESCE(SUM(pay.payment_amount),0) AS paid_amount,
+               SUM(d.sale_amount) - COALESCE(SUM(pay.payment_amount),0) AS pending_amount,
+               CASE
+                   WHEN SUM(d.sale_amount) - COALESCE(SUM(pay.payment_amount),0) <= 0 THEN 'Paid'
+                   WHEN MAX(d.payment_due_date)::date < CURRENT_DATE THEN 'Overdue'
+                   ELSE 'Pending'
+               END AS payment_status
+        FROM customer_deliveries d
+        JOIN shipments s ON d.shipment_id = s.id
+        JOIN customers c ON d.customer_id = c.id
+        LEFT JOIN (
+            SELECT delivery_id, SUM(payment_amount) AS payment_amount
+            FROM payments
+            GROUP BY delivery_id
+        ) pay ON d.id = pay.delivery_id
+        WHERE (? = '' OR LOWER(s.invoice_no) LIKE LOWER(CONCAT('%', ?, '%')))
+          AND (? = '' OR LOWER(c.customer_name) LIKE LOWER(CONCAT('%', ?, '%')))
+        GROUP BY s.invoice_no, s.shipment_no, c.customer_name, d.currency
+        ORDER BY payment_due_date
+    """, (invoice_filter, invoice_filter, customer_filter, customer_filter))
+
+elif report == 'Original Invoice Number Wise Balance Quantity Product Wise':
+    rows = fetch_all("""
+        SELECT s.invoice_no AS original_invoice_no,
+               s.shipment_no,
+               p.product_code,
+               p.product_name,
+               b.currency,
+               COALESCE(SUM(b.original_qty),0) AS original_qty,
+               COALESCE(SUM(d.delivered_qty),0) AS delivered_qty,
+               COALESCE(SUM(b.original_qty),0) - COALESCE(SUM(d.delivered_qty),0) AS balance_qty
+        FROM shipment_boxes b
+        JOIN shipments s ON b.shipment_id = s.id
+        JOIN products p ON b.product_id = p.id
+        LEFT JOIN (
+            SELECT box_id, SUM(delivered_qty) AS delivered_qty
+            FROM customer_deliveries
+            GROUP BY box_id
+        ) d ON b.id = d.box_id
+        WHERE (? = '' OR LOWER(p.product_code || ' ' || p.product_name) LIKE LOWER(CONCAT('%', ?, '%')))
+          AND (? = '' OR LOWER(s.invoice_no) LIKE LOWER(CONCAT('%', ?, '%')))
+        GROUP BY s.invoice_no, s.shipment_no, p.product_code, p.product_name, b.currency
+        ORDER BY s.invoice_no, p.product_code
+    """, (product_filter, product_filter, invoice_filter, invoice_filter))
+
+elif report == 'Pallet Wise Balance Quantity':
+    rows = fetch_all("""
+        SELECT s.shipment_no, s.invoice_no, b.fifo_row_id, b.pallet_no, b.box_no, p.product_code, p.product_name,
+               b.original_qty, b.unit_price, b.currency, b.amount,
+               COALESCE(d.delivered_qty,0) AS delivered_qty,
+               b.original_qty - COALESCE(d.delivered_qty,0) AS balance_qty
+        FROM shipment_boxes b
+        JOIN shipments s ON b.shipment_id = s.id
+        JOIN products p ON b.product_id = p.id
+        LEFT JOIN (
+            SELECT box_id, SUM(delivered_qty) AS delivered_qty
+            FROM customer_deliveries
+            GROUP BY box_id
+        ) d ON b.id = d.box_id
+        GROUP BY b.id, s.shipment_no, s.invoice_no, b.fifo_row_id, b.pallet_no, b.box_no, p.product_code,
+                 p.product_name, b.original_qty, b.unit_price, b.currency, b.amount, d.delivered_qty
+        ORDER BY COALESCE(b.fifo_row_id,b.id), s.shipment_no, b.pallet_no
+    """)
+
 elif report == 'Original Invoice Wise Balance Quantity':
-    rows = fetch_all('\n                SELECT s.invoice_no, s.shipment_no, p.product_code, p.product_name,\n                       SUM(b.original_qty) original_qty, SUM(b.amount) amount,\n                       IFNULL(SUM(d.delivered_qty),0) delivered_qty,\n                       SUM(b.original_qty) - IFNULL(SUM(d.delivered_qty),0) balance_qty\n                FROM shipment_boxes b\n                JOIN shipments s ON b.shipment_id = s.id\n                JOIN products p ON b.product_id = p.id\n                LEFT JOIN customer_deliveries d ON b.id = d.box_id\n                GROUP BY s.invoice_no, s.shipment_no, p.product_code, p.product_name\n                ORDER BY s.invoice_no\n            ')
+    rows = fetch_all("""
+        SELECT s.invoice_no, s.shipment_no, p.product_code, p.product_name,
+               SUM(b.original_qty) AS original_qty, SUM(b.amount) AS amount,
+               COALESCE(SUM(d.delivered_qty),0) AS delivered_qty,
+               SUM(b.original_qty) - COALESCE(SUM(d.delivered_qty),0) AS balance_qty
+        FROM shipment_boxes b
+        JOIN shipments s ON b.shipment_id = s.id
+        JOIN products p ON b.product_id = p.id
+        LEFT JOIN (
+            SELECT box_id, SUM(delivered_qty) AS delivered_qty
+            FROM customer_deliveries
+            GROUP BY box_id
+        ) d ON b.id = d.box_id
+        GROUP BY s.invoice_no, s.shipment_no, p.product_code, p.product_name
+        ORDER BY s.invoice_no
+    """)
+
 elif report == 'Payment Due Summary Invoice Wise':
-    rows = fetch_all("\n                SELECT d.delivery_invoice_no, c.customer_name, d.delivery_date, d.payment_due_date,\n                       pt.term_name, SUM(d.delivered_qty) delivered_qty, d.currency, SUM(d.sale_amount) sale_amount,\n                       IFNULL(SUM(p.payment_amount),0) paid_amount,\n                       SUM(d.sale_amount) - IFNULL(SUM(p.payment_amount),0) pending_amount,\n                       CASE WHEN SUM(d.sale_amount) - IFNULL(SUM(p.payment_amount),0) <= 0 THEN 'Paid'\n                            WHEN date(MAX(d.payment_due_date)) < date('now') THEN 'Overdue'\n                            ELSE 'Pending' END payment_status\n                FROM customer_deliveries d\n                JOIN customers c ON d.customer_id = c.id\n                LEFT JOIN payment_terms pt ON d.payment_term_id = pt.id\n                LEFT JOIN payments p ON d.id = p.delivery_id\n                GROUP BY d.delivery_invoice_no, c.customer_name, d.currency\n                ORDER BY d.payment_due_date\n            ")
+    rows = fetch_all("""
+        SELECT d.delivery_invoice_no, c.customer_name, MIN(d.delivery_date) AS delivery_date, MAX(d.payment_due_date) AS payment_due_date,
+               pt.term_name, SUM(d.delivered_qty) AS delivered_qty, d.currency, SUM(d.sale_amount) AS sale_amount,
+               COALESCE(SUM(pay.payment_amount),0) AS paid_amount,
+               SUM(d.sale_amount) - COALESCE(SUM(pay.payment_amount),0) AS pending_amount,
+               CASE WHEN SUM(d.sale_amount) - COALESCE(SUM(pay.payment_amount),0) <= 0 THEN 'Paid'
+                    WHEN MAX(d.payment_due_date)::date < CURRENT_DATE THEN 'Overdue'
+                    ELSE 'Pending' END AS payment_status
+        FROM customer_deliveries d
+        JOIN customers c ON d.customer_id = c.id
+        LEFT JOIN payment_terms pt ON d.payment_term_id = pt.id
+        LEFT JOIN (
+            SELECT delivery_id, SUM(payment_amount) AS payment_amount
+            FROM payments
+            GROUP BY delivery_id
+        ) pay ON d.id = pay.delivery_id
+        GROUP BY d.delivery_invoice_no, c.customer_name, pt.term_name, d.currency
+        ORDER BY payment_due_date
+    """)
+
 elif report == 'Delivery Invoice Wise Summary Report':
-    rows = fetch_all('\n                SELECT d.delivery_invoice_no, c.customer_name, s.invoice_no AS original_invoice_no,\n                       s.shipment_no, MIN(d.delivery_date) delivery_date, MAX(d.payment_due_date) payment_due_date,\n                       d.currency, SUM(d.delivered_qty) total_qty, SUM(d.sale_amount) total_amount,\n                       COUNT(d.id) product_rows\n                FROM customer_deliveries d\n                JOIN customers c ON d.customer_id = c.id\n                JOIN shipments s ON d.shipment_id = s.id\n                GROUP BY d.delivery_invoice_no, c.customer_name, s.invoice_no, s.shipment_no, d.currency\n                ORDER BY MIN(d.id) DESC\n            ')
+    rows = fetch_all("""
+        SELECT d.delivery_invoice_no, c.customer_name, s.invoice_no AS original_invoice_no,
+               s.shipment_no, MIN(d.delivery_date) AS delivery_date, MAX(d.payment_due_date) AS payment_due_date,
+               d.currency, SUM(d.delivered_qty) AS total_qty, SUM(d.sale_amount) AS total_amount,
+               COUNT(d.id) AS product_rows
+        FROM customer_deliveries d
+        JOIN customers c ON d.customer_id = c.id
+        JOIN shipments s ON d.shipment_id = s.id
+        GROUP BY d.delivery_invoice_no, c.customer_name, s.invoice_no, s.shipment_no, d.currency
+        ORDER BY MIN(d.id) DESC
+    """)
+
 elif report == 'Monthly Sales Report - Product and Customer':
-    rows = fetch_all("\n                SELECT strftime('%Y-%m', d.delivery_date) sales_month,\n                       c.customer_name, p.product_code, p.product_name, d.currency,\n                       SUM(d.delivered_qty) total_qty,\n                       SUM(d.sale_amount) total_sales\n                FROM customer_deliveries d\n                JOIN customers c ON d.customer_id = c.id\n                JOIN shipment_boxes b ON d.box_id = b.id\n                JOIN products p ON b.product_id = p.id\n                GROUP BY sales_month, c.customer_name, p.product_code, p.product_name, d.currency\n                ORDER BY sales_month DESC, c.customer_name, p.product_code\n            ")
+    rows = fetch_all("""
+        SELECT to_char(d.delivery_date::date, 'YYYY-MM') AS sales_month,
+               c.customer_name, p.product_code, p.product_name, d.currency,
+               SUM(d.delivered_qty) AS total_qty,
+               SUM(d.sale_amount) AS total_sales
+        FROM customer_deliveries d
+        JOIN customers c ON d.customer_id = c.id
+        JOIN shipment_boxes b ON d.box_id = b.id
+        JOIN products p ON b.product_id = p.id
+        GROUP BY sales_month, c.customer_name, p.product_code, p.product_name, d.currency
+        ORDER BY sales_month DESC, c.customer_name, p.product_code
+    """)
+
 else:
-    rows = fetch_all("\n                SELECT strftime('%Y-%m', p.payment_received_date) receipt_month,\n                       c.customer_name, d.delivery_invoice_no, s.invoice_no AS original_invoice_no,\n                       p.payment_reference, p.payment_received_date, p.payment_amount, p.remarks\n                FROM payments p\n                JOIN customer_deliveries d ON p.delivery_id = d.id\n                JOIN shipments s ON d.shipment_id = s.id\n                JOIN customers c ON d.customer_id = c.id\n                ORDER BY p.payment_received_date DESC, p.id DESC\n            ")
+    rows = fetch_all("""
+        SELECT to_char(p.payment_received_date::date, 'YYYY-MM') AS receipt_month,
+               c.customer_name, d.delivery_invoice_no, s.invoice_no AS original_invoice_no,
+               p.payment_reference, p.payment_received_date, p.payment_amount, p.remarks
+        FROM payments p
+        JOIN customer_deliveries d ON p.delivery_id = d.id
+        JOIN shipments s ON d.shipment_id = s.id
+        JOIN customers c ON d.customer_id = c.id
+        ORDER BY p.payment_received_date DESC, p.id DESC
+    """)
+
 df = show_filtered_df(rows, f'reports_filter_{report}', total=True)
 export_buttons(df, report.replace(' ', '_').replace('-', '').lower())
 

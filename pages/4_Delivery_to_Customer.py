@@ -330,6 +330,10 @@ else:
         print_popup(st.session_state.last_delivery_reprint)
         st.download_button('Download Reprint Delivery Invoice HTML', st.session_state.last_delivery_reprint, 'delivery_invoice_reprint.html', mime='text/html', key='download_reprint_delivery_invoice_html')
         del st.session_state.last_delivery_reprint
+    summary_df = pd.DataFrame(summary_rows)
+    if not summary_df.empty:
+        st.dataframe(style_total_row(summary_df), use_container_width=True, hide_index=True)
+        export_buttons(add_total_row(summary_df), "delivery_invoice_summary_total_row")
     st.markdown('### Delivery Invoice Product Details')
     detail_rows = fetch_all('\n                SELECT d.id, d.delivery_invoice_no, d.delivery_date, s.invoice_no AS original_invoice_no,\n                       s.shipment_no, p.product_code, p.product_name, b.pallet_no, b.box_no,\n                       d.delivered_qty, d.unit_price, d.currency, d.sale_amount, d.payment_due_date, d.vehicle_number, d.asn_number, d.asn_date, d.packaging_details\n                FROM customer_deliveries d\n                JOIN shipments s ON d.shipment_id = s.id\n                JOIN shipment_boxes b ON d.box_id = b.id\n                JOIN products p ON b.product_id = p.id\n                WHERE d.delivery_invoice_no=?\n                ORDER BY d.id\n            ', (selected_delivery_invoice_no,))
     show_filtered_df(edit_button_column(detail_rows, 'delivery'), f'delivery_invoice_detail_{selected_delivery_invoice_no}', total=True)

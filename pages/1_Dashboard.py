@@ -239,14 +239,33 @@ total_boxes = fetch_all('SELECT COUNT(*) c FROM shipment_boxes')[0]['c']
 total_customers = fetch_all('SELECT COUNT(*) c FROM customers')[0]['c']
 qty = fetch_all('\n        SELECT IFNULL((SELECT SUM(original_qty) FROM shipment_boxes),0) original_qty,\n               IFNULL((SELECT SUM(delivered_qty) FROM customer_deliveries),0) delivered_qty,\n               IFNULL((SELECT SUM(sale_amount) FROM customer_deliveries),0) total_sale\n    ')[0]
 balance_qty = qty['original_qty'] - qty['delivered_qty']
+stock_amount_row = fetch_all("""
+    SELECT COALESCE(SUM((b.original_qty - COALESCE(d.delivered_qty,0)) * COALESCE(b.unit_price,0)),0) AS total_stock_balance_amount
+    FROM shipment_boxes b
+    LEFT JOIN (
+        SELECT box_id, SUM(delivered_qty) AS delivered_qty
+        FROM customer_deliveries
+        GROUP BY box_id
+    ) d ON b.id = d.box_id
+""")[0]
+total_stock_balance_amount = float(stock_amount_row.get('total_stock_balance_amount') or 0)
 try:
     overdue_count = len(overdue_rows())
     overdue_amount = sum((float(r.get('pending_amount') or 0) for r in overdue_rows()))
 except Exception:
     overdue_count = 0
     overdue_amount = 0
-labels = [('TOTAL SHIPMENTS', total_shipments, 'green'), ('TOTAL BOXES', total_boxes, 'teal'), ('DELIVERED QTY', qty['delivered_qty'], 'orange'), ('BALANCE QTY', balance_qty, 'blue'), ('TOTAL SALE', round(qty['total_sale'], 2), 'yellow'), ('OVERDUE PAYMENTS', overdue_count, 'red'), ('OVERDUE PAYMENT AMOUNT', f'{overdue_amount:,.2f}', 'red')]
-cols = st.columns(7)
+labels = [
+    ('TOTAL SHIPMENTS', total_shipments, 'green'),
+    ('TOTAL BOXES', total_boxes, 'teal'),
+    ('DELIVERED QTY', qty['delivered_qty'], 'orange'),
+    ('BALANCE QTY', balance_qty, 'blue'),
+    ('TOTAL SALE', round(qty['total_sale'], 2), 'yellow'),
+    ('WAREHOUSE STOCK AMOUNT', f'{total_stock_balance_amount:,.2f}', 'blue'),
+    ('OVERDUE PAYMENTS', overdue_count, 'red'),
+    ('OVERDUE PAYMENT AMOUNT', f'{overdue_amount:,.2f}', 'red'),
+]
+cols = st.columns(len(labels))
 for col, (lab, val, cls) in zip(cols, labels):
     with col:
         card_color = (

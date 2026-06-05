@@ -31,6 +31,18 @@ def convert_sqlite_to_postgres(query: str) -> str:
     query = query.replace("IFNULL", "COALESCE")
     return query
 
+
+def _escape_percent_literals_for_psycopg(query: str, params=()):
+    """psycopg2 uses % for placeholders.
+
+    Queries like LIKE '%' || %s || '%' cause 'tuple index out of range'
+    because the literal % is parsed as a placeholder marker.
+    Escape all percent literals, then restore %s placeholders.
+    """
+    if params and isinstance(query, str) and "%" in query:
+        query = query.replace("%", "%%").replace("%%s", "%s")
+    return query
+
 def reset_pool():
     """Close and recreate PostgreSQL pool after stale SSL timeout errors."""
     global _POOL
@@ -109,6 +121,7 @@ def _is_connection_error(exc):
 
 def fetch_all(query, params=()):
     query = convert_sqlite_to_postgres(query)
+    query = _escape_percent_literals_for_psycopg(query, params)
     last_error = None
 
     for attempt in range(3):
@@ -144,6 +157,7 @@ def fetch_all(query, params=()):
 
 def execute_query(query, params=()):
     query = convert_sqlite_to_postgres(query)
+    query = _escape_percent_literals_for_psycopg(query, params)
     last_error = None
 
     for attempt in range(3):
@@ -189,93 +203,43 @@ def verify_user(username, password):
 
 def init_db():
     """Lightweight migrations for existing Supabase/PostgreSQL database."""
-    try:
-        execute_query("ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS po_number TEXT")
-    except Exception:
-        pass
-    try:
-        execute_query("ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS po_date DATE")
-    except Exception:
-        pass
-    try:
-        execute_query("ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS fifo_row_id INTEGER")
-    except Exception:
-        pass
-    try:
-        execute_query("CREATE INDEX IF NOT EXISTS idx_shipment_boxes_fifo_row_id ON shipment_boxes(fifo_row_id)")
-    except Exception:
-        pass
-    try:
-        execute_query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS customer_id INTEGER")
-    except Exception:
-        pass
-    try:
-        execute_query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER")
-    except Exception:
-        pass
-    try:
-        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER")
-    except Exception:
-        pass
-    try:
-        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS po_number TEXT")
-    except Exception:
-        pass
-    try:
-        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS po_date DATE")
-    except Exception:
-        pass
-    try:
-        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS vehicle_number TEXT")
-    except Exception:
-        pass
-    try:
-        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS asn_number TEXT")
-    except Exception:
-        pass
-    try:
-        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS asn_date DATE")
-    except Exception:
-        pass
-    try:
-        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS packaging_details TEXT")
-    except Exception:
-        pass
+    migrations = [
+        "ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS po_number TEXT",
+        "ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS po_date DATE",
+        "ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS fifo_row_id INTEGER",
+        "CREATE INDEX IF NOT EXISTS idx_shipment_boxes_fifo_row_id ON shipment_boxes(fifo_row_id)",
+        "ALTER TABLE shipments ADD COLUMN IF NOT EXISTS customer_id INTEGER",
+        "ALTER TABLE shipments ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
+        "ALTER TABLE shipments ADD COLUMN IF NOT EXISTS shipment_time_days INTEGER DEFAULT 0",
+        "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
+        "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS po_number TEXT",
+        "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS po_date DATE",
+        "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS vehicle_number TEXT",
+        "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS asn_number TEXT",
+        "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS asn_date DATE",
+        "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS packaging_details TEXT",
+    ]
+    for q in migrations:
+        try:
+            execute_query(q)
+        except Exception:
+            pass
 
-    # SHIP_TO_MASTER_SCHEMA_PATCH
-    execute_query("""
-        CREATE TABLE IF NOT EXISTS ship_to_masters (
-            id SERIAL PRIMARY KEY,
-            ship_to_name TEXT NOT NULL,
-            ship_to_id TEXT,
-            addressline1 TEXT,
-            addressline2 TEXT,
-            addressline3 TEXT,
-            vendor_gstin TEXT,
-            vendor_phone TEXT,
-            vendor_email TEXT,
-            is_active BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
     try:
-        execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER")
+        execute_query("""
+            CREATE TABLE IF NOT EXISTS ship_to_masters (
+                id SERIAL PRIMARY KEY,
+                ship_to_name TEXT NOT NULL,
+                ship_to_id TEXT,
+                addressline1 TEXT,
+                addressline2 TEXT,
+                addressline3 TEXT,
+                vendor_gstin TEXT,
+                vendor_phone TEXT,
+                vendor_email TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
     except Exception:
         pass
-    execute_query('''
-    CREATE TABLE IF NOT EXISTS ship_to_masters (
-        id SERIAL PRIMARY KEY,
-        ship_to_name TEXT NOT NULL,
-        ship_to_id TEXT,
-        addressline1 TEXT,
-        addressline2 TEXT,
-        addressline3 TEXT,
-        vendor_gstin TEXT,
-        vendor_phone TEXT,
-        vendor_email TEXT,
-        is_active BOOLEAN DEFAULT TRUE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-''')
-    # Tables are already created in Supabase.
-    pass

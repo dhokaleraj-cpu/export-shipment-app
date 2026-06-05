@@ -162,7 +162,7 @@ else:
                 first_po_date = st.session_state.shipment_temp_rows[0].get('po_date') or None
                 first_currency = st.session_state.shipment_temp_rows[0]['currency']
                 path = save_upload(attachment, f'shipment_{shipment_no}')
-                execute_query('\n                            INSERT INTO shipments (shipment_no, invoice_no, po_number, po_date, shipment_date, supplier_id, warehouse_id, customer_id, ship_to_master_id, invoice_amount, currency, attachment_path, remarks, shipping_bill_no, shipping_bill_date, shipment_doc_date, forwarder_name, incoterm, forwarder_id, incoterm_id)\n                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n                        ', (shipment_no, invoice_no, first_po_number, first_po_date, str(shipment_date), supplier_map[supplier], warehouse_map[warehouse], customer_map[customer], selected_shipment_ship_to.get('id'), total_amount, first_currency, path, remarks, shipping_bill_no, str(shipping_bill_date), str(shipment_doc_date), forwarder_name, incoterm, forwarder_map.get(forwarder_name), incoterm_map.get(incoterm)))
+                execute_query('\n                            INSERT INTO shipments (shipment_no, invoice_no, po_number, po_date, shipment_date, supplier_id, warehouse_id, customer_id, ship_to_master_id, shipment_time_days, invoice_amount, currency, attachment_path, remarks, shipping_bill_no, shipping_bill_date, shipment_doc_date, forwarder_name, incoterm, forwarder_id, incoterm_id)\n                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n                        ', (shipment_no, invoice_no, first_po_number, first_po_date, str(shipment_date), supplier_map[supplier], warehouse_map[warehouse], customer_map[customer], selected_shipment_ship_to.get('id'), int(warehouse_info.get(warehouse, {}).get('shipment_time_days') or 0), total_amount, first_currency, path, remarks, shipping_bill_no, str(shipping_bill_date), str(shipment_doc_date), forwarder_name, incoterm, forwarder_map.get(forwarder_name), incoterm_map.get(incoterm)))
                 shipment_id = fetch_all('SELECT id FROM shipments WHERE shipment_no=?', (shipment_no,))[0]['id']
                 for row in st.session_state.shipment_temp_rows:
                     old_match = fetch_all('\n                                SELECT b.id FROM shipment_boxes b\n                                WHERE b.pallet_no = ? AND b.product_id = ?\n                            ', (row['pallet_no'], row['product_id']))
@@ -177,6 +177,10 @@ else:
     st.divider()
     st.subheader('Last Shipment Entries')
     shipment_rows_for_actions = fetch_all('\n                SELECT s.id, s.shipment_no, s.invoice_no, s.po_number, s.po_date, s.shipment_date, s.shipping_bill_no, s.shipping_bill_date,\n                       s.shipment_doc_date, s.forwarder_name, s.incoterm,\n                       sup.supplier_name, w.warehouse_name, s.currency, s.invoice_amount\n                FROM shipments s\n                LEFT JOIN suppliers sup ON s.supplier_id = sup.id\n                LEFT JOIN warehouses w ON s.warehouse_id = w.id\n                ORDER BY s.id DESC\n                LIMIT 50\n            ')
+    shipment_display_df = pd.DataFrame(shipment_rows_for_actions)
+    if not shipment_display_df.empty:
+        st.dataframe(style_total_row(shipment_display_df), use_container_width=True, hide_index=True)
+        export_buttons(add_total_row(shipment_display_df), "shipment_last_entries_report")
     selected_shipment_action, _ = transaction_selector(shipment_rows_for_actions, 'shipment_transaction_selector', 'shipment_no')
     ship_action_col1, ship_action_col2 = st.columns(2)
     with ship_action_col1:
@@ -198,7 +202,7 @@ else:
             else:
                 st.error('Wrong password. Delete cancelled.')
     st.subheader('Saved Shipment / Pallet Stock')
-    show_filtered_df(fetch_all('\n                SELECT s.shipment_no, s.invoice_no, b.fifo_row_id, b.pallet_no, b.box_no, p.product_code, p.product_name,\n                       b.po_number, b.po_date, b.po_number, b.po_date, b.original_qty, b.unit_price, b.currency, b.amount\n                FROM shipment_boxes b\n                JOIN shipments s ON b.shipment_id = s.id\n                JOIN products p ON b.product_id = p.id\n                ORDER BY b.id DESC\n            '), 'auto_filter_key_1', total=True)
+    show_filtered_df(fetch_all('\n                SELECT s.shipment_no, s.invoice_no, b.fifo_row_id, b.pallet_no, b.box_no, p.product_code, p.product_name,\n                       b.po_number, b.po_date, b.original_qty, b.unit_price, b.currency, b.amount\n                FROM shipment_boxes b\n                JOIN shipments s ON b.shipment_id = s.id\n                JOIN products p ON b.product_id = p.id\n                ORDER BY b.id DESC\n            '), 'auto_filter_key_1', total=True)
     if st.session_state.user['role'] == 'super_admin':
         st.divider()
         st.subheader('Super Admin: Edit Old Shipment Header')
@@ -252,7 +256,7 @@ else:
     if st.session_state.user['role'] == 'super_admin':
         st.divider()
         st.subheader('Super Admin: Edit Old Pallet / Product Entry')
-        old_rows = fetch_all('\n                    SELECT b.id, b.fifo_row_id, s.shipment_no, s.invoice_no, b.pallet_no, b.box_no,\n                           p.product_code, p.product_name, b.po_number, b.po_date, b.po_number, b.po_date, b.original_qty, b.unit_price, b.currency, b.amount\n                    FROM shipment_boxes b\n                    JOIN shipments s ON b.shipment_id = s.id\n                    JOIN products p ON b.product_id = p.id\n                    ORDER BY b.id DESC\n                ')
+        old_rows = fetch_all('\n                    SELECT b.id, b.fifo_row_id, s.shipment_no, s.invoice_no, b.pallet_no, b.box_no,\n                           p.product_code, p.product_name, b.po_number, b.po_date, b.original_qty, b.unit_price, b.currency, b.amount\n                    FROM shipment_boxes b\n                    JOIN shipments s ON b.shipment_id = s.id\n                    JOIN products p ON b.product_id = p.id\n                    ORDER BY b.id DESC\n                ')
         if old_rows:
             row_map = {f"{r['id']} | {r['shipment_no']} | Pallet {r['pallet_no']} | {r['product_code']} | Qty {r['original_qty']}": r for r in old_rows}
             selected_old_key = searchable_selectbox('Select Old Row to Edit', list(row_map.keys()), key='super_edit_old_row')
