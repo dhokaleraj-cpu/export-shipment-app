@@ -2,7 +2,7 @@ from common import *
 
 page_setup()
 
-require_page_edit('overdue')
+require_page_view('overdue')
 show_edit_permission_status('overdue')
 
 show_header('Email Notification Settings')

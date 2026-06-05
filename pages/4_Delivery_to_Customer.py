@@ -104,7 +104,7 @@ from common import *
 
 page_setup()
 
-require_page_edit('delivery')
+require_page_view('delivery')
 show_edit_permission_status('delivery')
 
 show_header('Delivery Entry', 'Invoice-style FIFO delivery form with multi-pallet selection')

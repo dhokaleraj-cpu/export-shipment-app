@@ -1472,8 +1472,15 @@ def get_page_definition_by_key(page_key):
     return None
 
 def get_user_page_permissions(username):
-    ensure_page_access_table()
+    """Fast cached page permissions for normal users."""
+    username = str(username or "")
+    if not username:
+        return {}
+    cache_key = f"_page_permissions_cache_{username}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
     try:
+        ensure_page_access_table()
         rows = fetch_all('SELECT page_key, can_view, can_edit, can_access FROM user_page_access WHERE username=?', (username,))
         result = {}
         for r in rows:
@@ -1484,9 +1491,12 @@ def get_user_page_permissions(username):
                 'can_view': bool(legacy if can_view is None else can_view),
                 'can_edit': bool(legacy if can_edit is None else can_edit),
             }
+        st.session_state[cache_key] = result
         return result
     except Exception:
+        st.session_state[cache_key] = {}
         return {}
+
 
 def _role_default_view(page_def, role):
     return role in page_def.get('default_roles', [])
@@ -2169,9 +2179,23 @@ def print_popup(html):
     """, height=0)
 
 def require_roles(allowed):
-    if st.session_state.user["role"] not in allowed:
-        st.error("You do not have permission to access this module.")
-        st.stop()
+    """Role gate with page-wise Edit permission override."""
+    user = st.session_state.get('user', {})
+    role = user.get('role', '')
+    if role in allowed or role == 'super_admin':
+        return
+    try:
+        if current_user_can_edit():
+            return
+        page_def = get_page_definition_by_target(detect_current_page_target())
+        if page_def and can_user_access_page(page_def, user):
+            return
+    except Exception:
+        pass
+    st.error("You do not have permission to access this module.")
+    st.stop()
+
+
 
 
 
@@ -2189,38 +2213,7 @@ def require_roles(allowed):
 
 
 def login_page():
-    """Exact UI login page with fields directly under app title."""
-    inject_exact_ui_css()
-    if LOGO_PATH.exists():
-        logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
-        logo_html = f'<img src="data:image/png;base64,{logo_b64}" />'
-    else:
-        logo_html = '<div class="exact-app-logo-fallback" style="margin:0 auto 8px auto;">FSI</div>'
-
-    st.markdown(
-        f"""
-        <div class="exact-login-shell">
-            <div class="exact-login-card">
-                <div class="exact-login-logo">{logo_html}</div>
-                <div class="exact-login-title">EXPORT SHIPMENT<br>MONITORING SYSTEM</div>
-                <div style="height:4px;"></div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    username = st.text_input("User Name", key="login_username")
-    password = st.text_input("Password", type="password", key="login_password")
-
-    if st.button("Login", type="primary", key="login_button"):
-        user = verify_user(username, password)
-        if user:
-            st.session_state["user"] = user
-            st.rerun()
-        else:
-            st.error("Invalid username or password.")
-
-    st.markdown("</div></div>", unsafe_allow_html=True)
-
+    force_exact_login_page()
 
 def overdue_rows():
     return fetch_all("""
@@ -2609,10 +2602,8 @@ def deduplicate_coverage_plan_dates(product_id):
 
 def require_login():
     if "user" not in st.session_state or not st.session_state.get("user"):
-        login_page()
+        force_exact_login_page()
         st.stop()
-
-
 
 def page_setup(title=None, cleanup=False):
     inject_exact_ui_css()
@@ -2633,6 +2624,9 @@ def current_role():
 
 def clear_cache_after_write():
     clear_app_cache()
+    for _k in list(st.session_state.keys()):
+        if str(_k).startswith('_page_permissions_cache_'):
+            del st.session_state[_k]
 
 
 def render_big_card(title, value, header_bg="#FF8C00", value_bg="#FFFFFF", value_color="#111827"):
@@ -2893,7 +2887,7 @@ def ship_to_form():
             vendor_email = st.text_input("vendoremail", key="ship_to_vendor_email")
             is_active = st.checkbox("Active", value=True, key="ship_to_is_active")
 
-        submitted = st.form_submit_button("Save Ship To Master", type="primary")
+        submitted = st.form_submit_button("Save Ship To Master", type="primary", disabled=not current_user_can_edit('masters'))
         if submitted:
             if not ship_to_name.strip():
                 st.error("Ship To Name is mandatory.")
@@ -3730,6 +3724,148 @@ def inject_exact_ui_css():
         }
         .exact-login-title {
             font-size:24px !important;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+
+
+def force_exact_login_page():
+    """Reliable top-centered login page using Streamlit columns, not open HTML wrappers."""
+    inject_login_only_css()
+
+    if LOGO_PATH.exists():
+        logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
+        logo_html = f'<img src="data:image/png;base64,{logo_b64}" />'
+    else:
+        logo_html = '<div style="width:135px;height:44px;display:flex;align-items:center;justify-content:center;margin:0 auto 6px auto;border-radius:8px;border:1px solid #CBD5E1;background:#EAF3FC;color:#1B6DB5;font-family:Montserrat,Aptos,Arial,sans-serif;font-size:24px;font-weight:900;">FSI</div>'
+
+    st.markdown(
+        f"""
+        <div class="login-top-card">
+            {logo_html}
+            <div class="login-top-title">EXPORT SHIPMENT<br>MONITORING SYSTEM</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    left, center, right = st.columns([1.0, 0.42, 1.0])
+    with center:
+        username = st.text_input("User Name", key="force_login_username")
+        password = st.text_input("Password", type="password", key="force_login_password")
+        if st.button("Login", type="primary", key="force_login_button"):
+            user = verify_user(username, password)
+            if user:
+                st.session_state["user"] = user
+                st.rerun()
+            else:
+                st.error("Invalid username or password.")
+
+
+def inject_login_only_css():
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=swap');
+
+    html, body, .stApp, [data-testid="stAppViewContainer"], .main {
+        background: #F6F8FB !important;
+    }
+
+    header[data-testid="stHeader"],
+    div[data-testid="stToolbar"],
+    div[data-testid="collapsedControl"],
+    section[data-testid="stSidebar"] {
+        display: none !important;
+        height: 0 !important;
+        min-height: 0 !important;
+    }
+
+    .block-container {
+        padding-top: 18px !important;
+        margin-top: 0px !important;
+        max-width: 100% !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+
+    .login-top-card {
+        width: min(520px, 94vw);
+        margin: 0 auto 12px auto;
+        background: #FFFFFF;
+        border: 1px solid #CBD5E1;
+        border-radius: 16px;
+        box-shadow: 0 8px 28px rgba(15,23,42,.10);
+        padding: 18px 26px 20px 26px;
+        text-align: center;
+        box-sizing: border-box;
+    }
+
+    .login-top-card img {
+        width: 145px !important;
+        max-width: 70% !important;
+        height: auto !important;
+        object-fit: contain !important;
+        display: block !important;
+        margin: 0 auto 6px auto !important;
+    }
+
+    .login-top-title {
+        font-family: Montserrat, Aptos, Arial, sans-serif !important;
+        font-size: 27px !important;
+        line-height: 1.08 !important;
+        font-weight: 900 !important;
+        color: #1B6DB5 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        letter-spacing: .2px !important;
+    }
+
+    /* Login input column */
+    div[data-testid="stTextInput"] label p {
+        font-size: 14px !important;
+        font-weight: 900 !important;
+        color: #003B73 !important;
+    }
+
+    div[data-testid="stTextInput"] input {
+        height: 42px !important;
+        min-height: 42px !important;
+        border-radius: 10px !important;
+        border: 1px solid #CBD5E1 !important;
+        background: #FFFFFF !important;
+        font-weight: 800 !important;
+        color: #111827 !important;
+    }
+
+    div[data-testid="stButton"] > button {
+        width: 100% !important;
+        height: 44px !important;
+        min-height: 44px !important;
+        background: #1B6DB5 !important;
+        color: white !important;
+        border-radius: 10px !important;
+        border: 0 !important;
+        font-size: 16px !important;
+        font-weight: 900 !important;
+    }
+
+    @media (max-width: 760px) {
+        .block-container {
+            padding-top: 10px !important;
+            padding-left: .5rem !important;
+            padding-right: .5rem !important;
+        }
+        .login-top-card {
+            padding: 16px 18px 18px 18px !important;
+        }
+        .login-top-card img {
+            width: 115px !important;
+        }
+        .login-top-title {
+            font-size: 22px !important;
         }
     }
     </style>

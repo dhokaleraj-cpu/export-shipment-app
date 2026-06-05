@@ -2,7 +2,7 @@ from common import *
 
 page_setup()
 
-require_page_edit('payment')
+require_page_view('payment')
 show_edit_permission_status('payment')
 
 show_header('Payment Entry')
