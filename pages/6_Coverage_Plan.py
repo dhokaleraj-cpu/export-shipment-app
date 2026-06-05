@@ -99,8 +99,10 @@ def safe_float(value, default=0.0):
 def ensure_coverage_rows(product_id, start_week, weeks_count, two_months_inventory=0):
     """Ensure weekly rows exist for selected product.
 
-    Creates Monday-based plan rows from start_week for weeks_count weeks.
-    Existing rows are preserved. This function does not delete transactional data.
+    Safe for PostgreSQL / Streamlit Cloud:
+    - Existing rows are preserved.
+    - Duplicate rows are not inserted.
+    - ON CONFLICT DO NOTHING prevents UniqueViolation if another rerun already created the row.
     """
     if not product_id or not start_week or not weeks_count:
         return
@@ -112,53 +114,45 @@ def ensure_coverage_rows(product_id, start_week, weeks_count, two_months_invento
     if not start_date:
         return
 
-    # Align to Monday.
     try:
         start_date = datetime.strptime(monday_of_date(start_date), "%Y-%m-%d").date()
     except Exception:
         start_date = start_date - timedelta(days=start_date.weekday())
 
-    existing_rows = fetch_all(
-        """
-        SELECT plan_date
-        FROM coverage_plan_lines
-        WHERE product_id=?
-          AND plan_date >= ?
-          AND plan_date <= ?
-        """,
-        (
-            product_id,
-            start_date.isoformat(),
-            (start_date + timedelta(days=7 * int(weeks_count + 2))).isoformat(),
-        ),
-    )
-    existing_dates = set()
-    for r in existing_rows:
-        d = parse_db_date(r.get("plan_date"))
-        if d:
-            existing_dates.add(d.isoformat())
-
-    insert_params = []
     for i in range(int(weeks_count)):
         plan_date = start_date + timedelta(days=7 * i)
         plan_key = plan_date.isoformat()
-        if plan_key in existing_dates:
-            continue
-        # ISO week number is used for display; plan_date remains the main sequence.
         week_no = int(plan_date.isocalendar()[1])
-        insert_params.append((product_id, week_no, plan_key, 0, 0, 0, 0, 0, two_months_inventory, 0, 0, None))
 
-    for params in insert_params:
-        execute_query(
+        exists = fetch_all(
             """
-            INSERT INTO coverage_plan_lines
-            (product_id, week_no, plan_date, stock_at_wh, customer_forecast,
-             shipment_delivery_qty, delivered_to_customer, wh_bank,
-             two_months_inventory, bank_status, suggested_shipment_qty, next_shipment_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            SELECT id
+            FROM coverage_plan_lines
+            WHERE product_id=?
+              AND plan_date=?
+            LIMIT 1
             """,
-            params,
+            (product_id, plan_key),
         )
+        if exists:
+            continue
+
+        try:
+            execute_query(
+                """
+                INSERT INTO coverage_plan_lines
+                (product_id, week_no, plan_date, stock_at_wh, customer_forecast,
+                 shipment_delivery_qty, delivered_to_customer, wh_bank,
+                 two_months_inventory, bank_status, suggested_shipment_qty, next_shipment_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT DO NOTHING
+                """,
+                (product_id, week_no, plan_key, 0, 0, 0, 0, 0, two_months_inventory, 0, 0, None),
+            )
+        except Exception as e:
+            if "duplicate" in str(e).lower() or "unique" in str(e).lower():
+                continue
+            raise
 
 
 def get_week_qty_maps(product_id, shipment_time_days):

@@ -77,27 +77,60 @@ def get_pool():
     return _POOL
 
 def get_connection():
-    """Get a connection with recovery from pool exhaustion/stale pool."""
-    conn = None
-    try:
-        conn = get_pool().getconn()
-    except psycopg2.pool.PoolError:
-        reset_pool()
-        time.sleep(0.5)
-        conn = get_pool().getconn()
+    """Get a healthy PostgreSQL connection.
 
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SET statement_timeout = '45s'")
-            cur.execute("SET idle_in_transaction_session_timeout = '30s'")
-    except Exception:
+    Fixes stale pool / closed cursor / closed connection issues that can happen
+    after Streamlit reruns or network timeout.
+    """
+    last_error = None
+
+    for attempt in range(3):
+        conn = None
         try:
-            get_pool().putconn(conn, close=True)
-        except Exception:
-            pass
-        reset_pool()
-        raise
-    return conn
+            conn = get_pool().getconn()
+
+            # If pool returned a closed connection, discard it.
+            if conn is None or getattr(conn, "closed", 1):
+                try:
+                    get_pool().putconn(conn, close=True)
+                except Exception:
+                    pass
+                reset_pool()
+                time.sleep(0.2)
+                continue
+
+            # Validate connection with a very small query. Do not use the
+            # connection if cursor/session setup fails.
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.execute("SET statement_timeout = '45s'")
+                    cur.execute("SET idle_in_transaction_session_timeout = '30s'")
+            except Exception as setup_error:
+                last_error = setup_error
+                try:
+                    get_pool().putconn(conn, close=True)
+                except Exception:
+                    pass
+                conn = None
+                reset_pool()
+                time.sleep(0.3)
+                continue
+
+            return conn
+
+        except Exception as e:
+            last_error = e
+            try:
+                if conn is not None:
+                    get_pool().putconn(conn, close=True)
+            except Exception:
+                pass
+            reset_pool()
+            time.sleep(0.3)
+
+    raise last_error
+
 
 def release_connection(conn, close=False):
     if conn is not None:
@@ -115,6 +148,8 @@ def _is_connection_error(exc):
         or "operation timed out" in text
         or "server closed the connection" in text
         or "connection already closed" in text
+        or "cursor already closed" in text
+        or "closed cursor" in text
         or "could not receive data from server" in text
         or "could not send data to server" in text
     )
@@ -124,7 +159,7 @@ def fetch_all(query, params=()):
     query = _escape_percent_literals_for_psycopg(query, params)
     last_error = None
 
-    for attempt in range(3):
+    for attempt in range(4):
         conn = None
         released = False
         try:
@@ -133,6 +168,7 @@ def fetch_all(query, params=()):
                 cur.execute(query, params)
                 rows = cur.fetchall()
                 return [dict(row) for row in rows]
+
         except Exception as e:
             last_error = e
             try:
@@ -141,26 +177,29 @@ def fetch_all(query, params=()):
             except Exception:
                 pass
 
-            if _is_connection_error(e) and attempt < 2:
+            # Always discard bad connections on cursor/connection errors.
+            if _is_connection_error(e) and attempt < 3:
                 release_connection(conn, close=True)
                 released = True
                 reset_pool()
-                time.sleep(0.5)
+                time.sleep(0.4)
                 continue
 
             raise
+
         finally:
             if conn is not None and not released:
                 release_connection(conn)
 
     raise last_error
 
+
 def execute_query(query, params=()):
     query = convert_sqlite_to_postgres(query)
     query = _escape_percent_literals_for_psycopg(query, params)
     last_error = None
 
-    for attempt in range(3):
+    for attempt in range(4):
         conn = None
         released = False
         try:
@@ -169,6 +208,7 @@ def execute_query(query, params=()):
                 cur.execute(query, params)
                 conn.commit()
             return
+
         except Exception as e:
             last_error = e
             try:
@@ -177,19 +217,21 @@ def execute_query(query, params=()):
             except Exception:
                 pass
 
-            if _is_connection_error(e) and attempt < 2:
+            if _is_connection_error(e) and attempt < 3:
                 release_connection(conn, close=True)
                 released = True
                 reset_pool()
-                time.sleep(0.5)
+                time.sleep(0.4)
                 continue
 
             raise
+
         finally:
             if conn is not None and not released:
                 release_connection(conn)
 
     raise last_error
+
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
