@@ -102,6 +102,48 @@ def delivery_invoice_jpeg_placeholder(invoice, line_items):
 import html
 from common import *
 
+
+
+def delivery_print_data_to_pdf_payload(data):
+    """Convert common build_delivery_invoice_print_data output to PDF helper payload."""
+    invoice = {
+        "delivery_invoice_no": data.get("delivery_invoice_no", ""),
+        "delivery_date": data.get("delivery_date", ""),
+        "payment_due_date": data.get("payment_due_date", ""),
+        "customer_name": data.get("customer_name", ""),
+        "original_invoice_no": data.get("original_invoice_no", ""),
+        "shipment_no": data.get("shipment_no", ""),
+        "po_number": data.get("po_number", ""),
+        "po_date": data.get("po_date", ""),
+        "ship_to_name": data.get("ship_to_name", ""),
+        "ship_to_id": data.get("ship_to_id", ""),
+        "ship_to_addressline1": data.get("ship_to_addressline1", ""),
+        "ship_to_addressline2": data.get("ship_to_addressline2", ""),
+        "ship_to_addressline3": data.get("ship_to_addressline3", ""),
+        "ship_to_vendor_gstin": data.get("ship_to_vendor_gstin", ""),
+        "ship_to_vendor_phone": data.get("ship_to_vendor_phone", ""),
+        "ship_to_vendor_email": data.get("ship_to_vendor_email", ""),
+        "vehicle_number": data.get("vehicle_number", ""),
+        "asn_number": data.get("asn_number", ""),
+        "asn_date": data.get("asn_date", ""),
+        "packaging_details": data.get("packaging_details", ""),
+    }
+    line_items = []
+    for item in data.get("items") or []:
+        line_items.append({
+            "product_code": item.get("product_code", ""),
+            "product_name": item.get("product_name", ""),
+            "pallet_no": item.get("pallet_no", ""),
+            "box_no": item.get("box_no", ""),
+            "po_number": item.get("po_number", data.get("po_number", "")),
+            "po_date": format_date_ddmmyyyy(item.get("po_date") or data.get("po_date", "")),
+            "qty": item.get("qty") or 0,
+            "price": item.get("unit_price") or item.get("price") or 0,
+            "currency": item.get("currency", data.get("currency", "")),
+            "amount": item.get("amount") or 0,
+        })
+    return invoice, line_items
+
 page_setup()
 
 show_header('Delivery Entry', 'Invoice-style FIFO delivery form with multi-pallet selection')
@@ -142,7 +184,7 @@ else:
     ctop1, ctop2 = st.columns(2)
     with ctop1:
         st.markdown('<div class="input-section-title">Original Invoice Number with Shipment Number</div>', unsafe_allow_html=True)
-        selected_invoice = st.selectbox('Original Invoice Number with Shipment Number', list(inv_map.keys()), key='delivery_original_invoice_ship', label_visibility='collapsed')
+        selected_invoice = searchable_selectbox('Original Invoice Number with Shipment Number', list(inv_map.keys()), key='delivery_original_invoice_ship')
     invoice_top_col1, invoice_top_col2 = st.columns(2)
     with invoice_top_col1:
         delivery_invoice_no = st.text_input('Delivery Invoice Number', key='delivery_invoice_v10')
@@ -277,7 +319,7 @@ if not delivery_invoice_rows:
 else:
     invoice_options = [f"{r['delivery_invoice_no']} | Qty {r['total_qty']:,.2f} | Amount {r['total_amount']:,.2f} {r['currency']} | Due {format_date_ddmmyyyy(r['payment_due_date'])}" for r in delivery_invoice_rows]
     option_to_invoice = {opt: r['delivery_invoice_no'] for opt, r in zip(invoice_options, delivery_invoice_rows)}
-    selected_delivery_invoice_label = st.selectbox('Select Delivery Invoice No', invoice_options, key='selected_delivery_invoice_for_details')
+    selected_delivery_invoice_label = searchable_selectbox('Select Delivery Invoice No', invoice_options, key='selected_delivery_invoice_for_details')
     selected_delivery_invoice_no = option_to_invoice[selected_delivery_invoice_label]
     summary_rows = []
     for r in delivery_invoice_rows:
@@ -323,6 +365,36 @@ else:
                     st.error('Wrong password. Delete cancelled.')
         else:
             st.info('Delete allowed for Super Admin only.')
+    st.markdown('<div class="sap-subtitle">Export Selected Delivery Invoice</div>', unsafe_allow_html=True)
+    export_data = build_delivery_invoice_print_data(selected_delivery_invoice_no)
+    if export_data:
+        export_invoice, export_line_items = delivery_print_data_to_pdf_payload(export_data)
+        exp1, exp2, exp3 = st.columns(3)
+        with exp1:
+            st.download_button(
+                'Export Delivery Invoice PDF',
+                delivery_invoice_pdf_bytes(export_invoice, export_line_items),
+                file_name=f"delivery_invoice_{selected_delivery_invoice_no}.pdf",
+                mime='application/pdf',
+                key=f'export_delivery_pdf_{selected_delivery_invoice_no}',
+            )
+        with exp2:
+            st.download_button(
+                'Export Delivery Invoice Excel',
+                delivery_invoice_excel_bytes(export_invoice, export_line_items),
+                file_name=f"delivery_invoice_{selected_delivery_invoice_no}.xlsx",
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                key=f'export_delivery_excel_{selected_delivery_invoice_no}',
+            )
+        with exp3:
+            st.download_button(
+                'Export Delivery Invoice HTML',
+                delivery_note_html(export_data),
+                file_name=f"delivery_invoice_{selected_delivery_invoice_no}.html",
+                mime='text/html',
+                key=f'export_delivery_html_{selected_delivery_invoice_no}',
+            )
+
     if 'last_delivery_reprint' in st.session_state:
         print_popup(st.session_state.last_delivery_reprint)
         st.download_button('Download Reprint Delivery Invoice HTML', st.session_state.last_delivery_reprint, 'delivery_invoice_reprint.html', mime='text/html', key='download_reprint_delivery_invoice_html')
@@ -337,7 +409,8 @@ if st.session_state.user['role'] == 'super_admin':
     old_deliveries = fetch_all('\n                SELECT d.*, c.customer_name, s.invoice_no AS original_invoice_no, s.shipment_no\n                FROM customer_deliveries d\n                JOIN customers c ON d.customer_id = c.id\n                JOIN shipments s ON d.shipment_id = s.id\n                JOIN shipment_boxes b ON d.box_id = b.id\n                ORDER BY d.id DESC\n            ')
     if old_deliveries:
         dmap = {f"{d['id']} | {d['delivery_invoice_no']} | {d['customer_name']}": d for d in old_deliveries}
-        ed = dmap[st.selectbox('Select Delivery to Edit', list(dmap.keys()), key='edit_delivery_select')]
+        selected_delivery_edit_key = searchable_selectbox('Select Delivery to Edit', list(dmap.keys()), key='edit_delivery_select')
+        ed = dmap[selected_delivery_edit_key]
         dc1, dc2 = st.columns(2)
         with dc1:
             ed_inv = st.text_input('Edit Delivery Invoice No', ed['delivery_invoice_no'] or '', key='edit_delivery_inv')
