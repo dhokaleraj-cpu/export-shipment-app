@@ -3061,29 +3061,3 @@ def user_can_edit_page(page_key):
     if role == "user":
         return page_key in ["delivery"]
     return False
-
-
-def searchable_selectbox(label, options, key, default_index=0, help_text=None):
-    """Visible search box + selectbox for long edit lists."""
-    options = list(options or [])
-    if not options:
-        st.warning(f"No options available for {label}.")
-        return None
-    search_value = st.text_input(
-        f"Search {label}",
-        key=f"{key}_search",
-        placeholder="Type to search...",
-        help=help_text,
-    )
-    if search_value:
-        terms = [t.strip().lower() for t in str(search_value).split() if t.strip()]
-        filtered = [opt for opt in options if all(term in str(opt).lower() for term in terms)]
-    else:
-        filtered = options
-    if not filtered:
-        st.warning("No matching records found. Showing all records.")
-        filtered = options
-    safe_index = int(default_index or 0)
-    if safe_index < 0 or safe_index >= len(filtered):
-        safe_index = 0
-    return st.selectbox(label, filtered, index=safe_index, key=key)
