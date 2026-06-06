@@ -1362,378 +1362,46 @@ def format_date_ddmmyyyy(value):
         return str(value)
 
 def format_date_columns(rows):
-    """Format all date-like columns for display only."""
-    date_keys = ["date", "due", "plan_date", "shipment_date", "delivery_date", "payment_received_date", "payment_due_date", "next_shipment_date"]
-    output = []
-    for row in rows:
-        new_row = dict(row)
-        for k, v in list(new_row.items()):
-            kl = str(k).lower()
-            if any(x in kl for x in date_keys):
-                new_row[k] = format_date_ddmmyyyy(v)
-        output.append(new_row)
-    return output
-
-def cleanup_orphan_transactions():
-    """Remove transaction rows linked to deleted primary records so edit modules stay refreshed."""
-    try:
-        execute_query("""
-            DELETE FROM payments
-            WHERE delivery_id NOT IN (SELECT id FROM customer_deliveries)
-        """)
-    except Exception:
-        pass
-    try:
-        execute_query("""
-            DELETE FROM customer_deliveries
-            WHERE shipment_id NOT IN (SELECT id FROM shipments)
-               OR box_id NOT IN (SELECT id FROM shipment_boxes)
-               OR customer_id NOT IN (SELECT id FROM customers)
-        """)
-    except Exception:
-        pass
-    try:
-        execute_query("""
-            DELETE FROM shipment_boxes
-            WHERE shipment_id NOT IN (SELECT id FROM shipments)
-               OR product_id NOT IN (SELECT id FROM products)
-        """)
-    except Exception:
-        pass
-
-def save_upload(file, prefix):
-    if not file:
-        return None
-    safe_name = file.name.replace("/", "_").replace("\\", "_")
-    path = UPLOAD_DIR / f"{prefix}_{safe_name}"
-    with open(path, "wb") as f:
-        f.write(file.getbuffer())
-    return str(path)
-
-
-
-
-
-# --- Page-wise access controls ---
-APP_PAGE_DEFINITIONS = [
-    {"label": "Dashboard", "target": "pages/1_Dashboard.py", "key": "dashboard", "default_roles": ["user", "admin", "super_admin"]},
-    {"label": "Masters", "target": "pages/2_Masters.py", "key": "masters", "default_roles": ["admin", "super_admin"]},
-    {"label": "Shipment Entry", "target": "pages/3_Shipment_Entry.py", "key": "shipment", "default_roles": ["admin", "super_admin"]},
-    {"label": "Delivery", "target": "pages/4_Delivery_to_Customer.py", "key": "delivery", "default_roles": ["user", "admin", "super_admin"]},
-    {"label": "Payment", "target": "pages/5_Payment_Entry.py", "key": "payment", "default_roles": ["admin", "super_admin"]},
-    {"label": "Coverage Plan", "target": "pages/6_Coverage_Plan.py", "key": "coverage", "default_roles": ["user", "admin", "super_admin"]},
-    {"label": "Admin", "target": "pages/7_Admin.py", "key": "admin", "default_roles": ["admin", "super_admin"]},
-    {"label": "Reports", "target": "pages/8_Reports.py", "key": "reports", "default_roles": ["user", "admin", "super_admin"]},
-    {"label": "Overdue", "target": "pages/9_Overdue_Notification.py", "key": "overdue", "default_roles": ["admin", "super_admin"]},
-]
-
-def ensure_page_access_table():
-    """Create/upgrade page-wise permissions.
-
-    can_view controls whether a module is visible/openable.
-    can_edit is stored for page-wise edit control and can be used by pages to disable save/update/delete actions.
-    """
-    try:
-        execute_query("""
-            CREATE TABLE IF NOT EXISTS user_page_access (
-                id SERIAL PRIMARY KEY,
-                username TEXT NOT NULL,
-                page_key TEXT NOT NULL,
-                can_access BOOLEAN DEFAULT TRUE,
-                can_view BOOLEAN DEFAULT TRUE,
-                can_edit BOOLEAN DEFAULT TRUE,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(username, page_key)
-            )
-        """)
-    except Exception:
-        pass
-    for sql in [
-        "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_view BOOLEAN DEFAULT TRUE",
-        "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_edit BOOLEAN DEFAULT TRUE",
-        "UPDATE user_page_access SET can_view=COALESCE(can_view, can_access, TRUE), can_edit=COALESCE(can_edit, can_access, TRUE)",
-    ]:
+    """Format date-like columns; supports both list-of-dicts and DataFrame."""
+    if rows is None:
+        return []
+    if isinstance(rows, pd.DataFrame):
+        data = rows.to_dict("records")
+    else:
+        data = rows
+    formatted = []
+    for row in data:
         try:
-            execute_query(sql)
+            new_row = dict(row)
         except Exception:
-            pass
+            continue
+        for k, v in list(new_row.items()):
+            lk = str(k).lower()
+            if ("date" in lk or lk.endswith("_at")) and v not in (None, ""):
+                try:
+                    new_row[k] = format_date_ddmmyyyy(v)
+                except Exception:
+                    new_row[k] = v
+        formatted.append(new_row)
+    return formatted
 
-def get_page_definition_by_target(target):
-    target = str(target or '').replace('\\', '/')
-    for item in APP_PAGE_DEFINITIONS:
-        if item['target'] == target:
-            return item
-    return None
-
-def get_page_definition_by_key(page_key):
-    for item in APP_PAGE_DEFINITIONS:
-        if item['key'] == page_key:
-            return item
-    return None
-
-def get_user_page_permissions(username):
-    """Fast cached page permissions for normal users."""
-    username = str(username or "")
-    if not username:
-        return {}
-    cache_key = f"_page_permissions_cache_{username}"
-    if cache_key in st.session_state:
-        return st.session_state[cache_key]
-    try:
-        ensure_page_access_table()
-        rows = fetch_all('SELECT page_key, can_view, can_edit, can_access FROM user_page_access WHERE username=?', (username,))
-        result = {}
-        for r in rows:
-            can_view = r.get('can_view')
-            can_edit = r.get('can_edit')
-            legacy = r.get('can_access')
-            result[str(r.get('page_key'))] = {
-                'can_view': bool(legacy if can_view is None else can_view),
-                'can_edit': bool(legacy if can_edit is None else can_edit),
-            }
-        st.session_state[cache_key] = result
-        return result
-    except Exception:
-        st.session_state[cache_key] = {}
-        return {}
-
-
-def _role_default_view(page_def, role):
-    return role in page_def.get('default_roles', [])
-
-def _role_default_edit(page_def, role):
-    # User role can view assigned operational pages, but edit permissions default to admin/super_admin.
-    if role == 'super_admin':
-        return True
-    if role == 'admin':
-        return page_def['key'] != 'admin'
-    return False
-
-def can_user_access_page(page_def, user=None):
-    if not page_def:
-        return True
-    user = user or st.session_state.get('user', {})
-    role = user.get('role', '')
-    username = user.get('username', '')
-    if role == 'super_admin':
-        return True
-    perms = get_user_page_permissions(username)
-    if page_def['key'] in perms:
-        item = perms[page_def['key']]
-        if isinstance(item, dict):
-            return bool(item.get('can_view', False))
-        return bool(item)
-    return _role_default_view(page_def, role)
-
-def can_user_edit_page(page_def, user=None):
-    if not page_def:
-        return True
-    user = user or st.session_state.get('user', {})
-    role = user.get('role', '')
-    username = user.get('username', '')
-    if role == 'super_admin':
-        return True
-    perms = get_user_page_permissions(username)
-    if page_def['key'] in perms:
-        item = perms[page_def['key']]
-        if isinstance(item, dict):
-            return bool(item.get('can_edit', False))
-        return bool(item)
-    return _role_default_edit(page_def, role)
-
-def current_user_can_edit(page_key=None):
-    if page_key:
-        page_def = get_page_definition_by_key(page_key)
-    else:
-        page_def = get_page_definition_by_target(detect_current_page_target())
-    return can_user_edit_page(page_def)
-
-def get_allowed_nav_items(user=None):
-    user = user or st.session_state.get('user', {})
-    return [(p['label'], p['target']) for p in APP_PAGE_DEFINITIONS if can_user_access_page(p, user)]
-
-def detect_current_page_target():
-    import inspect
-    from pathlib import Path as _Path
-    try:
-        for frame in inspect.stack():
-            file_name = str(frame.filename).replace('\\', '/')
-            if '/pages/' in file_name:
-                return 'pages/' + _Path(file_name).name
-    except Exception:
-        pass
-    return ''
-
-def require_page_access_for_current_page():
-    target = detect_current_page_target()
-    if not target:
-        return
-    page_def = get_page_definition_by_target(target)
-    if page_def and not can_user_access_page(page_def):
-        st.error('You do not have permission to view this page. Contact the super admin.')
-        st.stop()
-
-def render_top_navigation():
-    """Exact top module navigation with page-wise user controls.
-
-    Supports both dict navigation items:
-        {"target": "...", "label": "..."}
-    and tuple/list navigation items:
-        ("Label", "target") or ("target", "Label")
-    """
-    inject_exact_ui_css()
-    user = st.session_state.get("user", {})
-    nav_items = get_allowed_nav_items(user)
-    st.markdown('<div class="exact-nav-card"><div class="exact-nav-title">MODULES</div>', unsafe_allow_html=True)
-
-    if not nav_items:
-        st.warning("No module access assigned. Contact Super Admin.")
-        st.markdown('</div>', unsafe_allow_html=True)
-        return
-
-    def _nav_label_target(item):
-        if isinstance(item, dict):
-            return item.get("label") or item.get("name") or str(item.get("target") or ""), item.get("target") or item.get("page") or ""
-        if isinstance(item, (tuple, list)):
-            if len(item) >= 2:
-                first = str(item[0])
-                second = str(item[1])
-                # Detect which side is target
-                if first.endswith(".py") or first.startswith("pages/") or first == "app.py":
-                    return second, first
-                return first, second
-            if len(item) == 1:
-                return str(item[0]), str(item[0])
-        return str(item), str(item)
-
-    cols = st.columns(min(len(nav_items), 9))
-    for i, item in enumerate(nav_items):
-        label, target = _nav_label_target(item)
-        with cols[i % len(cols)]:
-            try:
-                st.page_link(target, label=label)
-            except Exception:
-                # Fallback to a disabled-looking button if Streamlit cannot resolve a page target.
-                st.button(label, disabled=True, key=f"nav_disabled_{i}_{label}")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-
-
-def top_layout():
-    inject_exact_ui_css()
-    user = st.session_state.get("user", {"username": "-", "role": "-"})
-    if LOGO_PATH.exists():
-        logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
-        logo_html = f'<img src="data:image/png;base64,{logo_b64}" />'
-    else:
-        logo_html = '<div class="exact-app-logo-fallback">FSI</div>'
-
-    st.markdown(
-        f"""
-        <div class="exact-app-header">
-            <div class="exact-app-logo">{logo_html}</div>
-            <div class="exact-title">EXPORT SHIPMENT<br>MONITORING SYSTEM</div>
-            <div class="exact-user-box">
-                User: {user.get('username', '-')}<br>
-                Role: {user.get('role', '-')}<br>
-                <span id="liveClock">{datetime.now().strftime('%d-%m-%Y %H:%M')}</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    render_top_navigation()
-
-
-def show_header(title, subtitle="EXPORT SHIPMENT MONITORING SYSTEM"):
-    inject_exact_ui_css()
-    st.markdown(
-        f"""
-        <div class="exact-page-title-card">
-            <h1>{title}</h1>
-            <div class="exact-page-subtitle">{subtitle}</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-def add_total_row(df):
-    if df.empty:
-        return df
-    total_row = {}
-    numeric_cols = df.select_dtypes(include="number").columns
-    no_total_cols = {"unit_price", "price", "sale_unit_price"}
-    for col in df.columns:
-        col_key = str(col).lower().strip()
-        if col in numeric_cols and col_key not in no_total_cols and "price" not in col_key:
-            total_row[col] = df[col].sum()
-        elif col == df.columns[0]:
-            total_row[col] = "TOTAL"
-        else:
-            total_row[col] = ""
-    return pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
-
-def style_total_row(df):
-    def row_style(row):
-        if str(row.iloc[0]).upper() == "TOTAL":
-            return ["font-weight: 800; background-color: #fff3b0;" for _ in row]
-        return ["" for _ in row]
-    return df.style.apply(row_style, axis=1)
-
-def style_fifo_balance(df):
-    def style_cell(value, column_name):
-        if str(column_name).lower() == "balance_qty":
-            return "background-color: #d1fae5; color: #065f46; font-weight: 900;"
-        return ""
-    return df.style.apply(lambda row: [style_cell(row[col], col) for col in df.columns], axis=1)
-
-def show_df(rows, key=None, total=False):
-    rows = format_date_columns(rows)
-    if key:
-        df = filter_rows(rows, key)
-    else:
-        df = pd.DataFrame(rows)
-    if total:
-        df = add_total_row(df)
-    if df.empty:
-        st.info("No data available.")
-    else:
-        st.dataframe(style_total_row(df), use_container_width=True, hide_index=True)
-    return df
 
 def filter_rows(rows, key):
+    """Search/filter rows; supports list-of-dicts and DataFrame input."""
+    if rows is None:
+        rows = []
+    if isinstance(rows, pd.DataFrame):
+        rows = rows.to_dict("records")
     rows = format_date_columns(rows)
+    if not rows:
+        return pd.DataFrame()
     df = pd.DataFrame(rows)
-    if df.empty:
-        st.info("No data available.")
-        return df
-
-    if "filter_key_counter" not in st.session_state:
-        st.session_state.filter_key_counter = {}
-    base_key = str(key)
-    st.session_state.filter_key_counter[base_key] = st.session_state.filter_key_counter.get(base_key, 0) + 1
-    unique_key = f"{base_key}_{st.session_state.filter_key_counter[base_key]}"
-
-    with st.expander("Search / Multiple Field Filters", expanded=True):
-        search = st.text_input("Global Search", key=f"global_search_{unique_key}")
-        if search:
-            mask = df.astype(str).apply(lambda col: col.str.contains(search, case=False, na=False)).any(axis=1)
-            df = df[mask]
-
-        f1, f2 = st.columns([1, 2])
-        with f1:
-            filter_cols = st.multiselect("Fields", list(df.columns), key=f"field_filter_cols_{unique_key}")
-        with f2:
-            for col in filter_cols:
-                values = sorted([str(x) for x in df[col].dropna().unique().tolist()])
-                selected_values = st.multiselect(f"Filter {col}", values, key=f"field_filter_{unique_key}_{col}")
-                if selected_values:
-                    df = df[df[col].astype(str).isin(selected_values)]
-
-    if df.empty:
-        st.info("No data available after filter.")
+    search = st.text_input("Search", key=f"search_{key}")
+    if search:
+        mask = df.astype(str).apply(lambda col: col.str.contains(search, case=False, na=False)).any(axis=1)
+        df = df[mask]
     return df
+
 
 def show_filtered_df(rows, key, total=False):
     df = filter_rows(rows, key)
@@ -2624,11 +2292,170 @@ def require_login():
         force_exact_login_page()
         st.stop()
 
+
+
+def require_page_access_for_current_page():
+    """Safe page-access guard used by page_setup().
+
+    This function is intentionally defensive:
+    - Before login, it does nothing so the login page can render.
+    - On app.py/Dashboard landing page, it checks dashboard view access only after login.
+    - On Streamlit pages, it maps the file name to PAGE_DEFINITIONS and checks View permission.
+    - If mapping is not found, it allows the page to load instead of crashing.
+    """
+    user = st.session_state.get("user")
+    if not user:
+        return
+
+    try:
+        # Current page/script path from Streamlit context where available.
+        current_script = ""
+        try:
+            current_script = str(st.runtime.scriptrunner.get_script_run_ctx().page_script_hash or "")
+        except Exception:
+            current_script = ""
+
+        # Fallback: use query/page context is not stable across Streamlit versions,
+        # so we infer from __file__ in caller pages through Streamlit page title names where possible.
+        # To avoid false blocking, only block when a definite PAGE_DEFINITIONS target matches.
+        page_defs = PAGE_DEFINITIONS if "PAGE_DEFINITIONS" in globals() else []
+        target_page = None
+
+        # Common target names in this app.
+        possible_name = ""
+        try:
+            import inspect
+            for frame in inspect.stack():
+                file_name = str(frame.filename).replace("\\\\", "/")
+                if "/pages/" in file_name or file_name.endswith("/app.py") or file_name.endswith("app.py"):
+                    possible_name = file_name
+                    break
+        except Exception:
+            possible_name = ""
+
+        for pdef in page_defs:
+            target = str(pdef.get("target", "")).replace("\\\\", "/")
+            page_key = str(pdef.get("key", ""))
+            if target and possible_name and (possible_name.endswith(target) or target in possible_name):
+                target_page = pdef
+                break
+            if possible_name.endswith("app.py") and page_key == "dashboard":
+                target_page = pdef
+                break
+
+        if target_page and not can_user_access_page(target_page):
+            st.error("You do not have View permission for this page. Contact Super Admin.")
+            st.stop()
+
+    except Exception:
+        # Never let access guard crash the app/login.
+        return
+
+
+
+def render_top_navigation():
+    """Top module navigation bar with safe fallback."""
+    try:
+        nav_items = get_allowed_nav_items(st.session_state.get("user", {}))
+    except Exception:
+        nav_items = []
+    st.markdown('<div class="top-nav-wrap"><div class="top-nav-title">MODULES</div>', unsafe_allow_html=True)
+    if nav_items:
+        cols = st.columns(min(len(nav_items), 9))
+        for i, item in enumerate(nav_items):
+            if isinstance(item, dict):
+                label = item.get("label") or item.get("name") or str(item.get("target") or "")
+                target = item.get("target") or item.get("page") or ""
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                first = str(item[0])
+                second = str(item[1])
+                if first.endswith(".py") or first.startswith("pages/") or first == "app.py":
+                    target, label = first, second
+                else:
+                    label, target = first, second
+            else:
+                label = str(item)
+                target = str(item)
+            with cols[i % len(cols)]:
+                try:
+                    st.page_link(target, label=label)
+                except Exception:
+                    st.button(label, disabled=True, key=f"nav_disabled_{i}_{label}")
+    else:
+        # Fallback menu if permission helper fails
+        fallback = [
+            ("Dashboard", "pages/1_Dashboard.py"),
+            ("Masters", "pages/2_Masters.py"),
+            ("Shipment", "pages/3_Shipment_Entry.py"),
+            ("Delivery", "pages/4_Delivery_to_Customer.py"),
+            ("Payment", "pages/5_Payment_Entry.py"),
+            ("Coverage", "pages/6_Coverage_Plan.py"),
+            ("Admin", "pages/7_Admin.py"),
+            ("Reports", "pages/8_Reports.py"),
+            ("Overdue", "pages/9_Overdue_Notification.py"),
+        ]
+        cols = st.columns(len(fallback))
+        for i, (label, target) in enumerate(fallback):
+            with cols[i]:
+                try:
+                    st.page_link(target, label=label)
+                except Exception:
+                    pass
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+
+def top_layout():
+    """Application header used by page_setup()."""
+    user = st.session_state.get("user", {"username": "-", "role": "-"})
+    if LOGO_PATH.exists():
+        try:
+            logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
+            logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="max-width:170px;height:auto;object-fit:contain;" />'
+        except Exception:
+            logo_html = '<div class="logo-circle">FSI</div>'
+    else:
+        logo_html = '<div class="logo-circle">FSI</div>'
+
+    st.markdown(
+        f"""
+        <div class="top-strip">
+            <div class="logo-box">{logo_html}</div>
+            <div class="main-title-center">EXPORT SHIPMENT<br>MONITORING SYSTEM</div>
+            <div class="user-clock">
+                User: {user.get('username','-')}<br>
+                Role: {user.get('role','-')}<br>
+                {datetime.now().strftime('%d-%m-%Y %H:%M')}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    render_top_navigation()
+
+
+
+def show_header(title, subtitle="EXPORT SHIPMENT MONITORING SYSTEM"):
+    """Page header card used by app.py and module pages."""
+    st.markdown(
+        f"""
+        <div class="topbar">
+            <h1>{title}</h1>
+            <div class="subtext">{subtitle}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 def page_setup(title=None, cleanup=False):
     inject_exact_ui_css()
     require_login()
-    require_page_access_for_current_page()
-    top_layout()
+    try:
+        require_page_access_for_current_page()
+    except NameError:
+        pass
+    if st.session_state.get("user"):
+        top_layout()
     if "filter_key_counter" not in st.session_state:
         st.session_state.filter_key_counter = {}
     else:
@@ -3889,3 +3716,77 @@ def inject_login_only_css():
     }
     </style>
     """, unsafe_allow_html=True)
+
+
+def current_user_can_modify(page_key):
+    """Return True when the logged-in user has Modify permission for page_key.
+
+    Backward compatible: super_admin/admin can modify; if can_modify column does
+    not exist yet, fall back to edit permission.
+    """
+    user = st.session_state.get("user", {})
+    if user.get("role") in ("super_admin", "admin"):
+        return True
+    uid = user.get("id")
+    if not uid:
+        return False
+    try:
+        rows = fetch_all(
+            "SELECT can_modify FROM user_page_access WHERE user_id=? AND page_key=? LIMIT 1",
+            (uid, page_key)
+        )
+        if rows:
+            return bool(rows[0].get("can_modify"))
+    except Exception:
+        return current_user_can_edit(page_key)
+    return False
+
+def require_page_modify(page_key):
+    page_def = get_page_definition_by_key(page_key)
+    if page_def and not can_user_access_page(page_def):
+        st.error("You do not have View permission for this module. Contact Super Admin.")
+        st.stop()
+    if not current_user_can_modify(page_key):
+        st.error("You have View permission but not Modify permission for this module. Contact Super Admin.")
+        st.stop()
+
+def show_modify_permission_status(page_key):
+    if current_user_can_modify(page_key):
+        st.caption("Modify permission: Enabled for this user.")
+    else:
+        st.caption("Modify permission: Disabled.")
+
+
+def report_total_footer_df(rows_or_df):
+    """Add a TOTAL footer row for report quantity/amount fields.
+
+    Safe for DataFrame or list-of-dicts. Existing TOTAL rows are removed before
+    recalculating so totals are not doubled.
+    """
+    df = pd.DataFrame(rows_or_df)
+    if df.empty:
+        return df
+
+    first_col = df.columns[0]
+    df = df[df[first_col].astype(str).str.upper() != "TOTAL"].copy()
+
+    total_row = {col: "" for col in df.columns}
+    numeric_cols = []
+    total_keywords = [
+        "qty", "quantity", "amount", "sale", "sales", "balance", "pending",
+        "paid", "received", "stock", "delivered", "invoice_amount", "total"
+    ]
+
+    for col in df.columns:
+        low = str(col).lower()
+        if any(k in low for k in total_keywords):
+            vals = pd.to_numeric(df[col], errors="coerce")
+            if vals.notna().any():
+                total_row[col] = vals.sum()
+                numeric_cols.append(col)
+
+    if numeric_cols:
+        total_row[first_col] = "TOTAL"
+        df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+
+    return df

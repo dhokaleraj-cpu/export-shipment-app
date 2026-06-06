@@ -7,6 +7,31 @@ show_edit_permission_status('reports')
 
 show_header('Reports with Export')
 
+
+def _reports_total_footer_df_fallback(rows_or_df):
+    """Local fallback if common.py total footer helper is unavailable on deployment."""
+    df = pd.DataFrame(rows_or_df)
+    if df.empty:
+        return df
+    first_col = df.columns[0]
+    df = df[df[first_col].astype(str).str.upper() != "TOTAL"].copy()
+    total_row = {col: "" for col in df.columns}
+    numeric_cols = []
+    for col in df.columns:
+        low = str(col).lower()
+        if any(k in low for k in ["qty", "quantity", "amount", "sale", "sales", "balance", "pending", "paid", "received", "stock", "delivered", "invoice_amount", "total"]):
+            vals = pd.to_numeric(df[col], errors="coerce")
+            if vals.notna().any():
+                total_row[col] = vals.sum()
+                numeric_cols.append(col)
+    if numeric_cols:
+        total_row[first_col] = "TOTAL"
+        df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+    return df
+
+if "report_total_footer_df" not in globals():
+    report_total_footer_df = _reports_total_footer_df_fallback
+
 report_options = [
     'Delivery to Customer Product Wise Sale Report',
     'Product Wise and Delivery Invoice Wise Report for Original Invoice Number',
