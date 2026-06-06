@@ -240,7 +240,13 @@ total_customers = fetch_all('SELECT COUNT(*) c FROM customers')[0]['c']
 qty = fetch_all('\n        SELECT IFNULL((SELECT SUM(original_qty) FROM shipment_boxes),0) original_qty,\n               IFNULL((SELECT SUM(delivered_qty) FROM customer_deliveries),0) delivered_qty,\n               IFNULL((SELECT SUM(sale_amount) FROM customer_deliveries),0) total_sale\n    ')[0]
 balance_qty = qty['original_qty'] - qty['delivered_qty']
 stock_amount_row = fetch_all("""
-    SELECT COALESCE(SUM((b.original_qty - COALESCE(d.delivered_qty,0)) * COALESCE(b.unit_price,0)),0) AS total_stock_balance_amount
+    SELECT COALESCE(SUM(
+        CASE
+            WHEN UPPER(COALESCE(b.currency,'USD')) = 'USD'
+            THEN (b.original_qty - COALESCE(d.delivered_qty,0)) * COALESCE(b.unit_price,0)
+            ELSE (b.original_qty - COALESCE(d.delivered_qty,0)) * COALESCE(b.unit_price,0)
+        END
+    ),0) AS total_stock_balance_amount
     FROM shipment_boxes b
     LEFT JOIN (
         SELECT box_id, SUM(delivered_qty) AS delivered_qty
@@ -261,7 +267,7 @@ labels = [
     ('DELIVERED QTY', qty['delivered_qty'], 'orange'),
     ('BALANCE QTY', balance_qty, 'blue'),
     ('TOTAL SALE', round(qty['total_sale'], 2), 'yellow'),
-    ('WAREHOUSE STOCK AMOUNT', f'{total_stock_balance_amount:,.2f}', 'blue'),
+    ('WAREHOUSE STOCK AMOUNT', f'USD {total_stock_balance_amount:,.2f}', 'blue'),
     ('OVERDUE PAYMENTS', overdue_count, 'red'),
     ('OVERDUE PAYMENT AMOUNT', f'{overdue_amount:,.2f}', 'red'),
 ]

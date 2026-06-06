@@ -97,12 +97,9 @@ def safe_float(value, default=0.0):
 
 
 def ensure_coverage_rows(product_id, start_week, weeks_count, two_months_inventory=0):
-    """Ensure weekly rows exist for selected product.
+    """Ensure weekly rows exist for selected product using one PostgreSQL bulk insert.
 
-    Safe for PostgreSQL / Streamlit Cloud:
-    - Existing rows are preserved.
-    - Duplicate rows are not inserted.
-    - ON CONFLICT DO NOTHING prevents UniqueViolation if another rerun already created the row.
+    This is much faster than row-by-row SELECT/INSERT and avoids duplicate row errors.
     """
     if not product_id or not start_week or not weeks_count:
         return
@@ -119,40 +116,63 @@ def ensure_coverage_rows(product_id, start_week, weeks_count, two_months_invento
     except Exception:
         start_date = start_date - timedelta(days=start_date.weekday())
 
-    for i in range(int(weeks_count)):
-        plan_date = start_date + timedelta(days=7 * i)
-        plan_key = plan_date.isoformat()
-        week_no = int(plan_date.isocalendar()[1])
-
-        exists = fetch_all(
-            """
-            SELECT id
-            FROM coverage_plan_lines
-            WHERE product_id=?
-              AND plan_date=?
-            LIMIT 1
-            """,
-            (product_id, plan_key),
+    execute_query(
+        """
+        INSERT INTO coverage_plan_lines
+        (product_id, week_no, plan_date, stock_at_wh, customer_forecast,
+         shipment_delivery_qty, delivered_to_customer, wh_bank,
+         two_months_inventory, bank_status, suggested_shipment_qty, next_shipment_date)
+        SELECT
+            ? AS product_id,
+            EXTRACT(WEEK FROM gs.plan_date)::int AS week_no,
+            gs.plan_date::date AS plan_date,
+            0 AS stock_at_wh,
+            0 AS customer_forecast,
+            0 AS shipment_delivery_qty,
+            0 AS delivered_to_customer,
+            0 AS wh_bank,
+            ? AS two_months_inventory,
+            0 AS bank_status,
+            0 AS suggested_shipment_qty,
+            NULL AS next_shipment_date
+        FROM generate_series(?::date, (?::date + ((?::int - 1) * INTERVAL '7 days')), INTERVAL '7 days') AS gs(plan_date)
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM coverage_plan_lines c
+            WHERE c.product_id = ?
+              AND c.plan_date::date = gs.plan_date::date
         )
-        if exists:
-            continue
+        ON CONFLICT DO NOTHING
+        """,
+        (
+            product_id,
+            two_months_inventory,
+            start_date.isoformat(),
+            start_date.isoformat(),
+            int(weeks_count),
+            product_id,
+        ),
+    )
 
-        try:
-            execute_query(
-                """
-                INSERT INTO coverage_plan_lines
-                (product_id, week_no, plan_date, stock_at_wh, customer_forecast,
-                 shipment_delivery_qty, delivered_to_customer, wh_bank,
-                 two_months_inventory, bank_status, suggested_shipment_qty, next_shipment_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT DO NOTHING
-                """,
-                (product_id, week_no, plan_key, 0, 0, 0, 0, 0, two_months_inventory, 0, 0, None),
-            )
-        except Exception as e:
-            if "duplicate" in str(e).lower() or "unique" in str(e).lower():
-                continue
-            raise
+
+def get_product_shipment_time_info(product_id, fallback_days=0):
+    """Return latest warehouse/shipment time linked to selected product from Shipment Entry."""
+    try:
+        rows = fetch_all("""
+            SELECT w.warehouse_name,
+                   COALESCE(NULLIF(s.shipment_time_days,0), w.shipment_time_days, ?::int) AS shipment_time_days
+            FROM shipment_boxes b
+            JOIN shipments s ON b.shipment_id = s.id
+            LEFT JOIN warehouses w ON s.warehouse_id = w.id
+            WHERE b.product_id=?
+            ORDER BY s.shipment_date DESC NULLS LAST, s.id DESC
+            LIMIT 1
+        """, (int(fallback_days), product_id))
+        if rows:
+            return rows[0].get("warehouse_name") or "", int(rows[0].get("shipment_time_days") or fallback_days or 0)
+    except Exception:
+        pass
+    return "", int(fallback_days or 0)
 
 
 def get_week_qty_maps(product_id, shipment_time_days):
@@ -491,11 +511,16 @@ else:
         local_filter_start("WAREHOUSE", "#1A5E99")
         if warehouses:
             warehouse_map = {w["warehouse_name"]: w for w in warehouses}
-            selected_warehouse_name = st.selectbox("Warehouse", list(warehouse_map.keys()), key="coverage_warehouse_select", label_visibility="collapsed")
-            shipment_time_days = int(warehouse_map[selected_warehouse_name].get("shipment_time_days") or 0)
+            product_wh_name, product_ship_days = get_product_shipment_time_info(selected_product_id, 0)
+            warehouse_names = list(warehouse_map.keys())
+            default_wh_index = warehouse_names.index(product_wh_name) if product_wh_name in warehouse_names else 0
+            selected_warehouse_name = st.selectbox("Warehouse", warehouse_names, index=default_wh_index, key="coverage_warehouse_select", label_visibility="collapsed")
+            master_days = int(warehouse_map[selected_warehouse_name].get("shipment_time_days") or 0)
+            shipment_time_days = int(product_ship_days or master_days or 0)
+            st.caption(f"Shipment time linked from Shipment Entry/Product: {shipment_time_days} Days")
         else:
             selected_warehouse_name = ""
-            shipment_time_days = 0
+            product_wh_name, shipment_time_days = get_product_shipment_time_info(selected_product_id, 0)
             st.info("Create Warehouse Master and enter Shipment Time Days.")
         local_filter_end()
 

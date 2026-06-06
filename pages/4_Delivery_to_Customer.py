@@ -52,46 +52,74 @@ def delivery_invoice_pdf_bytes(invoice, line_items):
     story = []
     story.append(Paragraph("<b>DELIVERY / COMMERCIAL INVOICE</b>", styles["Title"]))
     story.append(Spacer(1, 8))
+
+    customer_text = f"""
+    <b>Customer:</b> {invoice.get('customer_name','')}<br/>
+    <b>Address:</b> {invoice.get('customer_address','')}<br/>
+    <b>Phone:</b> {invoice.get('customer_phone','')}<br/>
+    <b>Email:</b> {invoice.get('customer_email','')}
+    """
     ship_to_text = f"""
     <b>Ship To:</b> {invoice.get('ship_to_name','')}<br/>
     <b>Ship To ID:</b> {invoice.get('ship_to_id','')}<br/>
     {invoice.get('ship_to_addressline1','')}<br/>
     {invoice.get('ship_to_addressline2','')}<br/>
     {invoice.get('ship_to_addressline3','')}<br/>
-    <b>vendorGSTIN:</b> {invoice.get('ship_to_vendor_gstin','')}<br/>
-    <b>vendorphone:</b> {invoice.get('ship_to_vendor_phone','')}<br/>
-    <b>vendoremail:</b> {invoice.get('ship_to_vendor_email','')}
+    <b>GSTIN:</b> {invoice.get('ship_to_vendor_gstin','')}<br/>
+    <b>Phone:</b> {invoice.get('ship_to_vendor_phone','')}<br/>
+    <b>Email:</b> {invoice.get('ship_to_vendor_email','')}
     """
     invoice_text = f"""
     <b>Delivery Invoice No:</b> {invoice.get('delivery_invoice_no','')}<br/>
     <b>Delivery Date:</b> {invoice.get('delivery_date','')}<br/>
-    <b>Original Invoice:</b> {invoice.get('original_invoice_no','')}<br/>
-    <b>Shipment No:</b> {invoice.get('shipment_no','')}<br/>
-    <b>Payment Due Date:</b> {invoice.get('payment_due_date','')}
+    <b>Payment Due Date:</b> {invoice.get('payment_due_date','')}<br/>
+    <b>Vehicle Number:</b> {invoice.get('vehicle_number','')}<br/>
+    <b>ASN Number:</b> {invoice.get('asn_number','')}<br/>
+    <b>ASN Date:</b> {invoice.get('asn_date','')}<br/>
+    <b>Packaging:</b> {invoice.get('packaging_details','')}
     """
-    story.append(Table([[Paragraph(ship_to_text, styles["Normal"]), Paragraph(invoice_text, styles["Normal"])]], colWidths=[390, 390]))
+    story.append(Table([[Paragraph(customer_text, styles["Normal"]), Paragraph(ship_to_text, styles["Normal"]), Paragraph(invoice_text, styles["Normal"])]], colWidths=[260, 260, 260]))
     story.append(Spacer(1, 10))
-    data = [["Sr", "Product", "Pallet", "Box", "PO No", "PO Date", "Qty", "Price", "Cur", "Amount"]]
+
+    data = [["Sr", "Product", "Original Inv", "PO No", "PO Date", "Pallet", "Box", "Qty", "Price", "Cur", "Amount"]]
     total_qty = total_amt = 0
+    currency_set = set()
     for i, item in enumerate(line_items, start=1):
         qty = float(item.get("qty") or 0)
         price = float(item.get("price") or 0)
         amount = float(item.get("amount") or qty * price)
+        cur = str(item.get("currency") or "")
+        if cur:
+            currency_set.add(cur)
         total_qty += qty
         total_amt += amount
-        data.append([i, f"{item.get('product_code','')} {item.get('product_name','')}", item.get("pallet_no",""), item.get("box_no",""), item.get("po_number",""), item.get("po_date",""), f"{qty:,.0f}", f"{price:,.2f}", item.get("currency",""), f"{amount:,.2f}"])
-    data.append(["", "TOTAL", "", "", "", "", f"{total_qty:,.0f}", "", "", f"{total_amt:,.2f}"])
+        data.append([
+            i,
+            f"{item.get('product_code','')} {item.get('product_name','')}",
+            item.get("original_invoice_no", invoice.get("original_invoice_no","")),
+            item.get("po_number",""),
+            item.get("po_date",""),
+            item.get("pallet_no",""),
+            item.get("box_no",""),
+            f"{qty:,.0f}",
+            f"{price:,.2f}",
+            cur,
+            f"{amount:,.2f}"
+        ])
+    total_cur = ", ".join(sorted(currency_set))
+    data.append(["", "TOTAL", "", "", "", "", "", f"{total_qty:,.0f}", "", total_cur, f"{total_amt:,.2f}"])
     tbl = Table(data, repeatRows=1)
     tbl.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1f2f57")),
         ("TEXTCOLOR", (0,0), (-1,0), colors.white),
         ("GRID", (0,0), (-1,-1), 0.5, colors.black),
         ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-        ("ALIGN", (6,1), (-1,-1), "RIGHT"),
+        ("ALIGN", (7,1), (-1,-1), "RIGHT"),
     ]))
     story.append(tbl)
     doc.build(story)
     return buffer.getvalue()
+
 
 def delivery_invoice_jpeg_placeholder(invoice, line_items):
     # Streamlit/JPEG generation from HTML would require browser rendering.
@@ -254,6 +282,9 @@ else:
                                 term['id'], term['days'], str(payment_due_date), price, row['currency'], amount, path, row.get('po_number', ''), row.get('po_date', None)))
                     if first_print is None:
                         first_print = {'customer_name': customer,
+                                    'customer_address': selected_customer_row.get('address','') if 'selected_customer_row' in locals() else '',
+                                    'customer_phone': selected_customer_row.get('phone','') if 'selected_customer_row' in locals() else '',
+                                    'customer_email': selected_customer_row.get('email','') if 'selected_customer_row' in locals() else '',
                                     'ship_to_name': selected_ship_to.get('ship_to_name', ''),
                                     'ship_to_id': selected_ship_to.get('ship_to_id', ''),
                                     'ship_to_addressline1': selected_ship_to.get('addressline1', ''),
@@ -380,6 +411,9 @@ try:
                MAX(d.asn_date) AS asn_date,
                MAX(d.packaging_details) AS packaging_details,
                c.customer_name,
+               c.address AS customer_address,
+               c.phone AS customer_phone,
+               c.email AS customer_email,
                s.invoice_no AS original_invoice_no,
                s.shipment_no,
                d.currency,
@@ -429,6 +463,9 @@ try:
                 "delivery_date": str(selected_saved_invoice.get("delivery_date") or ""),
                 "payment_due_date": str(selected_saved_invoice.get("payment_due_date") or ""),
                 "customer_name": selected_saved_invoice.get("customer_name", ""),
+                "customer_address": selected_saved_invoice.get("customer_address", ""),
+                "customer_phone": selected_saved_invoice.get("customer_phone", ""),
+                "customer_email": selected_saved_invoice.get("customer_email", ""),
                 "original_invoice_no": selected_saved_invoice.get("original_invoice_no", ""),
                 "shipment_no": selected_saved_invoice.get("shipment_no", ""),
                 "vehicle_number": selected_saved_invoice.get("vehicle_number", ""),
@@ -449,6 +486,7 @@ try:
             for row in saved_line_rows:
                 export_line_items.append({
                     "fifo_row_id": row.get("fifo_row_id"),
+                    "original_invoice_no": row.get("invoice_no") or row.get("original_invoice_no") or selected_saved_invoice.get("original_invoice_no",""),
                     "product_code": row.get("product_code", ""),
                     "product_name": row.get("product_name", ""),
                     "pallet_no": row.get("pallet_no", ""),
@@ -496,14 +534,19 @@ st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</di
 
 
 def delivery_invoice_print_html(invoice, line_items):
-    """Commercial invoice style print layout using Ship To Master details."""
+    """Delivery invoice print layout with customer/ship-to header and PO in product table."""
     rows_html = ""
     total_qty = 0
     total_amt = 0
+    currency_set = set()
+
     for i, item in enumerate(line_items, start=1):
         qty = float(item.get("qty") or item.get("delivered_qty") or 0)
         price = float(item.get("price") or item.get("unit_price") or 0)
         amount = float(item.get("amount") or qty * price)
+        cur = str(item.get("currency") or "")
+        if cur:
+            currency_set.add(cur)
         total_qty += qty
         total_amt += amount
         rows_html += f"""
@@ -511,28 +554,30 @@ def delivery_invoice_print_html(invoice, line_items):
             <td>{i}</td>
             <td>{html.escape(str(item.get('product_code','')))}</td>
             <td>{html.escape(str(item.get('product_name','')))}</td>
+            <td>{html.escape(str(item.get('original_invoice_no', invoice.get('original_invoice_no',''))))}</td>
+            <td>{html.escape(str(item.get('po_number','')))}</td>
+            <td>{html.escape(str(item.get('po_date','')))}</td>
             <td>{html.escape(str(item.get('pallet_no','')))}</td>
             <td>{html.escape(str(item.get('box_no','') or '-'))}</td>
             <td style="text-align:right;">{qty:,.0f}</td>
             <td style="text-align:right;">{price:,.2f}</td>
-            <td>{html.escape(str(item.get('currency','')))}</td>
+            <td>{html.escape(cur)}</td>
             <td style="text-align:right;">{amount:,.2f}</td>
         </tr>
         """
+    total_currency = ", ".join(sorted(currency_set))
+
     return f"""
     <html>
     <head>
     <style>
-    @media print {{
-        body {{ margin: 0; }}
-        .no-print {{ display:none; }}
-    }}
+    @media print {{ body {{ margin: 0; }} .no-print {{ display:none; }} }}
     body {{ font-family: Arial, sans-serif; color:#111; }}
-    .invoice-wrap {{ width: 100%; max-width: 1100px; margin: 0 auto; padding: 18px; }}
+    .invoice-wrap {{ width: 100%; max-width: 1180px; margin: 0 auto; padding: 18px; }}
     .title {{ text-align:center; font-size: 22px; font-weight: 800; margin-bottom: 12px; }}
     .section {{ border:1px solid #111; margin-bottom:10px; }}
     .section-title {{ background:#1f2f57; color:white; font-weight:800; padding:6px 8px; }}
-    .grid {{ display:grid; grid-template-columns: 1fr 1fr; }}
+    .grid3 {{ display:grid; grid-template-columns: 1fr 1fr 1fr; }}
     .box {{ padding:8px; border-right:1px solid #111; min-height:110px; }}
     .box:last-child {{ border-right:0; }}
     table {{ width:100%; border-collapse: collapse; font-size: 12px; }}
@@ -545,66 +590,51 @@ def delivery_invoice_print_html(invoice, line_items):
     <body>
     <div class="invoice-wrap">
         <div class="title">DELIVERY / COMMERCIAL INVOICE</div>
-
         <div class="section">
-            <div class="section-title">Invoice Details</div>
-            <table>
-                <tr>
-                    <td class="bold">Delivery Invoice No.</td><td>{html.escape(str(invoice.get('delivery_invoice_no','')))}</td>
-                    <td class="bold">Delivery Date</td><td>{html.escape(str(invoice.get('delivery_date','')))}</td>
-                </tr>
-                <tr>
-                    <td class="bold">Original Invoice</td><td>{html.escape(str(invoice.get('original_invoice_no','')))}</td>
-                    <td class="bold">Shipment No.</td><td>{html.escape(str(invoice.get('shipment_no','')))}</td>
-                </tr>
-                <tr>
-                    <td class="bold">PO Number</td><td>{html.escape(str(invoice.get('po_number','')))}</td>
-                    <td class="bold">PO Date</td><td>{html.escape(str(invoice.get('po_date','')))}</td>
-                </tr>
-            </table>
-        </div>
-
-        <div class="section">
-            <div class="section-title">Ship To Details</div>
-            <div class="grid">
+            <div class="section-title">Header Details</div>
+            <div class="grid3">
                 <div class="box">
-                    <div class="bold">{html.escape(str(invoice.get('ship_to_name','')))}</div>
+                    <div class="bold">Customer</div>
+                    <div>{html.escape(str(invoice.get('customer_name','')))}</div>
+                    <div>{html.escape(str(invoice.get('customer_address','')))}</div>
+                    <div>{html.escape(str(invoice.get('customer_phone','')))}</div>
+                    <div>{html.escape(str(invoice.get('customer_email','')))}</div>
+                </div>
+                <div class="box">
+                    <div class="bold">Ship To</div>
+                    <div>{html.escape(str(invoice.get('ship_to_name','')))}</div>
                     <div>Ship To ID: {html.escape(str(invoice.get('ship_to_id','')))}</div>
                     <div>{html.escape(str(invoice.get('ship_to_addressline1','')))}</div>
                     <div>{html.escape(str(invoice.get('ship_to_addressline2','')))}</div>
                     <div>{html.escape(str(invoice.get('ship_to_addressline3','')))}</div>
+                    <div>GSTIN: {html.escape(str(invoice.get('ship_to_vendor_gstin','')))}</div>
                 </div>
                 <div class="box">
-                    <div><span class="bold">vendorGSTIN:</span> {html.escape(str(invoice.get('ship_to_vendor_gstin','')))}</div>
-                    <div><span class="bold">vendorphone:</span> {html.escape(str(invoice.get('ship_to_vendor_phone','')))}</div>
-                    <div><span class="bold">vendoremail:</span> {html.escape(str(invoice.get('ship_to_vendor_email','')))}</div>
-                    <div><span class="bold">Customer:</span> {html.escape(str(invoice.get('customer_name','')))}</div>
-                    <div><span class="bold">Payment Due:</span> {html.escape(str(invoice.get('payment_due_date','')))}</div>
+                    <div class="bold">Invoice Details</div>
+                    <div>Delivery Invoice No.: {html.escape(str(invoice.get('delivery_invoice_no','')))}</div>
+                    <div>Delivery Date: {html.escape(str(invoice.get('delivery_date','')))}</div>
+                    <div>Payment Due: {html.escape(str(invoice.get('payment_due_date','')))}</div>
+                    <div>Vehicle No.: {html.escape(str(invoice.get('vehicle_number','')))}</div>
+                    <div>ASN No.: {html.escape(str(invoice.get('asn_number','')))}</div>
+                    <div>ASN Date: {html.escape(str(invoice.get('asn_date','')))}</div>
+                    <div>Packaging: {html.escape(str(invoice.get('packaging_details','')))}</div>
                 </div>
             </div>
         </div>
-
         <div class="section">
             <div class="section-title">Product Details</div>
             <table>
-                <thead>
-                    <tr>
-                        <th>Sr.</th><th>Product Code</th><th>Description</th><th>Pallet</th><th>Box</th>
-                        <th>Qty</th><th>Rate</th><th>Currency</th><th>Amount</th>
-                    </tr>
-                </thead>
-                <tbody>{rows_html}</tbody>
-                <tfoot>
-                    <tr>
-                        <td colspan="5" class="right bold">TOTAL</td>
-                        <td class="right bold">{total_qty:,.0f}</td>
-                        <td></td><td></td>
-                        <td class="right bold">{total_amt:,.2f}</td>
-                    </tr>
-                </tfoot>
+                <thead><tr>
+                    <th>Sr.</th><th>Product Code</th><th>Description</th><th>Original Invoice No.</th>
+                    <th>PO No.</th><th>PO Date</th><th>Pallet</th><th>Box</th>
+                    <th>Qty</th><th>Rate</th><th>Currency</th><th>Amount</th>
+                </tr></thead>
+                <tbody>
+                    {rows_html}
+                    <tr><td colspan="8" class="right bold">TOTAL</td><td class="right bold">{total_qty:,.0f}</td><td></td><td class="bold">{html.escape(total_currency)}</td><td class="right bold">{total_amt:,.2f}</td></tr>
+                </tbody>
             </table>
         </div>
-
         <button class="no-print" onclick="window.print()" style="padding:10px 18px;font-weight:800;">Print Invoice</button>
     </div>
     </body>

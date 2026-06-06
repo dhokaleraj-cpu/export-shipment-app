@@ -2112,7 +2112,10 @@ def delivery_note_html(data):
 
 def build_delivery_invoice_print_data(delivery_invoice_no):
     rows = fetch_all("""
-        SELECT d.*, c.customer_name, s.shipment_no, s.invoice_no AS original_invoice_no,
+        SELECT d.*, c.customer_name, c.address AS customer_address, c.phone AS customer_phone, c.email AS customer_email,
+               s.shipment_no, s.invoice_no AS original_invoice_no,
+               stm.ship_to_name, stm.ship_to_id, stm.addressline1 AS ship_to_addressline1, stm.addressline2 AS ship_to_addressline2, stm.addressline3 AS ship_to_addressline3,
+               stm.vendor_gstin AS ship_to_vendor_gstin, stm.vendor_phone AS ship_to_vendor_phone, stm.vendor_email AS ship_to_vendor_email,
                p.product_code, p.product_name,
                COALESCE(d.po_number, s.po_number, p.po_number) AS po_number,
                COALESCE(d.po_date, s.po_date, p.po_date) AS po_date,
@@ -2122,6 +2125,7 @@ def build_delivery_invoice_print_data(delivery_invoice_no):
         JOIN shipments s ON d.shipment_id = s.id
         JOIN shipment_boxes b ON d.box_id = b.id
         JOIN products p ON b.product_id = p.id
+        LEFT JOIN ship_to_masters stm ON d.ship_to_master_id = stm.id
         WHERE d.delivery_invoice_no=?
         ORDER BY d.id
     """, (delivery_invoice_no,))
@@ -2153,6 +2157,21 @@ def build_delivery_invoice_print_data(delivery_invoice_no):
 
     return {
         "customer_name": first.get("customer_name", ""),
+        "customer_address": first.get("customer_address", ""),
+        "customer_phone": first.get("customer_phone", ""),
+        "customer_email": first.get("customer_email", ""),
+        "ship_to_name": first.get("ship_to_name", ""),
+        "ship_to_id": first.get("ship_to_id", ""),
+        "ship_to_addressline1": first.get("ship_to_addressline1", ""),
+        "ship_to_addressline2": first.get("ship_to_addressline2", ""),
+        "ship_to_addressline3": first.get("ship_to_addressline3", ""),
+        "ship_to_vendor_gstin": first.get("ship_to_vendor_gstin", ""),
+        "ship_to_vendor_phone": first.get("ship_to_vendor_phone", ""),
+        "ship_to_vendor_email": first.get("ship_to_vendor_email", ""),
+        "vehicle_number": first.get("vehicle_number", ""),
+        "asn_number": first.get("asn_number", ""),
+        "asn_date": first.get("asn_date", ""),
+        "packaging_details": first.get("packaging_details", ""),
         "shipment_no": first.get("shipment_no", ""),
         "original_invoice_no": first.get("original_invoice_no", ""),
         "delivery_invoice_no": delivery_invoice_no,
