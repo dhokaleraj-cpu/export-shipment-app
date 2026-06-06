@@ -196,9 +196,28 @@ else:
             if not selected_shipment_action:
                 st.warning('Select a shipment first.')
             elif check_delete_password(delete_password_ship):
-                execute_query('DELETE FROM shipment_boxes WHERE shipment_id=?', (selected_shipment_action['id'],))
-                delete_record_with_password('shipments', selected_shipment_action['id'], delete_password_ship, f"Shipment {selected_shipment_action['shipment_no']}")
-                st.rerun()
+                # Protect linked transactional data.
+                # Shipment boxes cannot be deleted when Delivery records already exist,
+                # because customer_deliveries.box_id has a foreign-key link to shipment_boxes.id.
+                linked_deliveries = fetch_all("""
+                    SELECT COUNT(*) AS c
+                    FROM customer_deliveries d
+                    JOIN shipment_boxes b ON d.box_id = b.id
+                    WHERE b.shipment_id=?
+                """, (selected_shipment_action['id'],))
+                delivery_count = int(linked_deliveries[0].get('c') or 0) if linked_deliveries else 0
+
+                if delivery_count > 0:
+                    st.error(
+                        f"Cannot delete Shipment {selected_shipment_action['shipment_no']} because {delivery_count} delivery record(s) are linked with its pallet/product rows. "
+                        "To preserve historical data, use Modify/Edit instead of Delete."
+                    )
+                else:
+                    execute_query('DELETE FROM shipment_boxes WHERE shipment_id=?', (selected_shipment_action['id'],))
+                    delete_record_with_password('shipments', selected_shipment_action['id'], delete_password_ship, f"Shipment {selected_shipment_action['shipment_no']}")
+                    st.success('Shipment deleted successfully.')
+                    clear_cache_after_write()
+                    st.rerun()
             else:
                 st.error('Wrong password. Delete cancelled.')
     st.subheader('Saved Shipment / Pallet Stock')
