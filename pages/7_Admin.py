@@ -2,9 +2,7 @@ from common import *
 
 page_setup()
 
-require_page_view('admin')
-show_edit_permission_status('admin')
-
+require_roles(('admin', 'super_admin'))
 
 # --- Default View/Edit rules for Admin Page Controls ---
 def _role_default_view(page, role):
@@ -83,7 +81,7 @@ with admin_tabs[2]:
         st.warning('No users found.')
     else:
         user_labels = [f"{u['username']} | {u['role']}" for u in users_for_access]
-        selected_user_label = searchable_selectbox('Select User for Page Access', user_labels, key='page_access_user_select')
+        selected_user_label = st.selectbox('Select User for Page Access', user_labels, key='page_access_user_select')
         selected_username = selected_user_label.split(' | ')[0]
         selected_user_row = next((u for u in users_for_access if u['username'] == selected_username), None)
         existing_perms = get_user_page_permissions(selected_username)
@@ -141,7 +139,7 @@ with admin_tabs[2]:
                     can_view = bool(selected_view_values[page['key']])
                     can_edit = bool(selected_edit_values[page['key']]) and can_view
                     execute_query("""
-                        INSERT INTO user_page_access (username, page_key, can_access, can_view, can_edit)
+                        INSERT INTO user_page_access (username, page_key, can_access, can_view, can_edit, can_modify)
                         VALUES (?, ?, ?, ?, ?)
                         ON CONFLICT (username, page_key)
                         DO UPDATE SET
@@ -149,7 +147,7 @@ with admin_tabs[2]:
                             can_view=EXCLUDED.can_view,
                             can_edit=EXCLUDED.can_edit,
                             updated_at=CURRENT_TIMESTAMP
-                    """, (selected_username, page['key'], can_view, can_view, can_edit))
+                    """, (selected_username, page['key'], can_view, can_view, can_edit, can_modify))
                 clear_cache_after_write()
                 st.success('Page View / Edit controls saved successfully.')
                 st.rerun()
@@ -159,7 +157,7 @@ with admin_tabs[2]:
                 clear_cache_after_write()
                 st.success('Page controls reset to role defaults.')
                 st.rerun()
-        access_rows = fetch_all('SELECT username, page_key, can_view, can_edit, updated_at FROM user_page_access ORDER BY username, page_key')
+        access_rows = fetch_all('SELECT username, page_key, can_view, can_edit, can_modify, updated_at FROM user_page_access ORDER BY username, page_key')
         if access_rows:
             st.markdown('<div class="sap-grid-card-title">Saved Page Access Records</div>', unsafe_allow_html=True)
             st.dataframe(pd.DataFrame(access_rows), use_container_width=True, hide_index=True)
@@ -197,3 +195,67 @@ with admin_tabs[4]:
             conn.close()
 
 st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)
+
+
+st.divider()
+st.subheader("Page Wise Modify Rights")
+
+try:
+    execute_query("ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_modify BOOLEAN DEFAULT FALSE")
+except Exception:
+    pass
+
+users_for_modify = fetch_all("SELECT id, username, role FROM users ORDER BY username")
+if users_for_modify:
+    user_labels_modify = [f"{u['id']} | {u['username']} | {u['role']}" for u in users_for_modify]
+    selected_user_modify_label = searchable_selectbox("Select User for Modify Rights", user_labels_modify, key="modify_rights_user_select")
+    selected_user_modify_id = int(str(selected_user_modify_label).split("|")[0].strip())
+
+    st.markdown("Assign page-wise Modify rights. View/Edit rights remain unchanged.")
+    page_defs_for_modify = PAGE_DEFINITIONS if 'PAGE_DEFINITIONS' in globals() else []
+    modify_rows = []
+    for pdef in page_defs_for_modify:
+        page_key = pdef.get("key") if isinstance(pdef, dict) else pdef[0]
+        page_label = pdef.get("label") if isinstance(pdef, dict) else pdef[1]
+        existing = fetch_all(
+            "SELECT can_view, can_edit, can_modify, can_modify FROM user_page_access WHERE user_id=? AND page_key=? LIMIT 1",
+            (selected_user_modify_id, page_key)
+        )
+        row = existing[0] if existing else {}
+        modify_rows.append({
+            "page_key": page_key,
+            "Page": page_label,
+            "Can View": bool(row.get("can_view", False)),
+            "Can Edit": bool(row.get("can_edit", False)),
+            "Can Modify": bool(row.get("can_modify", False)),
+            "Can Modify": bool(row.get("can_modify", False)),
+        })
+
+    modify_df = pd.DataFrame(modify_rows)
+    edited_modify_df = st.data_editor(
+        modify_df,
+        use_container_width=True,
+        hide_index=True,
+        disabled=["page_key", "Page"],
+        key="page_modify_rights_editor"
+    )
+    if st.button("Save Page Wise Modify Rights", type="primary", key="save_page_modify_rights"):
+        for _, rr in edited_modify_df.iterrows():
+            existing = fetch_all(
+                "SELECT id FROM user_page_access WHERE user_id=? AND page_key=? LIMIT 1",
+                (selected_user_modify_id, rr["page_key"])
+            )
+            if existing:
+                execute_query(
+                    "UPDATE user_page_access SET can_view=?, can_edit=?, can_modify=?, can_modify=? WHERE user_id=? AND page_key=?",
+                    (bool(rr["Can View"]), bool(rr["Can Edit"]), bool(rr["Can Modify"]), selected_user_modify_id, rr["page_key"])
+                )
+            else:
+                execute_query(
+                    "INSERT INTO user_page_access (user_id, page_key, can_view, can_edit, can_modify, can_modify) VALUES (?, ?, ?, ?, ?)",
+                    (selected_user_modify_id, rr["page_key"], bool(rr["Can View"]), bool(rr["Can Edit"]), bool(rr["Can Modify"]))
+                )
+        clear_permission_cache()
+        st.success("Page-wise View/Edit/Modify rights saved.")
+else:
+    st.info("No users available.")

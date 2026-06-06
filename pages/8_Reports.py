@@ -8,6 +8,7 @@ show_edit_permission_status('reports')
 show_header('Reports with Export')
 
 report_options = [
+    'Delivery to Customer Product Wise Sale Report',
     'Product Wise and Delivery Invoice Wise Report for Original Invoice Number',
     'Product Wise Stock Report',
     'Product Wise Sale Report',
@@ -38,7 +39,35 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 rows = []
 
-if report == 'Product Wise and Delivery Invoice Wise Report for Original Invoice Number':
+
+if report == 'Delivery to Customer Product Wise Sale Report':
+    rows = fetch_all("""
+        SELECT
+            d.delivery_invoice_no,
+            d.delivery_date,
+            s.invoice_no AS original_invoice_no,
+            s.shipment_no,
+            c.customer_name,
+            p.product_code,
+            p.product_name,
+            d.currency,
+            SUM(d.delivered_qty) AS delivered_qty,
+            AVG(d.unit_price) AS average_price,
+            SUM(d.sale_amount) AS sale_amount
+        FROM customer_deliveries d
+        JOIN shipments s ON d.shipment_id = s.id
+        JOIN shipment_boxes b ON d.box_id = b.id
+        JOIN products p ON b.product_id = p.id
+        JOIN customers c ON d.customer_id = c.id
+        WHERE (? = '' OR LOWER(p.product_code || ' ' || p.product_name) LIKE LOWER(CONCAT('%', ?, '%')))
+          AND (? = '' OR LOWER(s.invoice_no || ' ' || d.delivery_invoice_no) LIKE LOWER(CONCAT('%', ?, '%')))
+          AND (? = '' OR LOWER(c.customer_name) LIKE LOWER(CONCAT('%', ?, '%')))
+        GROUP BY d.delivery_invoice_no, d.delivery_date, s.invoice_no, s.shipment_no,
+                 c.customer_name, p.product_code, p.product_name, d.currency
+        ORDER BY d.delivery_date DESC, d.delivery_invoice_no, p.product_code
+    """, (product_filter, product_filter, invoice_filter, invoice_filter, customer_filter, customer_filter))
+
+elif report == 'Product Wise and Delivery Invoice Wise Report for Original Invoice Number':
     rows = fetch_all("""
         SELECT s.invoice_no AS original_invoice_no,
                d.delivery_invoice_no,
@@ -306,7 +335,8 @@ else:
         ORDER BY p.payment_received_date DESC, p.id DESC
     """)
 
-df = show_filtered_df(rows, f'reports_filter_{report}', total=True)
+df = report_total_footer_df(rows)
+df = show_filtered_df(df.to_dict('records'), f'reports_filter_{report}', total=False)
 export_buttons(df, report.replace(' ', '_').replace('-', '').lower())
 
 st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)

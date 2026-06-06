@@ -102,6 +102,24 @@ def dash_coverage_kpi_card(title, value, header_bg="#1A5E99", value_bg="#ffffff"
         unsafe_allow_html=True
     )
 
+def dash_get_product_shipment_time_info(product_id, fallback_days=0):
+    try:
+        rows = fetch_all("""
+            SELECT w.warehouse_name,
+                   COALESCE(NULLIF(s.shipment_time_days,0), NULLIF(w.shipment_time_days,0), ?::int) AS shipment_time_days
+            FROM shipment_boxes b
+            JOIN shipments s ON b.shipment_id = s.id
+            LEFT JOIN warehouses w ON s.warehouse_id = w.id
+            WHERE b.product_id=?
+            ORDER BY s.shipment_date DESC NULLS LAST, s.id DESC, b.id DESC
+            LIMIT 1
+        """, (int(fallback_days or 0), product_id))
+        if rows:
+            return rows[0].get("warehouse_name") or "", int(rows[0].get("shipment_time_days") or fallback_days or 0)
+    except Exception:
+        pass
+    return "", int(fallback_days or 0)
+
 def dash_get_week_qty_maps(product_id, shipment_time_days):
     delivered_week_rows = fetch_all("""
         SELECT date_trunc('week', d.delivery_date::date)::date AS week_start,
@@ -136,12 +154,11 @@ def dash_get_week_qty_maps(product_id, shipment_time_days):
     return shipment_by_week, delivered_by_week
 
 def dash_calculate_coverage_kpis(product_id, shipment_time_days, two_months_inventory):
-    """Calculate Dashboard Coverage KPIs.
+    """Dashboard Coverage KPIs aligned with Coverage Plan page calculation."""
+    _, product_ship_days = dash_get_product_shipment_time_info(product_id, shipment_time_days)
+    if product_ship_days:
+        shipment_time_days = int(product_ship_days)
 
-    NEXT SHIPMENT DATE / QTY: first future shortage after demand starts.
-    STOCK AT WH / WH BANK / BANK STATUS: values from CURRENT WEEK row,
-    matching the Coverage Plan table calculation.
-    """
     raw_rows = fetch_all("""
         SELECT id, week_no, plan_date, customer_forecast, stock_at_wh,
                shipment_delivery_qty, delivered_to_customer, wh_bank, bank_status,
@@ -153,15 +170,13 @@ def dash_calculate_coverage_kpis(product_id, shipment_time_days, two_months_inve
 
     shipment_by_week, delivered_by_week = dash_get_week_qty_maps(product_id, shipment_time_days)
 
-    current_week_start = datetime.strptime(monday_of_date(date.today()), "%Y-%m-%d").date()
+    today_date = date.today()
+    current_week_start = datetime.strptime(monday_of_date(today_date), "%Y-%m-%d").date()
 
-    previous_wh_bank = 0.0
-    shipment_receipt_started = False
+    previous_wh_bank = None
     demand_started = False
-
     next_shipment_date = ""
     next_shipment_qty = 0.0
-
     current_week_found = False
     current_stock_at_wh = 0.0
     current_wh_bank = 0.0
@@ -174,52 +189,36 @@ def dash_calculate_coverage_kpis(product_id, shipment_time_days, two_months_inve
         week_key = week_start.isoformat()
 
         shipment_delivery_qty = dash_safe_float(shipment_by_week.get(week_key, 0))
-        customer_forecast = dash_safe_float(r.get("customer_forecast"))
+        raw_customer_forecast = dash_safe_float(r.get("customer_forecast"))
+        customer_forecast = 0.0 if week_start < current_week_start else raw_customer_forecast
         delivered_to_customer = dash_safe_float(delivered_by_week.get(week_key, 0))
         stored_stock = dash_safe_float(r.get("stock_at_wh"))
 
-        if shipment_delivery_qty > 0:
-            shipment_receipt_started = True
+        if previous_wh_bank is None:
+            stock_at_wh = stored_stock if abs(stored_stock) > 0.000001 else 0.0
+        else:
+            stock_at_wh = previous_wh_bank
+
+        wh_bank = shipment_delivery_qty + stock_at_wh - delivered_to_customer - customer_forecast
+        bank_status = wh_bank - two_months_inventory
 
         if customer_forecast > 0 or delivered_to_customer > 0:
             demand_started = True
 
-        # Same rule as Coverage Plan module:
-        # Stock at WH remains 0 until first shipment receipt and never rolls negative.
-        if not shipment_receipt_started:
-            stock_at_wh = 0.0
-        else:
-            if stored_stock > 0:
-                stock_at_wh = stored_stock
-            else:
-                stock_at_wh = max(previous_wh_bank, 0.0)
+        if demand_started and bank_status < 0:
+            candidate_date_obj = week_start - timedelta(days=int(shipment_time_days or 0))
+            if candidate_date_obj >= today_date and not next_shipment_date:
+                next_shipment_date = candidate_date_obj.isoformat()
+                next_shipment_qty = abs(bank_status)
 
-        wh_bank = stock_at_wh + shipment_delivery_qty - customer_forecast - delivered_to_customer
-        bank_status = wh_bank - two_months_inventory
-
-        # Suggested shipment starts only after demand starts.
-        # For dashboard, only consider current week and future weeks.
-        if week_start >= current_week_start and demand_started and bank_status < 0:
-            suggested_qty = abs(bank_status)
-            suggested_date = (week_start - timedelta(days=int(shipment_time_days))).isoformat()
-        else:
-            suggested_qty = 0.0
-            suggested_date = ""
-
-        if week_start >= current_week_start and demand_started and suggested_qty > 0 and not next_shipment_date:
-            next_shipment_date = suggested_date
-            next_shipment_qty = suggested_qty
-
-        # Dashboard current week cards must come from current week row.
         if week_start == current_week_start:
             current_week_found = True
             current_stock_at_wh = stock_at_wh
             current_wh_bank = wh_bank
             current_bank_status = bank_status
 
-        previous_wh_bank = wh_bank if shipment_receipt_started else 0.0
+        previous_wh_bank = wh_bank
 
-    # If current week row was not seeded in coverage_plan_lines, keep zero instead of taking last row.
     if not current_week_found:
         current_stock_at_wh = 0.0
         current_wh_bank = 0.0

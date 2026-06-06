@@ -10,6 +10,7 @@ suppliers = fetch_all('SELECT * FROM suppliers ORDER BY supplier_name')
 customers = fetch_all('SELECT * FROM customers ORDER BY customer_name')
 ship_to_rows = fetch_all("SELECT * FROM ship_to_masters WHERE COALESCE(is_active, TRUE)=TRUE ORDER BY ship_to_name, ship_to_id")
 warehouses = fetch_all('SELECT * FROM warehouses ORDER BY warehouse_name')
+warehouse_info = {w.get('warehouse_name'): w for w in warehouses}
 products = fetch_all('SELECT * FROM products ORDER BY product_code')
 forwarders = fetch_all('SELECT * FROM forwarders ORDER BY forwarder_name')
 incoterms = fetch_all('SELECT * FROM incoterms ORDER BY incoterm_name')
@@ -64,6 +65,7 @@ else:
             incoterm_map = {incoterm: None}
         po_date = None  # PO Date is now captured row-wise in Add Pallet/Product Row
         warehouse = st.selectbox('Warehouse', list(warehouse_map.keys()), key='shipment_warehouse')
+        selected_shipment_time_days = int(warehouse_info.get(warehouse, {}).get('shipment_time_days') or 0)
         if ship_to_map:
             shipment_ship_to_key = st.selectbox('Ship To', list(ship_to_map.keys()), key='shipment_ship_to_select')
             selected_shipment_ship_to = ship_to_map[shipment_ship_to_key]
@@ -162,7 +164,7 @@ else:
                 first_po_date = st.session_state.shipment_temp_rows[0].get('po_date') or None
                 first_currency = st.session_state.shipment_temp_rows[0]['currency']
                 path = save_upload(attachment, f'shipment_{shipment_no}')
-                execute_query('\n                            INSERT INTO shipments (shipment_no, invoice_no, po_number, po_date, shipment_date, supplier_id, warehouse_id, customer_id, ship_to_master_id, shipment_time_days, invoice_amount, currency, attachment_path, remarks, shipping_bill_no, shipping_bill_date, shipment_doc_date, forwarder_name, incoterm, forwarder_id, incoterm_id)\n                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n                        ', (shipment_no, invoice_no, first_po_number, first_po_date, str(shipment_date), supplier_map[supplier], warehouse_map[warehouse], customer_map[customer], selected_shipment_ship_to.get('id'), int(warehouse_info.get(warehouse, {}).get('shipment_time_days') or 0), total_amount, first_currency, path, remarks, shipping_bill_no, str(shipping_bill_date), str(shipment_doc_date), forwarder_name, incoterm, forwarder_map.get(forwarder_name), incoterm_map.get(incoterm)))
+                execute_query('\n                            INSERT INTO shipments (shipment_no, invoice_no, po_number, po_date, shipment_date, supplier_id, warehouse_id, customer_id, ship_to_master_id, shipment_time_days, invoice_amount, currency, attachment_path, remarks, shipping_bill_no, shipping_bill_date, shipment_doc_date, forwarder_name, incoterm, forwarder_id, incoterm_id)\n                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n                        ', (shipment_no, invoice_no, first_po_number, first_po_date, str(shipment_date), supplier_map[supplier], warehouse_map[warehouse], customer_map[customer], selected_shipment_ship_to.get('id'), selected_shipment_time_days, total_amount, first_currency, path, remarks, shipping_bill_no, str(shipping_bill_date), str(shipment_doc_date), forwarder_name, incoterm, forwarder_map.get(forwarder_name), incoterm_map.get(incoterm)))
                 shipment_id = fetch_all('SELECT id FROM shipments WHERE shipment_no=?', (shipment_no,))[0]['id']
                 for row in st.session_state.shipment_temp_rows:
                     old_match = fetch_all('\n                                SELECT b.id FROM shipment_boxes b\n                                WHERE b.pallet_no = ? AND b.product_id = ?\n                            ', (row['pallet_no'], row['product_id']))

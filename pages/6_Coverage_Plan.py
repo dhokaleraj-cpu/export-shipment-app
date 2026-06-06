@@ -156,18 +156,24 @@ def ensure_coverage_rows(product_id, start_week, weeks_count, two_months_invento
 
 
 def get_product_shipment_time_info(product_id, fallback_days=0):
-    """Return latest warehouse/shipment time linked to selected product from Shipment Entry."""
+    """Return latest warehouse and shipment days linked to selected product from Shipment Entry.
+
+    Priority:
+    1. Latest shipment.shipment_time_days for this product, if available/non-zero.
+    2. Latest shipment warehouse master shipment_time_days for this product.
+    3. Fallback days.
+    """
     try:
         rows = fetch_all("""
             SELECT w.warehouse_name,
-                   COALESCE(NULLIF(s.shipment_time_days,0), w.shipment_time_days, ?::int) AS shipment_time_days
+                   COALESCE(NULLIF(s.shipment_time_days,0), NULLIF(w.shipment_time_days,0), ?::int) AS shipment_time_days
             FROM shipment_boxes b
             JOIN shipments s ON b.shipment_id = s.id
             LEFT JOIN warehouses w ON s.warehouse_id = w.id
             WHERE b.product_id=?
-            ORDER BY s.shipment_date DESC NULLS LAST, s.id DESC
+            ORDER BY s.shipment_date DESC NULLS LAST, s.id DESC, b.id DESC
             LIMIT 1
-        """, (int(fallback_days), product_id))
+        """, (int(fallback_days or 0), product_id))
         if rows:
             return rows[0].get("warehouse_name") or "", int(rows[0].get("shipment_time_days") or fallback_days or 0)
     except Exception:
@@ -176,11 +182,10 @@ def get_product_shipment_time_info(product_id, fallback_days=0):
 
 
 def get_week_qty_maps(product_id, shipment_time_days):
-    """Weekly quantity maps.
+    """Weekly quantity maps for Coverage Plan.
 
-    Shipment Delivery to Warehouse uses shipment entry lead time first:
-    - shipments.shipment_time_days if available and non-zero
-    - otherwise selected Warehouse shipment_time_days
+    Shipment Delivery to Warehouse week = shipment_date + shipment days.
+    Shipment days are product-specific from Shipment Entry when available.
     """
     delivered_week_rows = fetch_all("""
         SELECT date_trunc('week', d.delivery_date::date)::date AS week_start,
@@ -197,7 +202,6 @@ def get_week_qty_maps(product_id, shipment_time_days):
         if wk:
             delivered_by_week[wk.isoformat()] = safe_float(rr.get("delivered_qty"))
 
-    # If shipments.shipment_time_days does not exist in older DB, fallback query is used.
     try:
         shipment_week_rows = fetch_all("""
             SELECT date_trunc(
@@ -219,7 +223,7 @@ def get_week_qty_maps(product_id, shipment_time_days):
                            + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
                        )
                    )::date
-        """, (int(shipment_time_days), product_id, int(shipment_time_days)))
+        """, (int(shipment_time_days or 0), product_id, int(shipment_time_days or 0)))
     except Exception:
         shipment_week_rows = fetch_all("""
             SELECT date_trunc('week', (s.shipment_date::date + (?::int * INTERVAL '1 day')))::date AS week_start,
@@ -229,7 +233,7 @@ def get_week_qty_maps(product_id, shipment_time_days):
             WHERE b.product_id=?
               AND s.shipment_date IS NOT NULL
             GROUP BY date_trunc('week', (s.shipment_date::date + (?::int * INTERVAL '1 day')))::date
-        """, (int(shipment_time_days), product_id, int(shipment_time_days)))
+        """, (int(shipment_time_days or 0), product_id, int(shipment_time_days or 0)))
 
     shipment_by_week = {}
     for rr in shipment_week_rows:
@@ -241,17 +245,13 @@ def get_week_qty_maps(product_id, shipment_time_days):
 
 
 def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months_inventory, visible_start_week=None, max_rows=None):
-    """Coverage Plan weekly calculation based on uploaded Excel sheet.
+    """Coverage Plan calculation.
 
-    Excel reference:
-    - Stock at WH row = previous week's WH Bank.
-      Example: E3 = D6, F3 = E6, G3 = F6.
-    - WH Bank row = Shipment Delivery to Warehouse + Stock at WH - Delivered to Customer - Customer Forecast.
-      Example: E6 = E2 + E3 - E5 - E4.
-    - Bank Status = WH Bank - Two Months Inventory.
-
-    Only the first row can use an opening stock value from stored/imported Stock at WH.
-    From the second row onward, Stock at WH is always previous week's WH Bank.
+    - Old/passed weeks: Customer Forecast is treated as 0.
+    - Stock at WH = previous week's WH Bank. First row uses opening Stock at WH if entered/imported.
+    - WH Bank = Shipment Delivery to Warehouse + Stock at WH - Delivered to Customer - Customer Forecast.
+    - Suggested Shipment Qty is shown in the shortage week.
+    - KPI Next Shipment Date/Qty ignores past shipment dates and uses only today/future dates.
     """
     shipment_by_week, delivered_by_week = get_week_qty_maps(product_id, shipment_time_days)
 
@@ -262,6 +262,9 @@ def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months
     next_shipment_date = ""
     next_shipment_qty = 0.0
 
+    today_date = date.today()
+    current_week_start = datetime.strptime(monday_of_date(today_date), "%Y-%m-%d").date()
+
     for r in raw_rows:
         week_start = parse_db_date(r.get("plan_date"))
         if not week_start:
@@ -269,36 +272,33 @@ def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months
         week_key = week_start.isoformat()
 
         shipment_delivery_qty = safe_float(shipment_by_week.get(week_key, 0))
-        customer_forecast = safe_float(r.get("customer_forecast"))
+        raw_customer_forecast = safe_float(r.get("customer_forecast"))
         delivered_to_customer = safe_float(delivered_by_week.get(week_key, 0))
         stored_stock = safe_float(r.get("stock_at_wh"))
 
-        # Excel formula: current week's Stock at WH is previous week's WH Bank.
-        # First row only uses stored/imported opening stock; if blank, zero.
+        customer_forecast = 0.0 if week_start < current_week_start else raw_customer_forecast
+
         if previous_wh_bank is None:
             stock_at_wh = stored_stock if abs(stored_stock) > 0.000001 else 0.0
         else:
             stock_at_wh = previous_wh_bank
 
-        # Excel formula: WH Bank = Shipment Delivery + Stock at WH - Delivered - Forecast
         wh_bank = shipment_delivery_qty + stock_at_wh - delivered_to_customer - customer_forecast
-
-        # Bank Status = WH Bank - Two Months Inventory
         bank_status = wh_bank - two_months_inventory
 
         if customer_forecast > 0 or delivered_to_customer > 0:
             demand_started = True
 
+        suggested_qty = 0.0
+        suggested_date = ""
         if demand_started and bank_status < 0:
             suggested_qty = abs(bank_status)
-            suggested_date = (week_start - timedelta(days=int(shipment_time_days))).isoformat()
-        else:
-            suggested_qty = 0.0
-            suggested_date = ""
-
-        if demand_started and suggested_qty > 0 and not next_shipment_date:
-            next_shipment_date = suggested_date
-            next_shipment_qty = suggested_qty
+            candidate_date_obj = week_start - timedelta(days=int(shipment_time_days or 0))
+            # Table keeps suggested qty/date by shortage week; KPI ignores past dates.
+            suggested_date = candidate_date_obj.isoformat()
+            if candidate_date_obj >= today_date and not next_shipment_date:
+                next_shipment_date = suggested_date
+                next_shipment_qty = suggested_qty
 
         previous_wh_bank = wh_bank
 
@@ -321,6 +321,7 @@ def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months
             shipment_delivery_qty,
             delivered_to_customer,
             stock_at_wh,
+            customer_forecast,
             wh_bank,
             bank_status,
             suggested_qty,
@@ -344,8 +345,8 @@ def save_calculated_coverage(update_params):
     for item in update_params:
         execute_query("""
             UPDATE coverage_plan_lines
-            SET shipment_delivery_qty=?, delivered_to_customer=?, stock_at_wh=?, wh_bank=?, bank_status=?,
-                suggested_shipment_qty=?, next_shipment_date=?, two_months_inventory=?
+            SET shipment_delivery_qty=?, delivered_to_customer=?, stock_at_wh=?, customer_forecast=?,
+                wh_bank=?, bank_status=?, suggested_shipment_qty=?, next_shipment_date=?, two_months_inventory=?
             WHERE id=?
         """, item)
     clear_cache_after_write()
@@ -555,6 +556,9 @@ else:
     except Exception:
         pass
 
+    product_linked_warehouse_name, product_linked_shipment_time_days = get_product_shipment_time_info(selected_product_id, shipment_time_days)
+    if product_linked_shipment_time_days:
+        shipment_time_days = int(product_linked_shipment_time_days)
     ensure_coverage_rows(selected_product_id, visible_start_week, required_seed_weeks, product_two_months_inventory)
     execute_query("UPDATE coverage_plan_lines SET two_months_inventory=? WHERE product_id=?", (product_two_months_inventory, selected_product_id))
 
@@ -660,31 +664,46 @@ else:
             st.dataframe(input_grid, use_container_width=True)
             edited_input_grid = input_grid
 
+        manual_grid_password = st.text_input(
+            "Password to manually update Customer Forecast / Stock at WH Input Grid",
+            type="password",
+            key="coverage_manual_grid_password"
+        )
         if st.button("Save Forecast / Stock at WH Grid", type="primary", key="coverage_save_forecast_stock_grid"):
-            for label, record_id in id_by_label.items():
-                new_stock = safe_float(edited_input_grid.loc["Stock at WH", label])
-                new_forecast = safe_float(edited_input_grid.loc["Customer Forecast", label])
-                execute_query("UPDATE coverage_plan_lines SET stock_at_wh=?, customer_forecast=? WHERE id=?", (new_stock, new_forecast, record_id))
+            if not check_delete_password(manual_grid_password):
+                st.error("Wrong password. Customer Forecast / Stock at WH grid was not updated.")
+            else:
+                current_week_start_for_save = datetime.strptime(monday_of_date(date.today()), "%Y-%m-%d").date()
+                for label, record_id in id_by_label.items():
+                    new_stock = safe_float(edited_input_grid.loc["Stock at WH", label])
+                    new_forecast = safe_float(edited_input_grid.loc["Customer Forecast", label])
+                    label_row = next((x for x in forecast_rows if x["id"] == record_id), None)
+                    label_date = parse_db_date(label_row.get("plan_date")) if label_row else None
+                    if label_date and label_date < current_week_start_for_save:
+                        new_forecast = 0.0
+                    execute_query(
+                        "UPDATE coverage_plan_lines SET stock_at_wh=?, customer_forecast=? WHERE id=?",
+                        (new_stock, new_forecast, record_id)
+                    )
 
-            # Recalculate and save Coverage Plan Table immediately after grid save.
-            updated_raw_rows = fetch_all("""
-                SELECT id, week_no, plan_date, customer_forecast, stock_at_wh,
-                       shipment_delivery_qty, delivered_to_customer, wh_bank, bank_status,
-                       suggested_shipment_qty, next_shipment_date
-                FROM coverage_plan_lines
-                WHERE product_id=?
-                ORDER BY date(plan_date), week_no, id
-            """, (selected_product_id,))
-            _, _, update_after_grid, _, _ = calculate_coverage_rows(
-                updated_raw_rows,
-                selected_product_id,
-                shipment_time_days,
-                product_two_months_inventory
-            )
-            save_calculated_coverage(update_after_grid)
-            clear_cache_after_write()
-            st.success("Customer Forecast and Stock at WH updated. Coverage Plan Table recalculated and saved.")
-            st.rerun()
+                updated_raw_rows = fetch_all("""
+                    SELECT id, week_no, plan_date, customer_forecast, stock_at_wh,
+                           shipment_delivery_qty, delivered_to_customer, wh_bank, bank_status,
+                           suggested_shipment_qty, next_shipment_date
+                    FROM coverage_plan_lines
+                    WHERE product_id=?
+                    ORDER BY date(plan_date), week_no, id
+                """, (selected_product_id,))
+                _, _, update_after_grid, _, _ = calculate_coverage_rows(
+                    updated_raw_rows,
+                    selected_product_id,
+                    shipment_time_days,
+                    product_two_months_inventory
+                )
+                save_calculated_coverage(update_after_grid)
+                clear_cache_after_write()
+                st.success("Customer Forecast and Stock at WH updated. Stock at WH auto recalculated and old-week forecast set to zero.")
+                st.rerun()
 
     with st.expander("Detailed calculated rows", expanded=False):
         detail_df = pd.DataFrame(format_date_columns(visible_rows))
@@ -774,3 +793,6 @@ else:
             st.error(f"Forecast import failed: {e}")
 
 st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)
+
+
+# Safety no-op marker: suggested_shipment_qty and next_shipment_date are calculated and saved above.
