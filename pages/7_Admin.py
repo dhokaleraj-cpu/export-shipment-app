@@ -71,6 +71,61 @@ with admin_tabs[1]:
         else:
             st.error('User name and password are required.')
     show_filtered_df(fetch_all('SELECT id, username, role, is_active FROM users ORDER BY id'), 'admin_users', total=False)
+
+    st.divider()
+    st.subheader('Modify Existing User Details')
+    st.info('Select one user, tick the fields you want to update, then save.')
+
+    users_modify_rows = fetch_all('SELECT id, username, role, is_active FROM users ORDER BY username')
+    if users_modify_rows:
+        modify_labels = [f"{u['id']} | {u['username']} | {u['role']} | {'Active' if u.get('is_active') else 'Inactive'}" for u in users_modify_rows]
+        selected_modify_label = searchable_selectbox('Select User to Modify', modify_labels, key='admin_modify_user_select')
+        selected_modify_id = int(str(selected_modify_label).split('|')[0].strip())
+        selected_modify_user = next((u for u in users_modify_rows if int(u['id']) == selected_modify_id), None)
+
+        tick_username, tick_password, tick_role, tick_active = st.columns(4)
+        with tick_username:
+            update_username_tick = st.checkbox('Update User Name', key='tick_update_username')
+        with tick_password:
+            update_password_tick = st.checkbox('Update Password', key='tick_update_password')
+        with tick_role:
+            update_role_tick = st.checkbox('Update Role', key='tick_update_role')
+        with tick_active:
+            update_active_tick = st.checkbox('Update Active Status', key='tick_update_active')
+
+        mu1, mu2, mu3, mu4 = st.columns(4)
+        with mu1:
+            modified_username = st.text_input('New / Current User Name', value=selected_modify_user.get('username','') if selected_modify_user else '', key='admin_modified_username')
+        with mu2:
+            modified_password = st.text_input('New Password', type='password', key='admin_modified_password')
+        with mu3:
+            current_role = selected_modify_user.get('role','user') if selected_modify_user else 'user'
+            role_options = ['user', 'admin', 'super_admin']
+            modified_role = st.selectbox('New / Current Role', role_options, index=role_options.index(current_role) if current_role in role_options else 0, key='admin_modified_role')
+        with mu4:
+            modified_active = st.checkbox('Active', value=bool(selected_modify_user.get('is_active')) if selected_modify_user else True, key='admin_modified_active')
+
+        if st.button('Save Selected User Detail Changes', type='primary', key='admin_save_selected_user_detail_changes'):
+            if not any([update_username_tick, update_password_tick, update_role_tick, update_active_tick]):
+                st.warning('Please tick at least one field to update.')
+            else:
+                if update_username_tick and not modified_username.strip():
+                    st.error('User Name cannot be blank.')
+                elif update_password_tick and not modified_password.strip():
+                    st.error('Password cannot be blank when password update is ticked.')
+                else:
+                    if update_username_tick:
+                        execute_query('UPDATE users SET username=? WHERE id=?', (modified_username.strip(), selected_modify_id))
+                    if update_password_tick:
+                        execute_query('UPDATE users SET password_hash=? WHERE id=?', (hash_password(modified_password), selected_modify_id))
+                    if update_role_tick:
+                        execute_query('UPDATE users SET role=? WHERE id=?', (modified_role, selected_modify_id))
+                    if update_active_tick:
+                        execute_query('UPDATE users SET is_active=? WHERE id=?', (bool(modified_active), selected_modify_id))
+                    clear_permission_cache()
+                    st.success('Selected user details updated successfully.')
+                    st.rerun()
+
 with admin_tabs[2]:
     require_roles(('super_admin',))
     st.subheader('Page Wise User Controls - View / Edit')

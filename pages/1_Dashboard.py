@@ -266,7 +266,7 @@ labels = [
     ('DELIVERED QTY', qty['delivered_qty'], 'orange'),
     ('BALANCE QTY', balance_qty, 'blue'),
     ('TOTAL SALE', round(qty['total_sale'], 2), 'yellow'),
-    ('WAREHOUSE STOCK AMOUNT', f'USD {total_stock_balance_amount:,.2f}', 'blue'),
+    ('WAREHOUSE STOCK AMOUNT', f'$ {total_stock_balance_amount:,.2f}', 'blue'),
     ('OVERDUE PAYMENTS', overdue_count, 'red'),
     ('OVERDUE PAYMENT AMOUNT', f'{overdue_amount:,.2f}', 'red'),
 ]

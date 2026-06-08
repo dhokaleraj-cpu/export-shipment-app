@@ -1,3 +1,5 @@
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import Image as RLImage
 
 import io
 import base64
@@ -46,79 +48,378 @@ def delivery_invoice_excel_bytes(invoice, line_items):
     return output.getvalue()
 
 def delivery_invoice_pdf_bytes(invoice, line_items):
+    """One-page A4 portrait PDF Delivery Invoice.
+
+    Print and reprint both use this same PDF-only layout.
+    Footer is a single unified table so Amount Summary grid aligns exactly
+    with the footer border.
+    """
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=18,
+        leftMargin=18,
+        topMargin=16,
+        bottomMargin=14
+    )
+
     styles = getSampleStyleSheet()
+    normal = styles["Normal"]
+    small = styles["BodyText"]
+    title_style = styles["Title"]
+    heading_style = styles["Heading2"]
+
+    for style in [normal, small, title_style, heading_style]:
+        style.fontName = "Helvetica"
+
+    # Increased readable A4 font size.
+    normal.fontSize = 8.1
+    normal.leading = 9.5
+    small.fontSize = 7.6
+    small.leading = 8.8
+    title_style.fontName = "Helvetica-Bold"
+    title_style.fontSize = 15.4
+    title_style.leading = 17
+    heading_style.fontName = "Helvetica-Bold"
+    heading_style.fontSize = 10.8
+    heading_style.leading = 12.5
+
+    white_header_style = ParagraphStyle(
+        "white_header_style",
+        parent=normal,
+        fontName="Helvetica-Bold",
+        fontSize=8.3,
+        leading=9.8,
+        textColor=colors.white,
+    )
+
     story = []
-    story.append(Paragraph("<b>DELIVERY / COMMERCIAL INVOICE</b>", styles["Title"]))
-    story.append(Spacer(1, 8))
+    page_width = A4[0] - 36
+    navy = colors.HexColor("#1f2f57")
+    grey = colors.HexColor("#d9d9d9")
+    light_total = colors.HexColor("#f3f4f6")
 
-    customer_text = f"""
-    <b>Customer:</b> {invoice.get('customer_name','')}<br/>
-    <b>Address:</b> {invoice.get('customer_address','')}<br/>
-    <b>Phone:</b> {invoice.get('customer_phone','')}<br/>
-    <b>Email:</b> {invoice.get('customer_email','')}
-    """
-    ship_to_text = f"""
-    <b>Ship To:</b> {invoice.get('ship_to_name','')}<br/>
-    <b>Ship To ID:</b> {invoice.get('ship_to_id','')}<br/>
-    {invoice.get('ship_to_addressline1','')}<br/>
-    {invoice.get('ship_to_addressline2','')}<br/>
-    {invoice.get('ship_to_addressline3','')}<br/>
-    <b>GSTIN:</b> {invoice.get('ship_to_vendor_gstin','')}<br/>
-    <b>Phone:</b> {invoice.get('ship_to_vendor_phone','')}<br/>
-    <b>Email:</b> {invoice.get('ship_to_vendor_email','')}
-    """
-    invoice_text = f"""
-    <b>Delivery Invoice No:</b> {invoice.get('delivery_invoice_no','')}<br/>
-    <b>Delivery Date:</b> {invoice.get('delivery_date','')}<br/>
-    <b>Payment Due Date:</b> {invoice.get('payment_due_date','')}<br/>
-    <b>Vehicle Number:</b> {invoice.get('vehicle_number','')}<br/>
-    <b>ASN Number:</b> {invoice.get('asn_number','')}<br/>
-    <b>ASN Date:</b> {invoice.get('asn_date','')}<br/>
-    <b>Packaging:</b> {invoice.get('packaging_details','')}
-    """
-    story.append(Table([[Paragraph(customer_text, styles["Normal"]), Paragraph(ship_to_text, styles["Normal"]), Paragraph(invoice_text, styles["Normal"])]], colWidths=[260, 260, 260]))
-    story.append(Spacer(1, 10))
+    logo_cell = Paragraph("<b>FSI LOGO</b>", heading_style)
+    try:
+        if LOGO_PATH.exists():
+            logo_cell = RLImage(str(LOGO_PATH), width=86, height=32)
+    except Exception:
+        logo_cell = Paragraph("<b>FSI LOGO</b>", heading_style)
 
-    data = [["Sr", "Product", "Original Inv", "PO No", "PO Date", "Pallet", "Box", "Qty", "Price", "Cur", "Amount"]]
-    total_qty = total_amt = 0
+    title_table = Table(
+        [[logo_cell, Paragraph("<b>DELIVERY / COMMERCIAL INVOICE</b>", title_style)]],
+        colWidths=[112, page_width - 112],
+        rowHeights=[44]
+    )
+    title_table.setStyle(TableStyle([
+        ("BOX", (0,0), (-1,-1), 0.5, colors.black),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.black),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("ALIGN", (0,0), (0,0), "CENTER"),
+        ("ALIGN", (1,0), (1,0), "CENTER"),
+    ]))
+    story.append(title_table)
+    story.append(Spacer(1, 4))
+
+    seller_name = invoice.get("seller_name") or invoice.get("company_name") or "Four Star Industries Pvt. Ltd."
+    seller_address = invoice.get("seller_address") or invoice.get("company_address") or ""
+    company_code = invoice.get("customer_company_code") or invoice.get("company_code") or ""
+
+    seller = f"""<b>Seller</b><br/>
+{seller_name}<br/>
+{seller_address}<br/>
+<b>Company Code:</b> {company_code}"""
+
+    invoice_details = f"""<b>Delivery Invoice No:</b> {invoice.get('delivery_invoice_no','')}<br/>
+Delivery Date: {invoice.get('delivery_date','')}"""
+
+    ship = f"""<b>Ship To</b><br/>
+{invoice.get('ship_to_name','')}<br/>
+{invoice.get('ship_to_addressline1','')}<br/>
+{invoice.get('ship_to_addressline2','')}<br/>
+{invoice.get('ship_to_addressline3','')}"""
+
+    bill = f"""<b>Bill To</b><br/>
+{invoice.get('customer_name','')}<br/>
+{invoice.get('customer_address','')}"""
+
+    addr_table = Table(
+        [
+            [Paragraph(seller, normal), Paragraph(invoice_details, normal)],
+            [Paragraph(ship, normal), Paragraph(bill, normal)],
+        ],
+        colWidths=[page_width / 2, page_width / 2],
+        rowHeights=[70, 78]
+    )
+    addr_table.setStyle(TableStyle([
+        ("BOX", (0,0), (-1,-1), 0.5, colors.black),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.black),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("LEFTPADDING", (0,0), (-1,-1), 7),
+        ("RIGHTPADDING", (0,0), (-1,-1), 7),
+        ("TOPPADDING", (0,0), (-1,-1), 5),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+    ]))
+    story.append(addr_table)
+    story.append(Spacer(1, 4))
+
+    info_style = ParagraphStyle(
+        "invoice_info_style",
+        parent=normal,
+        fontName="Helvetica",
+        fontSize=8.1,
+        leading=9.5,
+        wordWrap="CJK",
+    )
+    info_data = [
+        [
+            Paragraph("<b>Payment Due Date:</b>", info_style),
+            Paragraph(str(invoice.get("payment_due_date","")), info_style),
+            Paragraph("<b>Vehicle Number:</b>", info_style),
+            Paragraph(str(invoice.get("vehicle_number","")), info_style),
+        ],
+        [
+            Paragraph("<b>ASN Number:</b>", info_style),
+            Paragraph(str(invoice.get("asn_number","")), info_style),
+            Paragraph("<b>ASN Date:</b>", info_style),
+            Paragraph(str(invoice.get("asn_date","")), info_style),
+        ],
+    ]
+    info_table = Table(
+        info_data,
+        colWidths=[page_width * 0.225, page_width * 0.275, page_width * 0.225, page_width * 0.275],
+        rowHeights=[24, 24]
+    )
+    info_table.setStyle(TableStyle([
+        ("BOX", (0,0), (-1,-1), 0.5, colors.black),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.black),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("LEFTPADDING", (0,0), (-1,-1), 8),
+        ("RIGHTPADDING", (0,0), (-1,-1), 8),
+        ("TOPPADDING", (0,0), (-1,-1), 5),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+    ]))
+    story.append(info_table)
+    story.append(Spacer(1, 4))
+
+    data = [[
+        "Sr", "Product", "FSI Orig Inv #", "PO No", "PO Date",
+        "Pallet", "Qty", "Rate", "Cur", "Amount"
+    ]]
+
+    total_qty = 0.0
+    total_amt = 0.0
     currency_set = set()
+
     for i, item in enumerate(line_items, start=1):
-        qty = float(item.get("qty") or 0)
-        price = float(item.get("price") or 0)
+        qty = float(item.get("qty") or item.get("delivered_qty") or 0)
+        price = float(item.get("price") or item.get("unit_price") or 0)
         amount = float(item.get("amount") or qty * price)
-        cur = str(item.get("currency") or "")
-        if cur:
-            currency_set.add(cur)
+        currency = str(item.get("currency") or invoice.get("currency") or "$")
+        if currency:
+            currency_set.add(currency)
         total_qty += qty
         total_amt += amount
+
+        product_text = f"{item.get('product_code','')} {item.get('product_name','')}"
         data.append([
-            i,
-            f"{item.get('product_code','')} {item.get('product_name','')}",
-            item.get("original_invoice_no", invoice.get("original_invoice_no","")),
-            item.get("po_number",""),
-            item.get("po_date",""),
-            item.get("pallet_no",""),
-            item.get("box_no",""),
+            str(i),
+            Paragraph(str(product_text), small),
+            str(item.get("original_invoice_no") or invoice.get("original_invoice_no", "")),
+            str(item.get("po_number") or ""),
+            str(item.get("po_date") or ""),
+            str(item.get("pallet_no") or ""),
             f"{qty:,.0f}",
             f"{price:,.2f}",
-            cur,
-            f"{amount:,.2f}"
+            currency,
+            f"{amount:,.2f}",
         ])
-    total_cur = ", ".join(sorted(currency_set))
-    data.append(["", "TOTAL", "", "", "", "", "", f"{total_qty:,.0f}", "", total_cur, f"{total_amt:,.2f}"])
-    tbl = Table(data, repeatRows=1)
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1f2f57")),
+
+    invoice_currency = ", ".join(sorted(currency_set)) if currency_set else "$"
+    data.append(["", "TOTAL", "", "", "", "", f"{total_qty:,.0f}", "", invoice_currency, f"{total_amt:,.2f}"])
+
+    body_widths = [24, 112, 76, 55, 52, 48, 42, 50, 35, 52]
+    body_table = Table(data, repeatRows=1, colWidths=body_widths)
+    body_table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), navy),
         ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-        ("GRID", (0,0), (-1,-1), 0.5, colors.black),
+        ("GRID", (0,0), (-1,-1), 0.45, colors.black),
+        ("BOX", (0,0), (-1,-1), 0.5, colors.black),
         ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-        ("ALIGN", (7,1), (-1,-1), "RIGHT"),
+        ("FONTNAME", (0,-1), (-1,-1), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,-1), 7.7),
+        ("ALIGN", (6,1), (-1,-1), "RIGHT"),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("LEFTPADDING", (0,0), (-1,-1), 3),
+        ("RIGHTPADDING", (0,0), (-1,-1), 3),
+        ("TOPPADDING", (0,0), (-1,-1), 3),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 3),
     ]))
-    story.append(tbl)
+    story.append(body_table)
+
+    # Footer position: push toward bottom while avoiding a second page.
+    row_count = len(line_items)
+    if row_count <= 2:
+        story.append(Spacer(1, 128))
+    elif row_count <= 4:
+        story.append(Spacer(1, 100))
+    elif row_count <= 6:
+        story.append(Spacer(1, 65))
+    else:
+        story.append(Spacer(1, 28))
+
+    packaging = str(invoice.get("packaging_details") or "")
+    packaging_value = Paragraph(packaging.replace("\n", "<br/>"), normal)
+
+    bank_details = Paragraph(
+        "<b>BANK DETAILS:</b><br/>"
+        "BANK ACCOUNT NO : 004330150000003<br/>"
+        "BANK IFSC CODE : BKID0000043<br/>"
+        "BANK MICR CODE : 400013080<br/>"
+        "BANK SWIFT CODE : BKIDINBBPPD",
+        normal
+    )
+
+    subtotal = total_amt
+    grand_total = subtotal
+
+    # Unified footer table. No nested subtotal table, so grid lines align exactly
+    # with the footer border and the amount section never has an inset mismatch.
+    left_w = page_width - 180
+    label_w = 82
+    cur_w = 30
+    amt_w = 68
+
+    footer_data = [
+        [
+            Paragraph("<b>PACKAGING DETAILS:</b>", white_header_style),
+            Paragraph("<b>AMOUNT SUMMARY</b>", white_header_style),
+            "",
+            "",
+        ],
+        [packaging_value, "SUBTOTAL", invoice_currency, f"{subtotal:,.2f}"],
+        ["", "TAX", "", "-"],
+        ["", "OTHER", "", "-"],
+        ["", "TOTAL", invoice_currency, f"{grand_total:,.2f}"],
+        [bank_details, "", "", ""],
+    ]
+
+    footer_table = Table(
+        footer_data,
+        colWidths=[left_w, label_w, cur_w, amt_w],
+        rowHeights=[24, 21, 21, 21, 23, 66]
+    )
+    footer_table.setStyle(TableStyle([
+        ("BOX", (0,0), (-1,-1), 0.5, colors.black),
+        ("GRID", (0,0), (-1,4), 0.5, colors.black),
+        ("BACKGROUND", (0,0), (-1,0), navy),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("SPAN", (1,0), (3,0)),
+        ("SPAN", (0,1), (0,4)),
+        ("SPAN", (0,5), (3,5)),
+        ("BACKGROUND", (0,5), (0,5), grey),
+        ("BOX", (0,5), (3,5), 0.5, colors.black),
+        ("BACKGROUND", (1,4), (3,4), light_total),
+        ("LINEABOVE", (1,4), (3,4), 0.8, colors.black),
+        ("FONTNAME", (1,4), (3,4), "Helvetica-Bold"),
+        ("ALIGN", (1,1), (3,4), "RIGHT"),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("FONTSIZE", (0,0), (-1,-1), 8.1),
+        ("LEFTPADDING", (0,0), (-1,-1), 7),
+        ("RIGHTPADDING", (0,0), (-1,-1), 7),
+        ("TOPPADDING", (0,0), (-1,-1), 4),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+    ]))
+    story.append(footer_table)
+    story.append(Spacer(1, 7))
+
+    contact_table = Table([
+        [Paragraph("If you have any questions about this documents, please contact<br/>FSI, connect@fourstarindustries.com", normal),
+         Paragraph("<b>Authorised Signatory</b>", normal)]
+    ], colWidths=[page_width - 170, 170])
+    contact_table.setStyle(TableStyle([
+        ("ALIGN", (0,0), (0,0), "CENTER"),
+        ("ALIGN", (1,0), (1,0), "RIGHT"),
+        ("FONTSIZE", (0,0), (-1,-1), 8.1),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+    ]))
+    story.append(contact_table)
+
     doc.build(story)
     return buffer.getvalue()
+
+
+def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
+    """Fetch saved delivery invoice details and line items for PDF reprint."""
+    header_rows = fetch_all("""
+        SELECT
+            d.delivery_invoice_no,
+            MIN(d.delivery_date) AS delivery_date,
+            MAX(d.payment_due_date) AS payment_due_date,
+            MAX(d.vehicle_number) AS vehicle_number,
+            MAX(d.asn_number) AS asn_number,
+            MAX(d.asn_date) AS asn_date,
+            MAX(d.packaging_details) AS packaging_details,
+            MAX(d.currency) AS currency,
+            c.customer_name,
+            c.address AS customer_address,
+            c.company_code AS customer_company_code,
+            c.phone AS customer_phone,
+            c.email AS customer_email,
+            s.invoice_no AS original_invoice_no,
+            s.shipment_no,
+            stm.ship_to_name,
+            stm.ship_to_id,
+            stm.addressline1 AS ship_to_addressline1,
+            stm.addressline2 AS ship_to_addressline2,
+            stm.addressline3 AS ship_to_addressline3,
+            stm.vendor_gstin AS ship_to_vendor_gstin,
+            stm.vendor_phone AS ship_to_vendor_phone,
+            stm.vendor_email AS ship_to_vendor_email
+        FROM customer_deliveries d
+        JOIN customers c ON d.customer_id = c.id
+        JOIN shipments s ON d.shipment_id = s.id
+        LEFT JOIN ship_to_masters stm ON d.ship_to_master_id = stm.id
+        WHERE d.delivery_invoice_no=?
+        GROUP BY d.delivery_invoice_no, c.customer_name, c.address, c.company_code, c.phone, c.email,
+                 s.invoice_no, s.shipment_no, stm.ship_to_name, stm.ship_to_id,
+                 stm.addressline1, stm.addressline2, stm.addressline3,
+                 stm.vendor_gstin, stm.vendor_phone, stm.vendor_email
+        ORDER BY MIN(d.id)
+        LIMIT 1
+    """, (delivery_invoice_no,))
+    if not header_rows:
+        return None, []
+
+    invoice = dict(header_rows[0])
+    invoice["seller_name"] = "Four Star Industries Pvt. Ltd."
+    invoice["seller_address"] = ""
+
+    item_rows = fetch_all("""
+        SELECT
+            d.delivery_invoice_no,
+            s.invoice_no AS original_invoice_no,
+            b.po_number,
+            b.po_date,
+            b.pallet_no,
+            b.box_no,
+            p.product_code,
+            p.product_name,
+            d.delivered_qty AS qty,
+            d.unit_price AS price,
+            d.currency,
+            d.sale_amount AS amount
+        FROM customer_deliveries d
+        JOIN shipments s ON d.shipment_id = s.id
+        JOIN shipment_boxes b ON d.box_id = b.id
+        JOIN products p ON b.product_id = p.id
+        WHERE d.delivery_invoice_no=?
+        ORDER BY COALESCE(b.fifo_row_id,b.id), b.pallet_no, p.product_code
+    """, (delivery_invoice_no,))
+    line_items = [dict(r) for r in item_rows]
+    return invoice, line_items
 
 
 def delivery_invoice_jpeg_placeholder(invoice, line_items):
@@ -283,6 +584,13 @@ else:
                     if first_print is None:
                         first_print = {'customer_name': customer,
                                     'customer_address': selected_customer_row.get('address','') if 'selected_customer_row' in locals() else '',
+                                    'customer_company_code': selected_customer_row.get('company_code','') if 'selected_customer_row' in locals() else '',
+                                    'customer_phone': selected_customer_row.get('phone','') if 'selected_customer_row' in locals() else '',
+                                    'customer_email': selected_customer_row.get('email','') if 'selected_customer_row' in locals() else '',
+                                    'seller_name': 'Four Star Industries Pvt. Ltd.',
+                                    'seller_address': '',
+                                    'customer_address': selected_customer_row.get('address','') if 'selected_customer_row' in locals() else '',
+                                    'customer_company_code': selected_customer_row.get('company_code','') if 'selected_customer_row' in locals() else '',
                                     'customer_phone': selected_customer_row.get('phone','') if 'selected_customer_row' in locals() else '',
                                     'customer_email': selected_customer_row.get('email','') if 'selected_customer_row' in locals() else '',
                                     'ship_to_name': selected_ship_to.get('ship_to_name', ''),
@@ -301,11 +609,58 @@ else:
 if 'last_delivery_print' in st.session_state:
     html_doc = delivery_note_html(st.session_state.last_delivery_print)
     print_popup(html_doc)
-    st.download_button('Download / Print Delivery Note HTML', html_doc, 'delivery_note.html', mime='text/html', key='download_delivery_note_html')
+    st.download_button('Download Delivery Note PDF Only', html_doc, 'delivery_note.pdf', mime='text/html', key='download_delivery_note_html')
     del st.session_state.last_delivery_print
 st.divider()
+show_header("Reprint Delivery Invoice PDF", "Generate saved Delivery Invoice again in the approved PDF format")
+
+saved_delivery_invoices_for_reprint = fetch_all("""
+    SELECT
+        d.delivery_invoice_no,
+        MIN(d.delivery_date) AS delivery_date,
+        c.customer_name,
+        s.invoice_no AS original_invoice_no,
+        SUM(d.delivered_qty) AS total_qty,
+        SUM(d.sale_amount) AS total_amount,
+        MAX(d.currency) AS currency
+    FROM customer_deliveries d
+    JOIN customers c ON d.customer_id = c.id
+    JOIN shipments s ON d.shipment_id = s.id
+    GROUP BY d.delivery_invoice_no, c.customer_name, s.invoice_no
+    ORDER BY MIN(d.id) DESC
+    LIMIT 200
+""")
+
+if saved_delivery_invoices_for_reprint:
+    reprint_options = [
+        f"{r['delivery_invoice_no']} | Original Inv {r['original_invoice_no']} | {r['customer_name']} | {r['total_qty']:,.0f} Qty | {r['total_amount']:,.2f} {r['currency']}"
+        for r in saved_delivery_invoices_for_reprint
+    ]
+    selected_reprint_key = searchable_selectbox(
+        "Select Delivery Invoice for PDF Reprint",
+        reprint_options,
+        key="delivery_invoice_pdf_reprint_select"
+    )
+    selected_reprint_invoice_no = selected_reprint_key.split(" | ")[0].strip()
+
+    invoice_for_reprint, line_items_for_reprint = get_saved_delivery_invoice_for_pdf(selected_reprint_invoice_no)
+    if invoice_for_reprint and line_items_for_reprint:
+        pdf_bytes_reprint = delivery_invoice_pdf_bytes(invoice_for_reprint, line_items_for_reprint)
+        st.download_button(
+            "Reprint Delivery Invoice PDF",
+            data=pdf_bytes_reprint,
+            file_name=f"delivery_invoice_reprint_{selected_reprint_invoice_no}.pdf",
+            mime="application/pdf",
+            key="reprint_delivery_invoice_pdf_button"
+        )
+    else:
+        st.warning("No saved line items found for selected Delivery Invoice.")
+else:
+    st.info("No saved Delivery Invoices available for reprint.")
+
+st.divider()
 st.subheader('Last Delivery Entries - Delivery Invoice Wise')
-delivery_invoice_rows = fetch_all('\n            SELECT d.delivery_invoice_no,\n                   MIN(d.id) AS first_id,\n                   MAX(d.delivery_date) AS delivery_date,\n                   MAX(d.payment_due_date) AS payment_due_date,\n                   c.customer_name,\n                   s.invoice_no AS original_invoice_no,\n                   s.shipment_no,\n                   d.currency,\n                   SUM(d.delivered_qty) AS total_qty,\n                   SUM(d.sale_amount) AS total_amount,\n                   COUNT(*) AS product_rows\n            FROM customer_deliveries d\n            JOIN customers c ON d.customer_id = c.id\n            JOIN shipments s ON d.shipment_id = s.id\n            GROUP BY d.delivery_invoice_no, c.customer_name, s.invoice_no, s.shipment_no, d.currency\n            ORDER BY first_id DESC\n            LIMIT 30\n        ')
+delivery_invoice_rows = fetch_all('\n            SELECT d.delivery_invoice_no,\n                   MIN(d.id) AS first_id,\n                   MAX(d.delivery_date) AS delivery_date,\n                   MAX(d.payment_due_date) AS payment_due_date,\n                   c.customer_name,\n                   s.invoice_no AS original_invoice_no,\n                   s.shipment_no,\n                   d.currency,\n                   SUM(d.delivered_qty) AS total_qty,\n                   SUM(d.sale_amount) AS total_amount,\n                   COUNT(*) AS product_rows\n            FROM customer_deliveries d\n            JOIN customers c ON d.customer_id = c.id\n            JOIN shipments s ON d.shipment_id = s.id\n            GROUP BY d.delivery_invoice_no, c.customer_name, c.company_code, s.invoice_no, s.shipment_no, d.currency\n            ORDER BY first_id DESC\n            LIMIT 30\n        ')
 if not delivery_invoice_rows:
     st.info('No delivery invoice entries available.')
 else:
@@ -412,6 +767,7 @@ try:
                MAX(d.packaging_details) AS packaging_details,
                c.customer_name,
                c.address AS customer_address,
+               c.company_code AS customer_company_code,
                c.phone AS customer_phone,
                c.email AS customer_email,
                s.invoice_no AS original_invoice_no,
@@ -423,7 +779,7 @@ try:
         FROM customer_deliveries d
         JOIN customers c ON d.customer_id = c.id
         JOIN shipments s ON d.shipment_id = s.id
-        GROUP BY d.delivery_invoice_no, c.customer_name, s.invoice_no, s.shipment_no, d.currency
+        GROUP BY d.delivery_invoice_no, c.customer_name, c.company_code, s.invoice_no, s.shipment_no, d.currency
         ORDER BY first_id DESC
         LIMIT 100
     """)
@@ -464,6 +820,13 @@ try:
                 "payment_due_date": str(selected_saved_invoice.get("payment_due_date") or ""),
                 "customer_name": selected_saved_invoice.get("customer_name", ""),
                 "customer_address": selected_saved_invoice.get("customer_address", ""),
+                "customer_company_code": selected_saved_invoice.get("customer_company_code", ""),
+                "customer_phone": selected_saved_invoice.get("customer_phone", ""),
+                "customer_email": selected_saved_invoice.get("customer_email", ""),
+                "seller_name": "Four Star Industries Pvt. Ltd.",
+                "seller_address": "",
+                "customer_address": selected_saved_invoice.get("customer_address", ""),
+                "customer_company_code": selected_saved_invoice.get("customer_company_code", ""),
                 "customer_phone": selected_saved_invoice.get("customer_phone", ""),
                 "customer_email": selected_saved_invoice.get("customer_email", ""),
                 "original_invoice_no": selected_saved_invoice.get("original_invoice_no", ""),
@@ -498,36 +861,19 @@ try:
                     "currency": row.get("currency") or "",
                     "amount": row.get("sale_amount") or 0,
                 })
-
-            exp1, exp2, exp3 = st.columns(3)
-            with exp1:
-                st.download_button(
-                    "Export Delivery Invoice PDF",
-                    delivery_invoice_pdf_bytes(export_invoice, export_line_items),
-                    file_name=f"delivery_invoice_{selected_saved_invoice['delivery_invoice_no']}.pdf",
-                    mime="application/pdf",
-                    key="saved_delivery_invoice_pdf_export",
-                )
-            with exp2:
-                st.download_button(
-                    "Export Delivery Invoice Excel",
-                    delivery_invoice_excel_bytes(export_invoice, export_line_items),
-                    file_name=f"delivery_invoice_{selected_saved_invoice['delivery_invoice_no']}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="saved_delivery_invoice_excel_export",
-                )
-            with exp3:
-                st.download_button(
-                    "Export HTML for Print/JPEG",
-                    delivery_invoice_print_html(export_invoice, export_line_items).encode("utf-8"),
-                    file_name=f"delivery_invoice_{selected_saved_invoice['delivery_invoice_no']}.html",
-                    mime="text/html",
-                    key="saved_delivery_invoice_html_export",
-                )
+            st.download_button(
+                "Generate Delivery Invoice PDF",
+                delivery_invoice_pdf_bytes(export_invoice, export_line_items),
+                file_name=f"delivery_invoice_{selected_saved_invoice['delivery_invoice_no']}.pdf",
+                mime="application/pdf",
+                key="saved_delivery_invoice_pdf_export",
+            )
+            st.info("Delivery Invoice print is available in PDF only.")
             with st.expander("Preview Selected Delivery Invoice", expanded=False):
                 components.html(delivery_invoice_print_html(export_invoice, export_line_items), height=900, scrolling=True)
 except Exception as export_error:
     st.warning(f"Saved delivery invoice export could not load: {export_error}")
+
 
 
 st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)

@@ -32,6 +32,17 @@ def _reports_total_footer_df_fallback(rows_or_df):
 if "report_total_footer_df" not in globals():
     report_total_footer_df = _reports_total_footer_df_fallback
 
+
+def _highlight_overdue_payment_due_date(row):
+    styles = ['' for _ in row]
+    try:
+        due = pd.to_datetime(row.get("payment_due_date"), errors="coerce")
+        if pd.notna(due) and due.date() < date.today():
+            styles = ['background-color: #fee2e2; color: #b91c1c; font-weight: 900;' if col == "payment_due_date" else '' for col in row.index]
+    except Exception:
+        pass
+    return styles
+
 report_options = [
     'Delivery to Customer Product Wise Sale Report',
     'Product Wise and Delivery Invoice Wise Report for Original Invoice Number',
@@ -44,7 +55,7 @@ report_options = [
     'Original Invoice Number Wise Balance Quantity Product Wise',
     'Pallet Wise Balance Quantity',
     'Original Invoice Wise Balance Quantity',
-    'Payment Due Summary Invoice Wise',
+    'Original Invoice wise payment Balance',
     'Delivery Invoice Wise Summary Report',
     'Monthly Sales Report - Product and Customer',
     'Monthly Payment Receipt Report',
@@ -300,16 +311,24 @@ elif report == 'Original Invoice Wise Balance Quantity':
         ORDER BY s.invoice_no
     """)
 
-elif report == 'Payment Due Summary Invoice Wise':
+elif report == 'Original Invoice wise payment Balance':
     rows = fetch_all("""
-        SELECT d.delivery_invoice_no, c.customer_name, MIN(d.delivery_date) AS delivery_date, MAX(d.payment_due_date) AS payment_due_date,
-               pt.term_name, SUM(d.delivered_qty) AS delivered_qty, d.currency, SUM(d.sale_amount) AS sale_amount,
+        SELECT s.invoice_no AS original_invoice_no,
+               d.delivery_invoice_no,
+               c.customer_name,
+               MIN(d.delivery_date) AS delivery_date,
+               MAX(d.payment_due_date) AS payment_due_date,
+               pt.term_name,
+               SUM(d.delivered_qty) AS delivered_qty,
+               d.currency,
+               SUM(d.sale_amount) AS sale_amount,
                COALESCE(SUM(pay.payment_amount),0) AS paid_amount,
                SUM(d.sale_amount) - COALESCE(SUM(pay.payment_amount),0) AS pending_amount,
                CASE WHEN SUM(d.sale_amount) - COALESCE(SUM(pay.payment_amount),0) <= 0 THEN 'Paid'
                     WHEN MAX(d.payment_due_date)::date < CURRENT_DATE THEN 'Overdue'
                     ELSE 'Pending' END AS payment_status
         FROM customer_deliveries d
+        JOIN shipments s ON d.shipment_id = s.id
         JOIN customers c ON d.customer_id = c.id
         LEFT JOIN payment_terms pt ON d.payment_term_id = pt.id
         LEFT JOIN (
@@ -317,8 +336,8 @@ elif report == 'Payment Due Summary Invoice Wise':
             FROM payments
             GROUP BY delivery_id
         ) pay ON d.id = pay.delivery_id
-        GROUP BY d.delivery_invoice_no, c.customer_name, pt.term_name, d.currency
-        ORDER BY payment_due_date
+        GROUP BY s.invoice_no, d.delivery_invoice_no, c.customer_name, pt.term_name, d.currency
+        ORDER BY original_invoice_no, payment_due_date
     """)
 
 elif report == 'Delivery Invoice Wise Summary Report':
