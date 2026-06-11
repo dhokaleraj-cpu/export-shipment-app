@@ -2679,6 +2679,73 @@ def require_login():
 
 
 
+
+def force_exact_login_page():
+    """Safe login UI renderer used by page_setup/login flow."""
+    try:
+        st.markdown("""
+        <style>
+        .login-card {
+            max-width: 420px;
+            margin: 28px auto 0 auto;
+            background: #ffffff;
+            border: 1px solid #d9e2ec;
+            border-radius: 16px;
+            padding: 22px 26px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+            text-align: center;
+        }
+        .login-card h1 {
+            font-family: Montserrat, Aptos, Arial, sans-serif !important;
+            font-size: 28px !important;
+            line-height: 1.1 !important;
+            font-weight: 900 !important;
+            color: #003B73 !important;
+            margin-bottom: 18px !important;
+        }
+        .login-logo-wrap {
+            display:flex;
+            justify-content:center;
+            align-items:center;
+            margin-bottom:10px;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        logo_html = '<div class="logo-circle">FSI</div>'
+        try:
+            if LOGO_PATH.exists():
+                logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
+                logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="max-width:90px;height:auto;object-fit:contain;" />'
+        except Exception:
+            pass
+
+        st.markdown(
+            '<div class="login-card">'
+            '<div class="login-logo-wrap">' + logo_html + '</div>'
+            '<h1>EXPORT SHIPMENT<br>MONITORING SYSTEM</h1>',
+            unsafe_allow_html=True
+        )
+
+        username = st.text_input("Username", key="force_exact_login_username")
+        password = st.text_input("Password", type="password", key="force_exact_login_password")
+
+        if st.button("Login", key="force_exact_login_button", type="primary"):
+            user = verify_user(username, password)
+            if user:
+                st.session_state["user"] = user
+                st.rerun()
+            else:
+                st.error("Invalid username or password.")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+        try:
+            render_slogan_footer(login=True)
+        except Exception:
+            pass
+    except Exception as e:
+        st.error(f"Login page error: {e}")
+
 def page_setup(cleanup=True):
     """Safe application page setup.
 
