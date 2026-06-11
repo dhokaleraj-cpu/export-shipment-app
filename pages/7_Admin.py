@@ -249,6 +249,7 @@ with admin_tabs[4]:
         finally:
             conn.close()
 
+render_slogan_footer()
 st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)
 
 

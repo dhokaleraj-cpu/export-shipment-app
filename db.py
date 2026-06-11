@@ -1,3 +1,4 @@
+DATA_RETENTION_NOTE = "This application uses non-destructive migrations; replacing db.py does not delete existing database rows."
 import os
 import hashlib
 import time

@@ -67,4 +67,5 @@ if st.session_state.user['role'] == 'super_admin':
             st.success('Payment updated successfully.')
             st.rerun()
 
+render_slogan_footer()
 st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)

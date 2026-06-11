@@ -378,4 +378,5 @@ except Exception as coverage_dash_error:
     st.warning(f"Coverage Plan Dashboard could not load: {coverage_dash_error}")
 
 
+render_slogan_footer()
 st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)

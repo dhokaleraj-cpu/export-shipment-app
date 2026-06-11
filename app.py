@@ -8,3 +8,6 @@ else:
 
 # Dashboard content is available in pages/1_Dashboard.py.
 # Use the Modules menu above to open each module.
+
+
+render_slogan_footer()

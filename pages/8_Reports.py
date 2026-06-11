@@ -383,4 +383,5 @@ df = report_total_footer_df(rows)
 df = show_filtered_df(df.to_dict('records'), f'reports_filter_{report}', total=False)
 export_buttons(df, report.replace(' ', '_').replace('-', '').lower())
 
+render_slogan_footer()
 st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)

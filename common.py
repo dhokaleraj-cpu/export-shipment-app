@@ -180,6 +180,41 @@ div[data-testid="stButton"] > button {
         padding: 8px !important;
     }
 }
+
+/* Rajesh slogan footer on every page and login page */
+.fsi-slogan-footer {
+    width: 100%;
+    text-align: center;
+    font-family: Aptos, Arial, sans-serif;
+    font-size: 13px;
+    font-weight: 900;
+    color: #003B73;
+    padding: 8px 10px;
+    margin-top: 14px;
+    border-top: 1px solid #d9e2ec;
+    background: rgba(255,255,255,0.92);
+}
+.fsi-login-slogan-footer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 8px;
+    width: 100%;
+    text-align: center;
+    font-family: Aptos, Arial, sans-serif;
+    font-size: 13px;
+    font-weight: 900;
+    color: #003B73;
+    z-index: 9999;
+}
+@media (max-width: 760px) {
+    .fsi-slogan-footer, .fsi-login-slogan-footer {
+        font-size: 11px;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -2622,7 +2657,18 @@ def deduplicate_coverage_plan_dates(product_id):
 def require_login():
     if "user" not in st.session_state or not st.session_state.get("user"):
         force_exact_login_page()
+        render_slogan_footer(login=True)
         st.stop()
+
+
+def render_slogan_footer(login=False):
+    """Render developer slogan/footer."""
+    cls = "fsi-login-slogan-footer" if login else "fsi-slogan-footer"
+    st.markdown('<div class="' + cls + '">Developed by Rajesh Dhokale&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Connect : dhokaleraj@icloud.com</div>', unsafe_allow_html=True)
+
+def footer_with_slogan():
+    """Standard footer with developer slogan."""
+    render_slogan_footer(login=False)
 
 def page_setup(title=None, cleanup=False):
     inject_exact_ui_css()

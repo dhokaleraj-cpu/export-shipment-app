@@ -792,6 +792,7 @@ else:
         except Exception as e:
             st.error(f"Forecast import failed: {e}")
 
+render_slogan_footer()
 st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)
 
 
