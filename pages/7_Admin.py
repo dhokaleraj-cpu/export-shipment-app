@@ -202,7 +202,7 @@ with admin_tabs[2]:
                             can_view=EXCLUDED.can_view,
                             can_edit=EXCLUDED.can_edit,
                             updated_at=CURRENT_TIMESTAMP
-                    """, (selected_username, page['key'], can_view, can_view, can_edit, locals().get("can_modify", can_edit)))
+                    """, (selected_username, page['key'], can_view, can_view, can_edit, can_modify))
                 clear_cache_after_write()
                 st.success('Page View / Edit controls saved successfully.')
                 st.rerun()

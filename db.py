@@ -247,7 +247,6 @@ def verify_user(username, password):
 def init_db():
     """Lightweight migrations for existing Supabase/PostgreSQL database."""
     migrations = [
-        "ALTER TABLE page_permissions ADD COLUMN IF NOT EXISTS can_modify BOOLEAN DEFAULT FALSE",
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_code TEXT",
         "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_modify BOOLEAN DEFAULT FALSE",
         "ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS po_number TEXT",
