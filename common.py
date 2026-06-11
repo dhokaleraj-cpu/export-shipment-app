@@ -2678,6 +2678,55 @@ def require_login():
         st.stop()
 
 
+
+def page_setup(cleanup=True):
+    """Safe application page setup.
+
+    This function is called by app.py and every page.
+    It initializes session/login, renders login screen when needed, and renders top layout after login.
+    """
+    try:
+        init_db()
+    except Exception:
+        pass
+
+    if "user" not in st.session_state or not st.session_state.get("user"):
+        # Prefer existing login helpers when available.
+        if "login_screen" in globals():
+            login_screen()
+        elif "show_login" in globals():
+            show_login()
+        elif "login_page" in globals():
+            login_page()
+        else:
+            st.markdown('<div class="login-card">', unsafe_allow_html=True)
+            st.markdown('<h1 style="text-align:center;color:#003B73;">EXPORT SHIPMENT<br>MONITORING SYSTEM</h1>', unsafe_allow_html=True)
+            username = st.text_input("Username", key="fallback_login_username")
+            password = st.text_input("Password", type="password", key="fallback_login_password")
+            if st.button("Login", key="fallback_login_button"):
+                user = verify_user(username, password)
+                if user:
+                    st.session_state["user"] = user
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+            st.markdown('</div>', unsafe_allow_html=True)
+        try:
+            render_slogan_footer(login=True)
+        except Exception:
+            pass
+        st.stop()
+
+    try:
+        require_page_access_for_current_page()
+    except Exception:
+        pass
+
+    try:
+        top_layout()
+    except Exception:
+        pass
+
 def render_slogan_footer(login=False):
     """Render centered developer slogan/footer."""
     cls = "fsi-login-slogan-footer" if login else "fsi-slogan-footer"
