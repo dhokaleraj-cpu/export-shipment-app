@@ -25,7 +25,6 @@ with mtab[6]:
     master_form('Forwarder Master', 'forwarders', ['forwarder_name', 'contact_person', 'email', 'phone', 'remarks'])
 
 render_slogan_footer()
-st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)
 
 with mtab[7]:
     ship_to_form()
