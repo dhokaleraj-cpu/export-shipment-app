@@ -1,0 +1,15 @@
+
+# Local archives and generated files
+*.zip
+Archive*/
+*.xlsx
+*.xls
+*.pyc
+__pycache__/
+.DS_Store
+
+# Temporary SQL/readme update files
+README_*.txt
+SUPABASE_*.sql
+*_MIGRATION.sql
+COVERAGE_PLAN_*.sql

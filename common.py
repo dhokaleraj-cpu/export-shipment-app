@@ -184,16 +184,13 @@ div[data-testid="stButton"] > button {
 /* Rajesh slogan footer on every page and login page */
 .fsi-slogan-footer {
     width: 100%;
-    display: block;
-    text-align: center !important;
-    justify-content: center;
-    align-items: center;
+    text-align: center;
     font-family: Aptos, Arial, sans-serif;
     font-size: 13px;
     font-weight: 900;
     color: #003B73;
     padding: 8px 10px;
-    margin: 18px auto 0 auto;
+    margin-top: 14px;
     border-top: 1px solid #d9e2ec;
     background: rgba(255,255,255,0.92);
 }
@@ -203,10 +200,7 @@ div[data-testid="stButton"] > button {
     right: 0;
     bottom: 8px;
     width: 100%;
-    display: block;
-    text-align: center !important;
-    justify-content: center;
-    align-items: center;
+    text-align: center;
     font-family: Aptos, Arial, sans-serif;
     font-size: 13px;
     font-weight: 900;
@@ -215,21 +209,10 @@ div[data-testid="stButton"] > button {
 }
 @media (max-width: 760px) {
     .fsi-slogan-footer, .fsi-login-slogan-footer {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 8px;
-    width: 100%;
-    display: block;
-    text-align: center !important;
-    justify-content: center;
-    align-items: center;
-    font-family: Aptos, Arial, sans-serif;
-    font-size: 13px;
-    font-weight: 900;
-    color: #003B73;
-    z-index: 9999;
-}
+        font-size: 11px;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
 }
 
 </style>
@@ -1633,7 +1616,7 @@ def render_top_navigation():
     and tuple/list navigation items:
         ("Label", "target") or ("target", "Label")
     """
-    globals().get('inject_exact_ui_css', lambda: None)()
+    inject_exact_ui_css()
     user = st.session_state.get("user", {})
     nav_items = get_allowed_nav_items(user)
     st.markdown('<div class="exact-nav-card"><div class="exact-nav-title">MODULES</div>', unsafe_allow_html=True)
@@ -1672,7 +1655,7 @@ def render_top_navigation():
 
 
 def top_layout():
-    globals().get('inject_exact_ui_css', lambda: None)()
+    inject_exact_ui_css()
     user = st.session_state.get("user", {"username": "-", "role": "-"})
     if LOGO_PATH.exists():
         logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
@@ -1697,76 +1680,8 @@ def top_layout():
     render_top_navigation()
 
 
-
-def inject_exact_ui_css():
-    """Safe UI CSS injector used by show_header/login/page setup."""
-    st.markdown("""
-    <style>
-    .topbar {
-        background:#f8fafc;
-        color:#003b73;
-        padding:18px 22px;
-        border-radius:12px;
-        margin-top:18px;
-        margin-bottom:16px;
-        border:1px solid #d9e2ec;
-        box-shadow:0 1px 6px rgba(0,0,0,.06);
-    }
-    .topbar h1 {
-        font-family: Montserrat, Aptos, Arial, sans-serif !important;
-        font-size: 28px !important;
-        margin:0;
-        font-weight:900 !important;
-        color:#003B73 !important;
-    }
-    .subtext {
-        font-size:13px;
-        opacity:.9;
-        margin-top:4px;
-        font-weight:800;
-    }
-    .fsi-slogan-footer {
-        width: 100%;
-        display: block;
-        text-align: center !important;
-        font-family: Aptos, Arial, sans-serif;
-        font-size: 13px;
-        font-weight: 900;
-        color: #003B73;
-        padding: 8px 10px;
-        margin: 18px auto 0 auto;
-        border-top: 1px solid #d9e2ec;
-        background: rgba(255,255,255,0.92);
-    }
-    .fsi-login-slogan-footer {
-        position: fixed;
-        left: 0;
-        right: 0;
-        bottom: 8px;
-        width: 100%;
-        display: block;
-        text-align: center !important;
-        font-family: Aptos, Arial, sans-serif;
-        font-size: 13px;
-        font-weight: 900;
-        color: #003B73;
-        z-index: 9999;
-    }
-    @media (max-width: 760px) {
-        .fsi-slogan-footer, .fsi-login-slogan-footer {
-            font-size: 11px;
-            padding-left: 8px;
-            padding-right: 8px;
-        }
-        .topbar h1 {
-            font-size: 22px !important;
-        }
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
 def show_header(title, subtitle="EXPORT SHIPMENT MONITORING SYSTEM"):
-    globals().get('inject_exact_ui_css', lambda: None)()
+    inject_exact_ui_css()
     st.markdown(
         f"""
         <div class="exact-page-title-card">
@@ -2493,10 +2408,6 @@ def product_form():
         lcr_weekly = st.number_input("LCR Weekly", min_value=0.0, step=1.0, key="product_lcr_weekly")
         mcr_weekly = st.number_input("MCR Weekly", min_value=0.0, step=1.0, key="product_mcr_weekly")
         po_date = st.date_input("PO Date", value=date.today(), key="product_po_date")
-        warehouse_rows_pm = fetch_all('SELECT id, warehouse_name FROM warehouses ORDER BY warehouse_name')
-        warehouse_map_pm = {w['warehouse_name']: w['id'] for w in warehouse_rows_pm}
-        selected_product_warehouse = st.selectbox('Warehouse', list(warehouse_map_pm.keys()), key='product_warehouse_select') if warehouse_map_pm else None
-        selected_product_warehouse_id = warehouse_map_pm.get(selected_product_warehouse) if selected_product_warehouse else None
         two_months_inventory = lcr_weekly * 8
         st.markdown(f'<div class="total-box">Two Months Inventory = LCR Weekly × 8 = {two_months_inventory:,.2f}</div>', unsafe_allow_html=True)
 
@@ -2505,17 +2416,17 @@ def product_form():
             execute_query("""
                 INSERT INTO products
                 (product_code, product_name, program, assy_plant, unit, unit_price, currency, weight,
-                 lcr_weekly, mcr_weekly, two_months_inventory, po_number, po_date, warehouse_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 lcr_weekly, mcr_weekly, two_months_inventory, po_number, po_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (product_code, product_name, program, assy_plant, unit, unit_price, currency, weight,
-                  lcr_weekly, mcr_weekly, two_months_inventory, po_number, str(po_date), selected_product_warehouse_id))
+                  lcr_weekly, mcr_weekly, two_months_inventory, po_number, str(po_date)))
             st.success("Product saved successfully.")
         except sqlite3.IntegrityError:
             st.error("Duplicate product code found.")
 
     rows = fetch_all("""
         SELECT id, product_code, product_name, program, assy_plant, unit, unit_price, currency,
-               weight, lcr_weekly, mcr_weekly, two_months_inventory, po_number, po_date, warehouse_id
+               weight, lcr_weekly, mcr_weekly, two_months_inventory, po_number, po_date
         FROM products
         ORDER BY id DESC
     """)
@@ -2750,59 +2661,1167 @@ def require_login():
         st.stop()
 
 
+def render_slogan_footer(login=False):
+    """Render developer slogan/footer."""
+    cls = "fsi-login-slogan-footer" if login else "fsi-slogan-footer"
+    st.markdown('<div class="' + cls + '">Developed by Rajesh Dhokale&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Connect : dhokaleraj@icloud.com</div>', unsafe_allow_html=True)
+
+def footer_with_slogan():
+    """Standard footer with developer slogan."""
+    render_slogan_footer(login=False)
+
+def page_setup(title=None, cleanup=False):
+    inject_exact_ui_css()
+    require_login()
+    require_page_access_for_current_page()
+    top_layout()
+    if "filter_key_counter" not in st.session_state:
+        st.session_state.filter_key_counter = {}
+    else:
+        st.session_state.filter_key_counter = {}
+    if cleanup:
+        cleanup_orphan_transactions()
+    if title:
+        show_header(title)
+
+def current_role():
+    return st.session_state.user.get("role", "")
+
+def clear_cache_after_write():
+    clear_app_cache()
+    for _k in list(st.session_state.keys()):
+        if str(_k).startswith('_page_permissions_cache_'):
+            del st.session_state[_k]
+
+
+def render_big_card(title, value, header_bg="#FF8C00", value_bg="#FFFFFF", value_color="#111827"):
+    """Inline-styled KPI/card. Does not depend on external CSS."""
+    st.markdown(
+        f"""
+        <div style="border:2px solid #1A5E99;border-radius:8px;overflow:hidden;background:white;margin-bottom:18px;box-shadow:0 1px 4px rgba(0,0,0,.12);">
+            <div style="background:{header_bg};color:white;min-height:78px;padding:18px 10px;display:flex;align-items:center;justify-content:center;text-align:center;font-family:Aptos,Arial,sans-serif;font-size:27px;font-weight:900;line-height:1.25;letter-spacing:.5px;text-transform:uppercase;">
+                {title}
+            </div>
+            <div style="background:{value_bg};color:{value_color};min-height:96px;padding:16px 10px;display:flex;align-items:center;justify-content:center;text-align:center;font-family:Aptos,Arial,sans-serif;font-size:32px;font-weight:900;line-height:1.2;">
+                {value}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+def render_filter_card_start(title):
+    """Inline-styled filter card header/body start."""
+    st.markdown(
+        f"""
+        <div style="border:2px solid #1A5E99;border-radius:8px 8px 0 0;background:#FF8C00;color:white;min-height:78px;padding:18px 10px;display:flex;align-items:center;justify-content:center;text-align:center;font-family:Aptos,Arial,sans-serif;font-size:27px;font-weight:900;line-height:1.25;letter-spacing:.5px;text-transform:uppercase;">
+            {title}
+        </div>
+        <div style="border-left:2px solid #1A5E99;border-right:2px solid #1A5E99;border-bottom:2px solid #1A5E99;border-radius:0 0 8px 8px;background:white;min-height:96px;padding:16px;margin-bottom:18px;">
+        """,
+        unsafe_allow_html=True
+    )
+
+def render_filter_card_end():
+    st.markdown("</div>", unsafe_allow_html=True)
+
+def ui_spacer(height=60):
+    st.markdown(f"<div style='height:{height}px;'></div>", unsafe_allow_html=True)
+
+# === FINAL KPI CARD UI HELPERS ===
+def render_dashboard_small_card(title, value, header_bg="#1A5E99", value_bg="#ffffff", value_color="#111827"):
+    """Dashboard card: 20% smaller, no visible outer border, equal card size."""
+    st.markdown(
+        f"""
+        <div style="
+            width:100%;
+            height:150px;
+            border:0;
+            border-radius:8px;
+            overflow:hidden;
+            background:white;
+            margin-bottom:12px;
+            box-shadow:0 1px 3px rgba(0,0,0,.10);
+        ">
+            <div style="
+                background:{header_bg};
+                color:#ffffff;
+                height:78px;
+                padding:8px 8px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                text-align:center;
+                font-family:Aptos, Arial, sans-serif;
+                font-size:24px;
+                line-height:1.15;
+                font-weight:900;
+                text-transform:uppercase;
+            ">{title}</div>
+            <div style="
+                background:{value_bg};
+                color:{value_color};
+                height:72px;
+                padding:8px 8px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                text-align:center;
+                font-family:Aptos, Arial, sans-serif;
+                font-size:30px;
+                line-height:1.1;
+                font-weight:900;
+            ">{value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+def render_coverage_kpi_card(title, value, header_bg="#ff8c00", value_bg="#ffffff", value_color="#111827"):
+    """Coverage KPI card matching attached Coverage Plan Table UI."""
+    st.markdown(
+        f"""
+        <div style="
+            width:100%;
+            border:1px solid #cbd5e1;
+            border-radius:4px;
+            overflow:hidden;
+            background:white;
+            margin-bottom:16px;
+        ">
+            <div style="
+                background:{header_bg};
+                color:#ffffff;
+                min-height:78px;
+                padding:18px 10px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                text-align:center;
+                font-family:Aptos, Arial, sans-serif;
+                font-size:24px;
+                line-height:1.2;
+                font-weight:900;
+                letter-spacing:.2px;
+                text-transform:uppercase;
+            ">{title}</div>
+            <div style="
+                background:{value_bg};
+                color:{value_color};
+                min-height:108px;
+                padding:22px 10px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                text-align:center;
+                font-family:Aptos, Arial, sans-serif;
+                font-size:36px;
+                line-height:1.2;
+                font-weight:900;
+            ">{value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+def render_coverage_input_card_start(title, header_bg="#ff8c00"):
+    """Coverage KPI card body that contains a Streamlit input inside the card."""
+    st.markdown(
+        f"""
+        <div style="
+            width:100%;
+            border:1px solid #cbd5e1;
+            border-bottom:0;
+            border-radius:4px 4px 0 0;
+            overflow:hidden;
+            background:white;
+            margin-bottom:0;
+        ">
+            <div style="
+                background:{header_bg};
+                color:#ffffff;
+                min-height:78px;
+                padding:18px 10px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                text-align:center;
+                font-family:Aptos, Arial, sans-serif;
+                font-size:24px;
+                line-height:1.2;
+                font-weight:900;
+                letter-spacing:.2px;
+                text-transform:uppercase;
+            ">{title}</div>
+        </div>
+        <div style="
+            border-left:1px solid #cbd5e1;
+            border-right:1px solid #cbd5e1;
+            border-bottom:1px solid #cbd5e1;
+            border-radius:0 0 4px 4px;
+            background:#ffffff;
+            min-height:108px;
+            padding:22px 10px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            margin-bottom:16px;
+        ">
+        """,
+        unsafe_allow_html=True
+    )
+
+def render_coverage_input_card_end():
+    st.markdown("</div>", unsafe_allow_html=True)
+
+def render_coverage_filter_card_start(title):
+    """Filter card header with the same Coverage Plan Table visual language."""
+    st.markdown(
+        f"""
+        <div style="
+            border:1px solid #cbd5e1;
+            border-bottom:0;
+            border-radius:4px 4px 0 0;
+            background:#ff8c00;
+            color:white;
+            min-height:72px;
+            padding:16px 10px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            text-align:center;
+            font-family:Aptos, Arial, sans-serif;
+            font-size:24px;
+            font-weight:900;
+            line-height:1.2;
+            text-transform:uppercase;
+        ">{title}</div>
+        <div style="
+            border:1px solid #cbd5e1;
+            border-top:0;
+            border-radius:0 0 4px 4px;
+            background:white;
+            min-height:86px;
+            padding:14px;
+            margin-bottom:16px;
+        ">
+        """,
+        unsafe_allow_html=True
+    )
+
+def render_coverage_filter_card_end():
+    st.markdown("</div>", unsafe_allow_html=True)
+
+def render_coverage_table_title(title="Coverage Plan Table"):
+    st.markdown(
+        f"""
+        <div style="
+            font-family:Aptos, Arial, sans-serif;
+            font-size:32px;
+            font-weight:900;
+            color:#003B73;
+            padding:6px 0 22px 0;
+            line-height:1.2;
+        ">{title}</div>
+        """,
+        unsafe_allow_html=True
+    )
+# === END FINAL KPI CARD UI HELPERS ===
+
+
+
+def ship_to_form():
+    """Ship To Master form used for Delivery Invoice print details."""
+    st.subheader("Ship To Master")
+    st.markdown(
+        '<div class="sap-grid-note">Create Ship To addresses for delivery invoices. These fields are used in Delivery print layout.</div>',
+        unsafe_allow_html=True
+    )
+
+    with st.form("ship_to_master_form", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            ship_to_name = st.text_input("Ship To Name", key="ship_to_name")
+            ship_to_id = st.text_input("Ship To ID", key="ship_to_id")
+            addressline1 = st.text_input("Addressline1", key="ship_to_addressline1")
+            addressline2 = st.text_input("Addressline2", key="ship_to_addressline2")
+        with c2:
+            addressline3 = st.text_input("Addressline3", key="ship_to_addressline3")
+            vendor_gstin = st.text_input("vendorGSTIN", key="ship_to_vendor_gstin")
+            vendor_phone = st.text_input("vendorphone", key="ship_to_vendor_phone")
+            vendor_email = st.text_input("vendoremail", key="ship_to_vendor_email")
+            is_active = st.checkbox("Active", value=True, key="ship_to_is_active")
+
+        submitted = st.form_submit_button("Save Ship To Master", type="primary", disabled=not current_user_can_edit('masters'))
+        if submitted:
+            if not ship_to_name.strip():
+                st.error("Ship To Name is mandatory.")
+            else:
+                existing = fetch_all(
+                    "SELECT id FROM ship_to_masters WHERE ship_to_name=? AND COALESCE(ship_to_id,'')=COALESCE(?, '') LIMIT 1",
+                    (ship_to_name.strip(), ship_to_id.strip())
+                )
+                if existing:
+                    execute_query("""
+                        UPDATE ship_to_masters
+                        SET addressline1=?, addressline2=?, addressline3=?, vendor_gstin=?,
+                            vendor_phone=?, vendor_email=?, is_active=?
+                        WHERE id=?
+                    """, (
+                        addressline1.strip(), addressline2.strip(), addressline3.strip(),
+                        vendor_gstin.strip(), vendor_phone.strip(), vendor_email.strip(),
+                        bool(is_active), existing[0]["id"]
+                    ))
+                    st.success("Ship To Master updated.")
+                else:
+                    execute_query("""
+                        INSERT INTO ship_to_masters
+                        (ship_to_name, ship_to_id, addressline1, addressline2, addressline3,
+                         vendor_gstin, vendor_phone, vendor_email, is_active)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        ship_to_name.strip(), ship_to_id.strip(), addressline1.strip(), addressline2.strip(),
+                        addressline3.strip(), vendor_gstin.strip(), vendor_phone.strip(), vendor_email.strip(),
+                        bool(is_active)
+                    ))
+                    st.success("Ship To Master saved.")
+                clear_cache_after_write()
+                st.rerun()
+
+    rows = fetch_all("""
+        SELECT id, ship_to_name, ship_to_id, addressline1, addressline2, addressline3,
+               vendor_gstin, vendor_phone, vendor_email, is_active
+        FROM ship_to_masters
+        ORDER BY ship_to_name, ship_to_id
+    """)
+    if rows:
+        show_filtered_df(rows, "ship_to_master_records", total=False)
+    else:
+        st.info("No Ship To records created yet.")
+
+
+def user_can_edit_page(page_key):
+    """Return True if current user can edit the given page. Super admin always can edit."""
+    user = st.session_state.get("user") or {}
+    username = user.get("username")
+    role = user.get("role")
+    if role == "super_admin":
+        return True
+    try:
+        rows = fetch_all("SELECT can_edit FROM user_page_access WHERE username=? AND page_key=? LIMIT 1", (username, page_key))
+        if rows:
+            return bool(rows[0].get("can_edit"))
+    except Exception:
+        pass
+    # default fallback
+    if role == "admin":
+        return page_key in ["masters", "shipment", "delivery", "payment", "coverage", "reports", "overdue"]
+    if role == "user":
+        return page_key in ["delivery"]
+    return False
+
+
+def require_page_view(page_key):
+    """Allow page access based on Page Controls View rights, not only role."""
+    page_def = get_page_definition_by_key(page_key)
+    if page_def and not can_user_access_page(page_def):
+        st.error("You do not have View permission for this module. Contact Super Admin.")
+        st.stop()
+
+def require_page_edit(page_key):
+    """Allow data entry/edit based on Page Controls Edit rights."""
+    page_def = get_page_definition_by_key(page_key)
+    if page_def and not can_user_access_page(page_def):
+        st.error("You do not have View permission for this module. Contact Super Admin.")
+        st.stop()
+    if page_def and not can_user_edit_page(page_def):
+        st.error("You have View permission but not Edit permission for this module. Contact Super Admin.")
+        st.stop()
+
+def show_edit_permission_status(page_key):
+    """Small helper to show whether current user can edit the module."""
+    if current_user_can_edit(page_key):
+        st.caption("Edit permission: Enabled for this user.")
+    else:
+        st.caption("Edit permission: View only.")
+
+
+def searchable_selectbox(label, options, key, default_index=0, help_text=None):
+    """Visible search box + selectbox for long edit lists."""
+    options = list(options or [])
+    if not options:
+        st.warning(f"No options available for {label}.")
+        return None
+    search_value = st.text_input(
+        f"Search {label}",
+        key=f"{key}_search",
+        placeholder="Type to search...",
+        help=help_text,
+    )
+    if search_value:
+        terms = [t.strip().lower() for t in str(search_value).split() if t.strip()]
+        filtered = [opt for opt in options if all(term in str(opt).lower() for term in terms)]
+    else:
+        filtered = options
+    if not filtered:
+        st.warning("No matching records found. Showing all records.")
+        filtered = options
+    safe_index = default_index if 0 <= int(default_index or 0) < len(filtered) else 0
+    return st.selectbox(label, filtered, index=safe_index, key=key)
+
+
+
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=swap');
+
+/* =========================================================
+   EXACT UI VERSION - ALL PAGES
+   ========================================================= */
+:root{
+    --fsi-blue:#1B6DB5;
+    --fsi-blue-dark:#003B73;
+    --fsi-bg:#F6F8FB;
+    --fsi-card:#FFFFFF;
+    --fsi-border:#CBD5E1;
+    --fsi-soft:#EEF2F7;
+    --fsi-text:#111827;
+    --fsi-muted:#64748B;
+    --fsi-green:#15803D;
+    --fsi-red:#B72C24;
+    --fsi-orange:#EE9337;
+}
+
+html, body, .stApp {
+    background: var(--fsi-bg) !important;
+}
+
+html, body, .stApp, div, span, p, label, input, textarea, select, button {
+    font-family: Aptos, Arial, sans-serif !important;
+}
+
+.block-container {
+    max-width: 100% !important;
+    padding-top: 0.80rem !important;
+    padding-left: clamp(0.50rem, 1.3vw, 1.25rem) !important;
+    padding-right: clamp(0.50rem, 1.3vw, 1.25rem) !important;
+    padding-bottom: 1rem !important;
+}
+
+/* Hide sidebar for same clean app view */
+section[data-testid="stSidebar"], div[data-testid="stSidebar"], div[data-testid="collapsedControl"]{
+    display:none !important;
+}
+
+/* App title exact style */
+.fsi-app-title,
+.main-title-center,
+.topbar-title-main {
+    font-family: Montserrat, Aptos, Arial, sans-serif !important;
+    font-size: 40px !important;
+    line-height: 1.05 !important;
+    font-weight: 900 !important;
+    color: var(--fsi-blue) !important;
+    letter-spacing: .25px !important;
+    text-align:center !important;
+}
+
+/* Top header area */
+.topbar,
+.app-header-card,
+.top-strip {
+    background: var(--fsi-card) !important;
+    border: 1px solid var(--fsi-border) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 1px 4px rgba(15,23,42,.08) !important;
+    padding: 14px 18px !important;
+    margin: 8px 0 14px 0 !important;
+    color: var(--fsi-text) !important;
+}
+
+.topbar h1 {
+    font-size: 28px !important;
+    line-height: 1.15 !important;
+    font-weight: 900 !important;
+    color: var(--fsi-blue-dark) !important;
+    margin: 0 !important;
+}
+
+.subtext {
+    color: var(--fsi-muted) !important;
+    font-size: 14px !important;
+    font-weight: 800 !important;
+}
+
+/* Module menu exact card style */
+.top-nav-wrap,
+.modules-card {
+    background: var(--fsi-card) !important;
+    border: 1px solid var(--fsi-border) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 1px 4px rgba(15,23,42,.08) !important;
+    padding: 12px !important;
+    margin: 8px 0 18px 0 !important;
+}
+
+.top-nav-title,
+.custom-module-title {
+    color: var(--fsi-blue) !important;
+    font-size: 20px !important;
+    font-weight: 900 !important;
+    letter-spacing: .02em !important;
+    margin-bottom: 8px !important;
+}
+
+.top-nav-wrap [data-testid="stPageLink"] a,
+.modules-card a,
+div[data-testid="stButton"] > button {
+    background: var(--fsi-soft) !important;
+    color: var(--fsi-blue) !important;
+    border: 1px solid var(--fsi-border) !important;
+    border-radius: 10px !important;
+    min-height: 42px !important;
+    font-size: 15px !important;
+    font-weight: 900 !important;
+    text-decoration: none !important;
+    box-shadow: none !important;
+    white-space: normal !important;
+}
+
+.top-nav-wrap [data-testid="stPageLink"] a:hover,
+div[data-testid="stButton"] > button:hover {
+    background: var(--fsi-blue) !important;
+    color: white !important;
+}
+
+/* Page heading card */
+.page-title-card,
+.sap-section-card,
+.sap-grid-card,
+.card {
+    background: var(--fsi-card) !important;
+    border: 1px solid var(--fsi-border) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 1px 4px rgba(15,23,42,.08) !important;
+    padding: clamp(10px, 1.2vw, 16px) !important;
+    margin-bottom: 14px !important;
+    overflow-x: auto !important;
+}
+
+h1, h2, h3, h4, h5, h6,
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+div[data-testid="stMarkdownContainer"] h1,
+div[data-testid="stMarkdownContainer"] h2,
+div[data-testid="stMarkdownContainer"] h3,
+.sap-grid-card-title,
+.sap-subtitle,
+.input-section-title,
+.section-title {
+    font-family: Aptos, Arial, sans-serif !important;
+    font-weight: 900 !important;
+    color: var(--fsi-blue-dark) !important;
+}
+
+h1 { font-size: clamp(24px, 2.0vw, 30px) !important; }
+h2 { font-size: clamp(20px, 1.7vw, 26px) !important; }
+h3 { font-size: clamp(17px, 1.35vw, 22px) !important; }
+
+.sap-grid-card-title,
+.sap-subtitle,
+.input-section-title,
+.section-title {
+    font-size: clamp(16px, 1.35vw, 22px) !important;
+    line-height: 1.18 !important;
+    padding: 4px 0 8px 0 !important;
+}
+
+/* Labels and controls */
+label,
+[data-testid="stWidgetLabel"] p,
+.stSelectbox label p,
+.stTextInput label p,
+.stNumberInput label p,
+.stDateInput label p,
+.stTextArea label p,
+.stFileUploader label p,
+.stMultiSelect label p {
+    font-size: clamp(12px, 1vw, 15px) !important;
+    line-height: 1.15 !important;
+    font-weight: 900 !important;
+    color: var(--fsi-blue-dark) !important;
+}
+
+div[data-baseweb="input"] > div,
+div[data-baseweb="select"] > div,
+.stTextInput input,
+.stNumberInput input,
+.stDateInput input,
+.stTextArea textarea {
+    min-height: clamp(36px, 3.2vw, 44px) !important;
+    font-size: clamp(12px, 1vw, 15px) !important;
+    font-weight: 800 !important;
+    color: var(--fsi-text) !important;
+    background: var(--fsi-card) !important;
+    border: 1px solid var(--fsi-border) !important;
+    border-radius: 10px !important;
+    box-shadow: none !important;
+}
+
+div[data-baseweb="select"] span {
+    font-weight: 800 !important;
+    color: var(--fsi-text) !important;
+}
+
+/* Search fields must look clear */
+input[placeholder*="search" i],
+input[placeholder*="Type to search" i] {
+    background: #FFFFFF !important;
+    border: 2px solid #D9E2EC !important;
+}
+
+/* Tables */
+div[data-testid="stDataFrame"],
+div[data-testid="stDataEditor"] {
+    border: 1px solid var(--fsi-border) !important;
+    border-radius: 10px !important;
+    overflow-x: auto !important;
+}
+
+/* KPI exact cards */
+.kpi-head, .metric-head {
+    background: var(--fsi-blue) !important;
+    color: white !important;
+    min-height: 48px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    text-align:center !important;
+    font-size: 18px !important;
+    line-height: 1.12 !important;
+    font-weight: 900 !important;
+    border-radius: 4px 4px 0 0 !important;
+}
+
+.kpi-value, .metric-value {
+    min-height: 56px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    text-align:center !important;
+    font-size: 24px !important;
+    line-height: 1.12 !important;
+    font-weight: 900 !important;
+    background: white !important;
+    color: var(--fsi-text) !important;
+    border: 1px solid var(--fsi-border) !important;
+    border-top:0 !important;
+    border-radius: 0 0 4px 4px !important;
+}
+
+/* Prevent cramped columns */
+div[data-testid="column"] {
+    min-width: 0 !important;
+}
+
+/* File upload consistent */
+div[data-testid="stFileUploader"] section {
+    background:#FFFFFF !important;
+    border:1px dashed var(--fsi-border) !important;
+    border-radius:10px !important;
+}
+
+/* Footer */
+.footer {
+    text-align:center !important;
+    color: var(--fsi-muted) !important;
+    font-size: 12px !important;
+    font-weight: 900 !important;
+    margin-top: 26px !important;
+}
+
+/* Low resolution laptop */
+@media (max-width: 1366px) {
+    .block-container {
+        padding-left: 0.60rem !important;
+        padding-right: 0.60rem !important;
+    }
+    .fsi-app-title,
+    .main-title-center,
+    .topbar-title-main {
+        font-size: 32px !important;
+    }
+    .top-nav-title,
+    .custom-module-title {
+        font-size: 17px !important;
+    }
+    .top-nav-wrap [data-testid="stPageLink"] a,
+    div[data-testid="stButton"] > button {
+        min-height: 36px !important;
+        font-size: 13px !important;
+        padding: 4px 8px !important;
+    }
+    .topbar h1 {
+        font-size: 24px !important;
+    }
+}
+
+/* Tablet and mobile */
+@media (max-width: 760px) {
+    .block-container {
+        padding-left: 0.42rem !important;
+        padding-right: 0.42rem !important;
+    }
+    .fsi-app-title,
+    .main-title-center,
+    .topbar-title-main {
+        font-size: 24px !important;
+    }
+    .topbar, .top-nav-wrap, .sap-grid-card, .sap-section-card, .card {
+        padding: 8px !important;
+        margin-bottom: 10px !important;
+    }
+    h1 { font-size: 22px !important; }
+    h2 { font-size: 19px !important; }
+    h3 { font-size: 17px !important; }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+def inject_exact_ui_css():
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=swap');
+
+    :root{
+        --fsi-blue:#1B6DB5;
+        --fsi-blue-dark:#003B73;
+        --fsi-bg:#F6F8FB;
+        --fsi-card:#FFFFFF;
+        --fsi-border:#CBD5E1;
+        --fsi-soft:#EEF2F7;
+        --fsi-text:#111827;
+        --fsi-muted:#64748B;
+        --fsi-green:#15803D;
+        --fsi-red:#B72C24;
+        --fsi-orange:#EE9337;
+    }
+
+    html, body, .stApp, [data-testid="stAppViewContainer"], .main {
+        background: var(--fsi-bg) !important;
+    }
+
+    html, body, .stApp, div, span, p, label, input, textarea, select, button {
+        font-family: Aptos, Arial, sans-serif !important;
+    }
+
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        height: 0 !important;
+    }
+
+    section[data-testid="stSidebar"], div[data-testid="stSidebar"], div[data-testid="collapsedControl"]{
+        display:none !important;
+    }
+
+    .block-container {
+        max-width: 100% !important;
+        padding-top: 0.75rem !important;
+        padding-left: clamp(0.50rem, 1.3vw, 1.25rem) !important;
+        padding-right: clamp(0.50rem, 1.3vw, 1.25rem) !important;
+        padding-bottom: 1rem !important;
+    }
+
+    .exact-app-header {
+        width:100%;
+        background:#FFFFFF;
+        border:1px solid #CBD5E1;
+        border-radius:10px;
+        box-shadow:0 1px 4px rgba(15,23,42,.08);
+        padding:14px 18px;
+        margin:8px 0 14px 0;
+        display:grid;
+        grid-template-columns: 240px 1fr 260px;
+        gap:12px;
+        align-items:center;
+        box-sizing:border-box;
+    }
+
+    .exact-app-logo {
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        min-width:0;
+    }
+
+    .exact-app-logo img {
+        max-width:190px !important;
+        width:190px !important;
+        height:auto !important;
+        display:block;
+        object-fit:contain;
+    }
+
+    .exact-app-logo-fallback {
+        width:130px;
+        height:42px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        border-radius:8px;
+        border:1px solid #CBD5E1;
+        background:#EAF3FC;
+        color:#1B6DB5;
+        font-weight:900;
+        font-size:24px;
+        font-family:Montserrat, Aptos, Arial, sans-serif !important;
+    }
+
+    .fsi-app-title,
+    .main-title-center,
+    .exact-title {
+        font-family: Montserrat, Aptos, Arial, sans-serif !important;
+        font-size: 40px !important;
+        line-height: 1.05 !important;
+        font-weight: 900 !important;
+        color: #1B6DB5 !important;
+        letter-spacing: .25px !important;
+        text-align:center !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .exact-user-box {
+        text-align:right;
+        font-size:16px;
+        line-height:1.35;
+        font-weight:900;
+        color:#111827;
+        white-space:nowrap;
+    }
+
+    .exact-nav-card {
+        background:#FFFFFF;
+        border:1px solid #CBD5E1;
+        border-radius:10px;
+        box-shadow:0 1px 4px rgba(15,23,42,.08);
+        padding:12px;
+        margin:8px 0 18px 0;
+    }
+
+    .exact-nav-title,
+    .top-nav-title,
+    .custom-module-title {
+        color:#1B6DB5 !important;
+        font-size:20px !important;
+        font-weight:900 !important;
+        letter-spacing:.02em !important;
+        margin:0 0 8px 0 !important;
+        padding:0 !important;
+        font-family:Aptos, Arial, sans-serif !important;
+    }
+
+    .exact-nav-card [data-testid="stPageLink"] a,
+    .top-nav-wrap [data-testid="stPageLink"] a,
+    div[data-testid="stButton"] > button {
+        background:#EEF2F7 !important;
+        color:#1B6DB5 !important;
+        border:1px solid #CBD5E1 !important;
+        border-radius:10px !important;
+        min-height:42px !important;
+        font-size:15px !important;
+        font-weight:900 !important;
+        text-decoration:none !important;
+        box-shadow:none !important;
+        white-space:normal !important;
+        font-family:Aptos, Arial, sans-serif !important;
+    }
+
+    .exact-nav-card [data-testid="stPageLink"] a:hover,
+    .top-nav-wrap [data-testid="stPageLink"] a:hover,
+    div[data-testid="stButton"] > button:hover {
+        background:#1B6DB5 !important;
+        color:#FFFFFF !important;
+    }
+
+    .exact-page-title-card,
+    .topbar {
+        background:#FFFFFF !important;
+        border:1px solid #CBD5E1 !important;
+        border-radius:10px !important;
+        box-shadow:0 1px 4px rgba(15,23,42,.08) !important;
+        padding:14px 18px !important;
+        margin:8px 0 14px 0 !important;
+    }
+
+    .exact-page-title-card h1,
+    .topbar h1 {
+        font-family:Aptos, Arial, sans-serif !important;
+        font-size:30px !important;
+        line-height:1.15 !important;
+        font-weight:900 !important;
+        color:#003B73 !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .exact-page-subtitle,
+    .subtext {
+        color:#64748B !important;
+        font-size:14px !important;
+        font-weight:800 !important;
+        margin-top:4px !important;
+    }
+
+    .sap-grid-card,
+    .sap-section-card,
+    .card,
+    .total-box {
+        background:#FFFFFF !important;
+        border:1px solid #CBD5E1 !important;
+        border-radius:10px !important;
+        box-shadow:0 1px 4px rgba(15,23,42,.08) !important;
+        padding:clamp(10px, 1.2vw, 16px) !important;
+        margin-bottom:14px !important;
+        overflow-x:auto !important;
+    }
+
+    h1, h2, h3, h4, h5, h6,
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+    div[data-testid="stMarkdownContainer"] h1,
+    div[data-testid="stMarkdownContainer"] h2,
+    div[data-testid="stMarkdownContainer"] h3,
+    .sap-grid-card-title,
+    .sap-subtitle,
+    .input-section-title,
+    .section-title {
+        font-family:Aptos, Arial, sans-serif !important;
+        font-weight:900 !important;
+        color:#003B73 !important;
+    }
+
+    h1 { font-size:clamp(24px, 2.0vw, 30px) !important; }
+    h2 { font-size:clamp(20px, 1.7vw, 26px) !important; }
+    h3 { font-size:clamp(17px, 1.35vw, 22px) !important; }
+
+    .sap-grid-card-title,
+    .sap-subtitle,
+    .input-section-title,
+    .section-title {
+        font-size:clamp(16px, 1.35vw, 22px) !important;
+        line-height:1.18 !important;
+        padding:4px 0 8px 0 !important;
+        margin:0 0 8px 0 !important;
+    }
+
+    label,
+    [data-testid="stWidgetLabel"] p,
+    .stSelectbox label p,
+    .stTextInput label p,
+    .stNumberInput label p,
+    .stDateInput label p,
+    .stTextArea label p,
+    .stFileUploader label p,
+    .stMultiSelect label p {
+        font-size:clamp(12px, 1vw, 15px) !important;
+        line-height:1.15 !important;
+        font-weight:900 !important;
+        color:#003B73 !important;
+    }
+
+    div[data-baseweb="input"] > div,
+    div[data-baseweb="select"] > div,
+    .stTextInput input,
+    .stNumberInput input,
+    .stDateInput input,
+    .stTextArea textarea {
+        min-height:clamp(36px, 3.2vw, 44px) !important;
+        font-size:clamp(12px, 1vw, 15px) !important;
+        font-weight:800 !important;
+        color:#111827 !important;
+        background:#FFFFFF !important;
+        border:1px solid #CBD5E1 !important;
+        border-radius:10px !important;
+        box-shadow:none !important;
+    }
+
+    div[data-baseweb="select"] span {
+        font-weight:800 !important;
+        color:#111827 !important;
+    }
+
+    div[data-testid="stDataFrame"],
+    div[data-testid="stDataEditor"] {
+        border:1px solid #CBD5E1 !important;
+        border-radius:10px !important;
+        overflow-x:auto !important;
+    }
+
+    div[data-testid="column"] {
+        min-width:0 !important;
+    }
+
+    .footer {
+        text-align:center !important;
+        color:#64748B !important;
+        font-size:12px !important;
+        font-weight:900 !important;
+        margin-top:26px !important;
+    }
+
+    /* Exact login page */
+    .exact-login-shell {
+        min-height:100vh;
+        background:#F6F8FB;
+        display:flex;
+        align-items:flex-start;
+        justify-content:center;
+        padding-top:28px;
+        box-sizing:border-box;
+    }
+
+    .exact-login-card {
+        width:min(520px, 94vw);
+        background:#FFFFFF;
+        border:1px solid #CBD5E1;
+        border-radius:16px;
+        box-shadow:0 8px 28px rgba(15,23,42,.08);
+        padding:22px 32px 28px 32px;
+        text-align:center;
+        box-sizing:border-box;
+    }
+
+    .exact-login-logo img {
+        width:190px !important;
+        max-width:72% !important;
+        height:auto !important;
+        object-fit:contain;
+        margin:0 auto 8px auto;
+        display:block;
+    }
+
+    .exact-login-title {
+        font-family:Montserrat, Aptos, Arial, sans-serif !important;
+        font-size:30px !important;
+        line-height:1.08 !important;
+        font-weight:900 !important;
+        color:#1B6DB5 !important;
+        letter-spacing:.20px !important;
+        margin:0 0 8px 0 !important;
+    }
+
+    .exact-login-card div[data-testid="stTextInput"] {
+        max-width:280px !important;
+        margin-left:auto !important;
+        margin-right:auto !important;
+    }
+
+    .exact-login-card div[data-testid="stButton"] {
+        max-width:280px !important;
+        margin-left:auto !important;
+        margin-right:auto !important;
+    }
+
+    .exact-login-card div[data-testid="stButton"] > button {
+        width:100% !important;
+        background:#1B6DB5 !important;
+        color:white !important;
+        border-radius:10px !important;
+        min-height:46px !important;
+    }
+
+    @media (max-width:1366px) {
+        .exact-app-header {
+            grid-template-columns: 190px 1fr 220px;
+            padding:12px 14px;
+        }
+        .exact-app-logo img { width:155px !important; }
+        .fsi-app-title, .main-title-center, .exact-title {
+            font-size:32px !important;
+        }
+        .exact-user-box {
+            font-size:14px;
+        }
+        .exact-nav-title, .top-nav-title, .custom-module-title {
+            font-size:17px !important;
+        }
+        .exact-nav-card [data-testid="stPageLink"] a,
+        div[data-testid="stButton"] > button {
+            min-height:36px !important;
+            font-size:13px !important;
+            padding:4px 8px !important;
+        }
+        .exact-page-title-card h1,
+        .topbar h1 {
+            font-size:24px !important;
+        }
+    }
+
+    @media (max-width:760px) {
+        .exact-app-header {
+            grid-template-columns:1fr;
+            text-align:center;
+            gap:8px;
+        }
+        .exact-app-logo {
+            justify-content:center;
+        }
+        .exact-app-logo img {
+            width:130px !important;
+        }
+        .fsi-app-title, .main-title-center, .exact-title {
+            font-size:24px !important;
+        }
+        .exact-user-box {
+            text-align:center;
+            font-size:13px;
+        }
+        .sap-grid-card, .sap-section-card, .card, .topbar, .exact-page-title-card, .exact-nav-card {
+            padding:8px !important;
+            margin-bottom:10px !important;
+        }
+        .exact-login-shell {
+            padding-top:24px;
+        }
+        .exact-login-card {
+            padding:20px 18px 24px 18px;
+        }
+        .exact-login-title {
+            font-size:24px !important;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
 
 
 def force_exact_login_page():
-    """Safe login UI renderer used by page_setup/login flow."""
-    try:
-        st.markdown("""
-        <style>
-        .login-card {
-            max-width: 420px;
-            margin: 28px auto 0 auto;
-            background: #ffffff;
-            border: 1px solid #d9e2ec;
-            border-radius: 16px;
-            padding: 22px 26px;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
-            text-align: center;
-        }
-        .login-card h1 {
-            font-family: Montserrat, Aptos, Arial, sans-serif !important;
-            font-size: 28px !important;
-            line-height: 1.1 !important;
-            font-weight: 900 !important;
-            color: #003B73 !important;
-            margin-bottom: 18px !important;
-        }
-        .login-logo-wrap {
-            display:flex;
-            justify-content:center;
-            align-items:center;
-            margin-bottom:10px;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+    """Reliable top-centered login page using Streamlit columns, not open HTML wrappers."""
+    inject_login_only_css()
 
-        logo_html = '<div class="logo-circle">FSI</div>'
-        try:
-            if LOGO_PATH.exists():
-                logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
-                logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="max-width:90px;height:auto;object-fit:contain;" />'
-        except Exception:
-            pass
+    if LOGO_PATH.exists():
+        logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
+        logo_html = f'<img src="data:image/png;base64,{logo_b64}" />'
+    else:
+        logo_html = '<div style="width:135px;height:44px;display:flex;align-items:center;justify-content:center;margin:0 auto 6px auto;border-radius:8px;border:1px solid #CBD5E1;background:#EAF3FC;color:#1B6DB5;font-family:Montserrat,Aptos,Arial,sans-serif;font-size:24px;font-weight:900;">FSI</div>'
 
-        st.markdown(
-            '<div class="login-card">'
-            '<div class="login-logo-wrap">' + logo_html + '</div>'
-            '<h1>EXPORT SHIPMENT<br>MONITORING SYSTEM</h1>',
-            unsafe_allow_html=True
-        )
+    st.markdown(
+        f"""
+        <div class="login-top-card">
+            {logo_html}
+            <div class="login-top-title">EXPORT SHIPMENT<br>MONITORING SYSTEM</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
-        username = st.text_input("Username", key="force_exact_login_username")
-        password = st.text_input("Password", type="password", key="force_exact_login_password")
-
-        if st.button("Login", key="force_exact_login_button", type="primary"):
+    left, center, right = st.columns([1.0, 0.42, 1.0])
+    with center:
+        username = st.text_input("User Name", key="force_login_username")
+        password = st.text_input("Password", type="password", key="force_login_password")
+        if st.button("Login", type="primary", key="force_login_button"):
             user = verify_user(username, password)
             if user:
                 st.session_state["user"] = user
@@ -2810,84 +3829,109 @@ def force_exact_login_page():
             else:
                 st.error("Invalid username or password.")
 
-        st.markdown("</div>", unsafe_allow_html=True)
-        try:
-            render_slogan_footer(login=True)
-        except Exception:
-            pass
-    except Exception as e:
-        st.error(f"Login page error: {e}")
 
+def inject_login_only_css():
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=swap');
 
-def get_user_allowed_warehouse_ids(username=None):
-    """Return allowed warehouse IDs. Empty list means all warehouse access."""
-    try:
-        user = st.session_state.get("user") or {}
-        username = username or user.get("username")
-        if not username or user.get("role") == "super_admin":
-            return []
-        rows = fetch_all("SELECT warehouse_id FROM user_warehouse_access WHERE username=? AND COALESCE(can_access, TRUE)=TRUE", (username,))
-        return [int(r["warehouse_id"]) for r in rows if r.get("warehouse_id") is not None]
-    except Exception:
-        return []
+    html, body, .stApp, [data-testid="stAppViewContainer"], .main {
+        background: #F6F8FB !important;
+    }
 
-def warehouse_access_filter_rows(rows, warehouse_key="warehouse_id"):
-    ids = get_user_allowed_warehouse_ids()
-    if not ids:
-        return rows
-    allowed = set(ids)
-    return [r for r in rows if int(r.get(warehouse_key) or 0) in allowed]
+    header[data-testid="stHeader"],
+    div[data-testid="stToolbar"],
+    div[data-testid="collapsedControl"],
+    section[data-testid="stSidebar"] {
+        display: none !important;
+        height: 0 !important;
+        min-height: 0 !important;
+    }
 
-def page_setup(cleanup=True):
-    """Safe application page setup.
+    .block-container {
+        padding-top: 18px !important;
+        margin-top: 0px !important;
+        max-width: 100% !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
 
-    This function is called by app.py and every page.
-    It initializes session/login, renders login screen when needed, and renders top layout after login.
-    """
-    try:
-        init_db()
-    except Exception:
-        pass
+    .login-top-card {
+        width: min(520px, 94vw);
+        margin: 0 auto 12px auto;
+        background: #FFFFFF;
+        border: 1px solid #CBD5E1;
+        border-radius: 16px;
+        box-shadow: 0 8px 28px rgba(15,23,42,.10);
+        padding: 18px 26px 20px 26px;
+        text-align: center;
+        box-sizing: border-box;
+    }
 
-    if "user" not in st.session_state or not st.session_state.get("user"):
-        # Prefer existing login helpers when available.
-        if "login_screen" in globals():
-            login_screen()
-        elif "show_login" in globals():
-            show_login()
-        elif "login_page" in globals():
-            login_page()
-        else:
-            st.markdown('<div class="login-card">', unsafe_allow_html=True)
-            st.markdown('<h1 style="text-align:center;color:#003B73;">EXPORT SHIPMENT<br>MONITORING SYSTEM</h1>', unsafe_allow_html=True)
-            username = st.text_input("Username", key="fallback_login_username")
-            password = st.text_input("Password", type="password", key="fallback_login_password")
-            if st.button("Login", key="fallback_login_button"):
-                user = verify_user(username, password)
-                if user:
-                    st.session_state["user"] = user
-                    st.rerun()
-                else:
-                    st.error("Invalid username or password.")
-            st.markdown('</div>', unsafe_allow_html=True)
-        try:
-            render_slogan_footer(login=True)
-        except Exception:
-            pass
-        st.stop()
+    .login-top-card img {
+        width: 145px !important;
+        max-width: 70% !important;
+        height: auto !important;
+        object-fit: contain !important;
+        display: block !important;
+        margin: 0 auto 6px auto !important;
+    }
 
-    try:
-        require_page_access_for_current_page()
-    except Exception:
-        pass
+    .login-top-title {
+        font-family: Montserrat, Aptos, Arial, sans-serif !important;
+        font-size: 27px !important;
+        line-height: 1.08 !important;
+        font-weight: 900 !important;
+        color: #1B6DB5 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        letter-spacing: .2px !important;
+    }
 
-    try:
-        top_layout()
-    except Exception:
-        pass
+    /* Login input column */
+    div[data-testid="stTextInput"] label p {
+        font-size: 14px !important;
+        font-weight: 900 !important;
+        color: #003B73 !important;
+    }
 
-def render_slogan_footer(login=False):
-    """Render centered developer slogan/footer."""
-    cls = "fsi-login-slogan-footer" if login else "fsi-slogan-footer"
-    st.markdown('<div class="' + cls + '"><span style="display:inline-block;text-align:center;width:100%;">Developed by Rajesh Dhokale&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;dhokaleraj@icloud.com&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;Copyrights to jrdhokale</span></div>', unsafe_allow_html=True)
+    div[data-testid="stTextInput"] input {
+        height: 42px !important;
+        min-height: 42px !important;
+        border-radius: 10px !important;
+        border: 1px solid #CBD5E1 !important;
+        background: #FFFFFF !important;
+        font-weight: 800 !important;
+        color: #111827 !important;
+    }
 
+    div[data-testid="stButton"] > button {
+        width: 100% !important;
+        height: 44px !important;
+        min-height: 44px !important;
+        background: #1B6DB5 !important;
+        color: white !important;
+        border-radius: 10px !important;
+        border: 0 !important;
+        font-size: 16px !important;
+        font-weight: 900 !important;
+    }
+
+    @media (max-width: 760px) {
+        .block-container {
+            padding-top: 10px !important;
+            padding-left: .5rem !important;
+            padding-right: .5rem !important;
+        }
+        .login-top-card {
+            padding: 16px 18px 18px 18px !important;
+        }
+        .login-top-card img {
+            width: 115px !important;
+        }
+        .login-top-title {
+            font-size: 22px !important;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
