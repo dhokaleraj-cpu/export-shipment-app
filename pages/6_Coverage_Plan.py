@@ -793,6 +793,7 @@ else:
             st.error(f"Forecast import failed: {e}")
 
 render_slogan_footer()
+st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)
 
 
 # Safety no-op marker: suggested_shipment_qty and next_shipment_date are calculated and saved above.

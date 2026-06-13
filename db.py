@@ -247,6 +247,9 @@ def verify_user(username, password):
 def init_db():
     """Lightweight migrations for existing Supabase/PostgreSQL database."""
     migrations = [
+        'CREATE TABLE IF NOT EXISTS user_warehouse_access (id SERIAL PRIMARY KEY, username TEXT NOT NULL, warehouse_id INTEGER NOT NULL, can_access BOOLEAN DEFAULT TRUE, UNIQUE(username, warehouse_id))',
+        'ALTER TABLE products ADD COLUMN IF NOT EXISTS warehouse_id INTEGER',
+        "ALTER TABLE page_permissions ADD COLUMN IF NOT EXISTS can_modify BOOLEAN DEFAULT FALSE",
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_code TEXT",
         "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_modify BOOLEAN DEFAULT FALSE",
         "ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS po_number TEXT",

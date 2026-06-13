@@ -877,6 +877,7 @@ except Exception as export_error:
 
 
 render_slogan_footer()
+st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)
 
 
 def delivery_invoice_print_html(invoice, line_items):

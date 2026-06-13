@@ -40,3 +40,4 @@ for r in rows:
             st.link_button('Open WhatsApp', whatsapp_link(r['whatsapp_no'], message))
 
 render_slogan_footer()
+st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)

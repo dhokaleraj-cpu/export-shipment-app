@@ -310,3 +310,4 @@ else:
             st.info('No old rows available for editing.')
 
 render_slogan_footer()
+st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)
