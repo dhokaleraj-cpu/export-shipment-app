@@ -5,6 +5,8 @@ page_setup()
 require_page_edit('shipment')
 show_edit_permission_status('shipment')
 
+require_page_view('shipment')
+access_notice()
 show_header('Shipment Entry with Pallet / Product Rows')
 suppliers = fetch_all('SELECT * FROM suppliers ORDER BY supplier_name')
 customers = fetch_all('SELECT * FROM customers ORDER BY customer_name')

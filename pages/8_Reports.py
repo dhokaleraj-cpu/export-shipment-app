@@ -5,6 +5,7 @@ page_setup()
 require_page_view('reports')
 show_edit_permission_status('reports')
 
+access_notice()
 show_header('Reports with Export')
 
 

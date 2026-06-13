@@ -436,6 +436,7 @@ page_setup()
 require_page_view('delivery')
 show_edit_permission_status('delivery')
 
+access_notice()
 show_header('Delivery Entry', 'Invoice-style FIFO delivery form with multi-pallet selection')
 
 st.markdown("""

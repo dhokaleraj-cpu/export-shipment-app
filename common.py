@@ -200,6 +200,72 @@ st.markdown("""
         }
     }
 
+
+
+/* FULL WIDTH RESPONSIVE UI PATCH */
+.block-container {
+    max-width: 100% !important;
+    padding-left: clamp(0.8rem, 2vw, 2.2rem) !important;
+    padding-right: clamp(0.8rem, 2vw, 2.2rem) !important;
+    padding-top: 0.9rem !important;
+}
+.exact-app-header {
+    width: 100% !important;
+    max-width: 100% !important;
+    display: grid !important;
+    grid-template-columns: 170px 1fr 220px !important;
+    align-items: center !important;
+    gap: 16px !important;
+    padding: 10px 18px !important;
+    margin: 0 0 14px 0 !important;
+    background: #ffffff !important;
+    border: 1px solid #d9e2ec !important;
+    border-radius: 16px !important;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08) !important;
+}
+.exact-app-logo img {
+    max-width: 115px !important;
+    max-height: 62px !important;
+    width: auto !important;
+    height: auto !important;
+    object-fit: contain !important;
+}
+.exact-title {
+    text-align: center !important;
+    font-size: clamp(22px, 2.4vw, 36px) !important;
+    line-height: 1.05 !important;
+    font-weight: 900 !important;
+    color: #003B73 !important;
+}
+.exact-user-box {
+    text-align: left !important;
+    font-size: 12px !important;
+    line-height: 1.5 !important;
+    font-weight: 800 !important;
+}
+.exact-nav-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 8px 0 18px 0 !important;
+}
+.exact-page-title-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 10px 0 14px 0 !important;
+}
+div[data-testid="stHorizontalBlock"] {
+    gap: 0.85rem !important;
+}
+@media (max-width: 900px) {
+    .exact-app-header {
+        grid-template-columns: 1fr !important;
+        text-align: center !important;
+    }
+    .exact-user-box {
+        text-align: center !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -3199,6 +3265,148 @@ def user_can_access_product_id(product_id, username=None):
         return int(product_id) in set(ids)
     except Exception:
         return False
+
+
+def require_page_view(page_key):
+    """Backward-compatible page view guard used by older pages."""
+    try:
+        user = st.session_state.get("user") or {}
+        role = user.get("role")
+        if role == "super_admin":
+            return True
+        username = user.get("username")
+        if not username:
+            st.stop()
+        rows = fetch_all(
+            "SELECT can_access, can_view FROM user_page_access WHERE username=? AND page_key=?",
+            (username, page_key),
+        )
+        if rows:
+            allowed = bool(rows[0].get("can_view", rows[0].get("can_access", False)))
+        else:
+            # Role defaults keep app usable when no page settings are saved.
+            defaults = {
+                "admin": {"dashboard", "masters", "shipment", "delivery", "payment", "coverage", "admin", "reports", "overdue"},
+                "user": {"dashboard", "delivery", "coverage", "reports"},
+            }
+            allowed = page_key in defaults.get(role, set())
+        if not allowed:
+            st.error("You do not have View permission for this page. Contact Super Admin.")
+            st.stop()
+        return True
+    except Exception:
+        # Do not crash the page because of permission helper issues.
+        return True
+
+def require_page_edit(page_key):
+    """Backward-compatible page edit guard."""
+    try:
+        user = st.session_state.get("user") or {}
+        if user.get("role") == "super_admin":
+            return True
+        rows = fetch_all(
+            "SELECT can_edit FROM user_page_access WHERE username=? AND page_key=?",
+            (user.get("username"), page_key),
+        )
+        allowed = bool(rows and rows[0].get("can_edit"))
+        if not allowed:
+            st.warning("You have View permission only for this page.")
+        return allowed
+    except Exception:
+        return False
+
+def current_user_allowed_product_ids():
+    """Product IDs allotted to current user. Empty list means all products."""
+    try:
+        user = st.session_state.get("user") or {}
+        if user.get("role") == "super_admin":
+            return []
+        username = user.get("username")
+        if not username:
+            return []
+        rows = fetch_all(
+            "SELECT product_id FROM user_product_access WHERE username=? AND COALESCE(can_access, TRUE)=TRUE",
+            (username,),
+        )
+        return [int(r["product_id"]) for r in rows if r.get("product_id") is not None]
+    except Exception:
+        return []
+
+def current_user_allowed_warehouse_ids():
+    """Warehouse IDs allotted to current user. Empty list means all warehouses."""
+    try:
+        user = st.session_state.get("user") or {}
+        if user.get("role") == "super_admin":
+            return []
+        username = user.get("username")
+        if not username:
+            return []
+        rows = fetch_all(
+            "SELECT warehouse_id FROM user_warehouse_access WHERE username=? AND COALESCE(can_access, TRUE)=TRUE",
+            (username,),
+        )
+        return [int(r["warehouse_id"]) for r in rows if r.get("warehouse_id") is not None]
+    except Exception:
+        return []
+
+def access_sql_for_product_alias(alias="p", column="id"):
+    ids = current_user_allowed_product_ids()
+    if not ids:
+        return "", ()
+    prefix = f"{alias}." if alias else ""
+    placeholders = ",".join(["?"] * len(ids))
+    return f" AND {prefix}{column} IN ({placeholders}) ", tuple(ids)
+
+def access_sql_for_warehouse_alias(alias="", column="warehouse_id"):
+    ids = current_user_allowed_warehouse_ids()
+    if not ids:
+        return "", ()
+    prefix = f"{alias}." if alias else ""
+    placeholders = ",".join(["?"] * len(ids))
+    return f" AND {prefix}{column} IN ({placeholders}) ", tuple(ids)
+
+def filter_rows_by_user_access(rows, product_key="product_id", warehouse_key="warehouse_id"):
+    """Filter row dictionaries by allotted product and warehouse. Empty allotment means all."""
+    try:
+        product_ids = current_user_allowed_product_ids()
+        warehouse_ids = current_user_allowed_warehouse_ids()
+        product_set = set(product_ids)
+        warehouse_set = set(warehouse_ids)
+        result = []
+        for r in rows or []:
+            ok_product = True
+            ok_warehouse = True
+            if product_ids and product_key in r and r.get(product_key) is not None:
+                ok_product = int(r.get(product_key) or 0) in product_set
+            if warehouse_ids and warehouse_key in r and r.get(warehouse_key) is not None:
+                ok_warehouse = int(r.get(warehouse_key) or 0) in warehouse_set
+            if ok_product and ok_warehouse:
+                result.append(r)
+        return result
+    except Exception:
+        return rows
+
+def filter_product_rows_for_current_user(rows, product_id_key="id"):
+    """Filter product master rows by allotted part numbers. Empty allotment means all."""
+    ids = current_user_allowed_product_ids()
+    if not ids:
+        return rows
+    allowed = set(ids)
+    return [r for r in rows or [] if int(r.get(product_id_key) or 0) in allowed]
+
+def access_notice():
+    """Small access notice for non-super users."""
+    try:
+        user = st.session_state.get("user") or {}
+        if user.get("role") == "super_admin":
+            return
+        product_ids = current_user_allowed_product_ids()
+        wh_ids = current_user_allowed_warehouse_ids()
+        part_msg = "All Part Numbers" if not product_ids else f"{len(product_ids)} allotted Part Number(s)"
+        wh_msg = "All Warehouses" if not wh_ids else f"{len(wh_ids)} allotted Warehouse(s)"
+        st.info(f"Data Access: {part_msg} | {wh_msg}")
+    except Exception:
+        pass
 
 def page_setup(cleanup=True):
     """Safe application page setup.

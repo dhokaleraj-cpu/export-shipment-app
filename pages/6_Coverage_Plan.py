@@ -459,6 +459,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+access_notice()
 show_header("Coverage Plan", "Weekly customer forecast, warehouse stock and shipment planning")
 
 @st.cache_data(ttl=1800, show_spinner=False)
