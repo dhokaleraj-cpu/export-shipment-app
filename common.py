@@ -1633,7 +1633,7 @@ def render_top_navigation():
     and tuple/list navigation items:
         ("Label", "target") or ("target", "Label")
     """
-    inject_exact_ui_css()
+    globals().get('inject_exact_ui_css', lambda: None)()
     user = st.session_state.get("user", {})
     nav_items = get_allowed_nav_items(user)
     st.markdown('<div class="exact-nav-card"><div class="exact-nav-title">MODULES</div>', unsafe_allow_html=True)
@@ -1672,7 +1672,7 @@ def render_top_navigation():
 
 
 def top_layout():
-    inject_exact_ui_css()
+    globals().get('inject_exact_ui_css', lambda: None)()
     user = st.session_state.get("user", {"username": "-", "role": "-"})
     if LOGO_PATH.exists():
         logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
@@ -1697,8 +1697,76 @@ def top_layout():
     render_top_navigation()
 
 
+
+def inject_exact_ui_css():
+    """Safe UI CSS injector used by show_header/login/page setup."""
+    st.markdown("""
+    <style>
+    .topbar {
+        background:#f8fafc;
+        color:#003b73;
+        padding:18px 22px;
+        border-radius:12px;
+        margin-top:18px;
+        margin-bottom:16px;
+        border:1px solid #d9e2ec;
+        box-shadow:0 1px 6px rgba(0,0,0,.06);
+    }
+    .topbar h1 {
+        font-family: Montserrat, Aptos, Arial, sans-serif !important;
+        font-size: 28px !important;
+        margin:0;
+        font-weight:900 !important;
+        color:#003B73 !important;
+    }
+    .subtext {
+        font-size:13px;
+        opacity:.9;
+        margin-top:4px;
+        font-weight:800;
+    }
+    .fsi-slogan-footer {
+        width: 100%;
+        display: block;
+        text-align: center !important;
+        font-family: Aptos, Arial, sans-serif;
+        font-size: 13px;
+        font-weight: 900;
+        color: #003B73;
+        padding: 8px 10px;
+        margin: 18px auto 0 auto;
+        border-top: 1px solid #d9e2ec;
+        background: rgba(255,255,255,0.92);
+    }
+    .fsi-login-slogan-footer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 8px;
+        width: 100%;
+        display: block;
+        text-align: center !important;
+        font-family: Aptos, Arial, sans-serif;
+        font-size: 13px;
+        font-weight: 900;
+        color: #003B73;
+        z-index: 9999;
+    }
+    @media (max-width: 760px) {
+        .fsi-slogan-footer, .fsi-login-slogan-footer {
+            font-size: 11px;
+            padding-left: 8px;
+            padding-right: 8px;
+        }
+        .topbar h1 {
+            font-size: 22px !important;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 def show_header(title, subtitle="EXPORT SHIPMENT MONITORING SYSTEM"):
-    inject_exact_ui_css()
+    globals().get('inject_exact_ui_css', lambda: None)()
     st.markdown(
         f"""
         <div class="exact-page-title-card">
@@ -2823,13 +2891,3 @@ def render_slogan_footer(login=False):
     cls = "fsi-login-slogan-footer" if login else "fsi-slogan-footer"
     st.markdown('<div class="' + cls + '"><span style="display:inline-block;text-align:center;width:100%;">Developed by Rajesh Dhokale&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;dhokaleraj@icloud.com&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;Copyrights to jrdhokale</span></div>', unsafe_allow_html=True)
 
-
-
-st.markdown("""
-<style>
-/* NEW SLOGAN CENTER OVERRIDE */
-.fsi-slogan-footer,.fsi-login-slogan-footer{width:100%!important;text-align:center!important;display:block!important;font-family:Aptos,Arial,sans-serif!important;font-size:13px!important;font-weight:900!important;color:#003B73!important;}
-.fsi-slogan-footer{padding:8px 10px!important;margin:18px auto 0 auto!important;border-top:1px solid #d9e2ec!important;background:rgba(255,255,255,.92)!important;}
-.fsi-login-slogan-footer{position:fixed!important;left:0!important;right:0!important;bottom:8px!important;z-index:9999!important;}
-</style>
-""", unsafe_allow_html=True)
