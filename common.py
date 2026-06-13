@@ -49,6 +49,164 @@ init_db()
 
 st.markdown("""
 <style>
+/* DIRECT EXACT UI SAFETY PATCH */
+
+    /* Restored compact app header UI */
+    .exact-app-header {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(120px, 170px) 1fr minmax(145px, 210px);
+        align-items: center;
+        gap: 14px;
+        padding: 10px 16px;
+        margin: 4px 0 12px 0;
+        background: #ffffff;
+        border: 1px solid #d9e2ec;
+        border-radius: 16px;
+        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+        overflow: hidden;
+    }
+    .exact-app-logo {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        max-width: 170px;
+        min-height: 54px;
+        overflow: hidden;
+    }
+    .exact-app-logo img {
+        display: block !important;
+        max-width: 110px !important;
+        width: auto !important;
+        max-height: 58px !important;
+        height: auto !important;
+        object-fit: contain !important;
+    }
+    .exact-app-logo-fallback {
+        width: 68px;
+        height: 42px;
+        border-radius: 10px;
+        background: #003B73;
+        color: #ffffff;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-weight:900;
+        font-size:18px;
+    }
+    .exact-title {
+        text-align: center;
+        font-family: Montserrat, Aptos, Arial, sans-serif !important;
+        font-size: clamp(20px, 2.2vw, 32px);
+        line-height: 1.08;
+        font-weight: 900;
+        letter-spacing: 0.5px;
+        color: #003B73;
+    }
+    .exact-user-box {
+        text-align: left;
+        font-size: 12px;
+        line-height: 1.55;
+        font-weight: 800;
+        color: #334155;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 8px 10px;
+    }
+    .exact-nav-card {
+        width: 100%;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 8px 10px 10px 10px;
+        margin: 8px 0 16px 0;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+    }
+    .exact-nav-title {
+        font-size: 12px;
+        font-weight: 900;
+        color: #334155;
+        margin-bottom: 4px;
+        letter-spacing: .3px;
+    }
+    .exact-page-title-card {
+        margin: 10px 0 12px 0;
+        padding: 12px 14px;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+    }
+    .exact-page-title-card h1 {
+        margin: 0 !important;
+        font-size: clamp(22px, 2.1vw, 34px) !important;
+        line-height: 1.12 !important;
+        font-weight: 900 !important;
+        color: #0f172a !important;
+        font-family: Montserrat, Aptos, Arial, sans-serif !important;
+    }
+    .exact-page-subtitle {
+        margin-top: 8px;
+        font-size: 13px;
+        font-weight: 800;
+        color: #475569;
+    }
+    .fsi-slogan-footer {
+        width: 100%;
+        display: block;
+        text-align: center !important;
+        font-family: Aptos, Arial, sans-serif;
+        font-size: 13px;
+        font-weight: 900;
+        color: #003B73;
+        padding: 8px 10px;
+        margin: 18px auto 0 auto;
+        border-top: 1px solid #d9e2ec;
+        background: rgba(255,255,255,0.92);
+    }
+    .fsi-login-slogan-footer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 8px;
+        width: 100%;
+        display: block;
+        text-align: center !important;
+        font-family: Aptos, Arial, sans-serif;
+        font-size: 13px;
+        font-weight: 900;
+        color: #003B73;
+        z-index: 9999;
+    }
+    @media (max-width: 780px) {
+        .exact-app-header {
+            grid-template-columns: 1fr;
+            text-align: center;
+            gap: 8px;
+        }
+        .exact-app-logo {
+            max-width: 100%;
+        }
+        .exact-app-logo img {
+            max-width: 95px !important;
+            max-height: 46px !important;
+        }
+        .exact-user-box {
+            text-align: center;
+        }
+        .fsi-slogan-footer, .fsi-login-slogan-footer {
+            font-size: 11px;
+        }
+    }
+
+</style>
+""", unsafe_allow_html=True)
+
+
+
+st.markdown("""
+<style>
 @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=swap');
 
 /* GLOBAL DEVICE FRIENDLY UI - COVERAGE PLAN STYLE */
@@ -1676,7 +1834,7 @@ def top_layout():
     user = st.session_state.get("user", {"username": "-", "role": "-"})
     if LOGO_PATH.exists():
         logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
-        logo_html = f'<img src="data:image/png;base64,{logo_b64}" />'
+        logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="max-width:110px;max-height:58px;width:auto;height:auto;object-fit:contain;" />'
     else:
         logo_html = '<div class="exact-app-logo-fallback">FSI</div>'
 
@@ -1762,7 +1920,157 @@ def inject_exact_ui_css():
             font-size: 22px !important;
         }
     }
-    </style>
+    
+    /* Restored compact app header UI */
+    .exact-app-header {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(120px, 170px) 1fr minmax(145px, 210px);
+        align-items: center;
+        gap: 14px;
+        padding: 10px 16px;
+        margin: 4px 0 12px 0;
+        background: #ffffff;
+        border: 1px solid #d9e2ec;
+        border-radius: 16px;
+        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+        overflow: hidden;
+    }
+    .exact-app-logo {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        max-width: 170px;
+        min-height: 54px;
+        overflow: hidden;
+    }
+    .exact-app-logo img {
+        display: block !important;
+        max-width: 110px !important;
+        width: auto !important;
+        max-height: 58px !important;
+        height: auto !important;
+        object-fit: contain !important;
+    }
+    .exact-app-logo-fallback {
+        width: 68px;
+        height: 42px;
+        border-radius: 10px;
+        background: #003B73;
+        color: #ffffff;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-weight:900;
+        font-size:18px;
+    }
+    .exact-title {
+        text-align: center;
+        font-family: Montserrat, Aptos, Arial, sans-serif !important;
+        font-size: clamp(20px, 2.2vw, 32px);
+        line-height: 1.08;
+        font-weight: 900;
+        letter-spacing: 0.5px;
+        color: #003B73;
+    }
+    .exact-user-box {
+        text-align: left;
+        font-size: 12px;
+        line-height: 1.55;
+        font-weight: 800;
+        color: #334155;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 8px 10px;
+    }
+    .exact-nav-card {
+        width: 100%;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 8px 10px 10px 10px;
+        margin: 8px 0 16px 0;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+    }
+    .exact-nav-title {
+        font-size: 12px;
+        font-weight: 900;
+        color: #334155;
+        margin-bottom: 4px;
+        letter-spacing: .3px;
+    }
+    .exact-page-title-card {
+        margin: 10px 0 12px 0;
+        padding: 12px 14px;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+    }
+    .exact-page-title-card h1 {
+        margin: 0 !important;
+        font-size: clamp(22px, 2.1vw, 34px) !important;
+        line-height: 1.12 !important;
+        font-weight: 900 !important;
+        color: #0f172a !important;
+        font-family: Montserrat, Aptos, Arial, sans-serif !important;
+    }
+    .exact-page-subtitle {
+        margin-top: 8px;
+        font-size: 13px;
+        font-weight: 800;
+        color: #475569;
+    }
+    .fsi-slogan-footer {
+        width: 100%;
+        display: block;
+        text-align: center !important;
+        font-family: Aptos, Arial, sans-serif;
+        font-size: 13px;
+        font-weight: 900;
+        color: #003B73;
+        padding: 8px 10px;
+        margin: 18px auto 0 auto;
+        border-top: 1px solid #d9e2ec;
+        background: rgba(255,255,255,0.92);
+    }
+    .fsi-login-slogan-footer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 8px;
+        width: 100%;
+        display: block;
+        text-align: center !important;
+        font-family: Aptos, Arial, sans-serif;
+        font-size: 13px;
+        font-weight: 900;
+        color: #003B73;
+        z-index: 9999;
+    }
+    @media (max-width: 780px) {
+        .exact-app-header {
+            grid-template-columns: 1fr;
+            text-align: center;
+            gap: 8px;
+        }
+        .exact-app-logo {
+            max-width: 100%;
+        }
+        .exact-app-logo img {
+            max-width: 95px !important;
+            max-height: 46px !important;
+        }
+        .exact-user-box {
+            text-align: center;
+        }
+        .fsi-slogan-footer, .fsi-login-slogan-footer {
+            font-size: 11px;
+        }
+    }
+
+</style>
     """, unsafe_allow_html=True)
 
 def show_header(title, subtitle="EXPORT SHIPMENT MONITORING SYSTEM"):
@@ -1807,6 +2115,18 @@ def style_fifo_balance(df):
             return "background-color: #d1fae5; color: #065f46; font-weight: 900;"
         return ""
     return df.style.apply(lambda row: [style_cell(row[col], col) for col in df.columns], axis=1)
+
+
+def searchable_selectbox(label, options, key=None, index=0, help=None):
+    """Safe searchable selectbox fallback.
+
+    Keeps older pages working even when the custom searchable widget is missing.
+    """
+    options = list(options or [])
+    if not options:
+        return None
+    safe_index = index if isinstance(index, int) and 0 <= index < len(options) else 0
+    return st.selectbox(label, options, index=safe_index, key=key, help=help)
 
 def show_df(rows, key=None, total=False):
     rows = format_date_columns(rows)
