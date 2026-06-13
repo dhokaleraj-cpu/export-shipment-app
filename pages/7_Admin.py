@@ -145,7 +145,6 @@ with admin_tabs[2]:
         st.markdown('<div class="sap-grid-card"><div class="sap-grid-card-title">Page Wise View / Edit Permissions</div>', unsafe_allow_html=True)
         selected_view_values = {}
         selected_edit_values = {}
-        selected_modify_values = {}
 
         header_cols = st.columns([2.4, 1, 1])
         with header_cols[0]:
@@ -167,7 +166,7 @@ with admin_tabs[2]:
                 default_view = selected_user_row.get('role') in page.get('default_roles', []) if selected_user_row else False
                 default_edit = _role_default_edit(page, selected_user_row.get('role')) if selected_user_row else False
 
-            row_cols = st.columns([2.4, 1, 1, 1])
+            row_cols = st.columns([2.4, 1, 1])
             with row_cols[0]:
                 st.markdown(f"**{page['label']}**")
             with row_cols[1]:
@@ -186,8 +185,6 @@ with admin_tabs[2]:
                     disabled=is_super_selected,
                     label_visibility='collapsed'
                 )
-            with row_cols[3]:
-                selected_modify_values[page['key']] = st.checkbox('Modify', value=bool(default_edit), key=f"modify_{selected_username}_{page['key']}", disabled=is_super_selected, label_visibility='collapsed')
         st.markdown('</div>', unsafe_allow_html=True)
 
         csave, creset = st.columns([1, 1])
@@ -196,18 +193,16 @@ with admin_tabs[2]:
                 for page in APP_PAGE_DEFINITIONS:
                     can_view = bool(selected_view_values[page['key']])
                     can_edit = bool(selected_edit_values[page['key']]) and can_view
-                    can_modify = bool(selected_modify_values.get(page['key'], can_edit)) and can_view
                     execute_query("""
                         INSERT INTO user_page_access (username, page_key, can_access, can_view, can_edit, can_modify)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?)
                         ON CONFLICT (username, page_key)
                         DO UPDATE SET
                             can_access=EXCLUDED.can_view,
                             can_view=EXCLUDED.can_view,
                             can_edit=EXCLUDED.can_edit,
-                            can_modify=EXCLUDED.can_modify,
                             updated_at=CURRENT_TIMESTAMP
-                    """, (selected_username, page['key'], can_view, can_view, can_edit, locals().get("can_modify", can_edit)))
+                    """, (selected_username, page['key'], can_view, can_view, can_edit, can_modify))
                 clear_cache_after_write()
                 st.success('Page View / Edit controls saved successfully.')
                 st.rerun()
@@ -221,71 +216,6 @@ with admin_tabs[2]:
         if access_rows:
             st.markdown('<div class="sap-grid-card-title">Saved Page Access Records</div>', unsafe_allow_html=True)
             st.dataframe(pd.DataFrame(access_rows), use_container_width=True, hide_index=True)
-
-
-    st.divider()
-    st.subheader('Warehouse Data Access')
-    st.info('Default: if no warehouse is selected for a user, the user can access all warehouse data. Select warehouses only when you want to restrict access.')
-    access_users = fetch_all('SELECT id, username, role FROM users ORDER BY username')
-    access_warehouses = fetch_all('SELECT id, warehouse_name FROM warehouses ORDER BY warehouse_name')
-    if access_users and access_warehouses:
-        user_labels = [f"{u['username']} | {u['role']}" for u in access_users]
-        selected_access_user_label = searchable_selectbox('Select User for Warehouse Access', user_labels, key='warehouse_access_user_select')
-        selected_access_username = selected_access_user_label.split('|')[0].strip()
-        existing_access = fetch_all('SELECT warehouse_id FROM user_warehouse_access WHERE username=? AND COALESCE(can_access, TRUE)=TRUE', (selected_access_username,))
-        existing_ids = {int(r['warehouse_id']) for r in existing_access if r.get('warehouse_id') is not None}
-        warehouse_options = [f"{w['warehouse_name']} | {w['id']}" for w in access_warehouses]
-        default_selected = [opt for opt in warehouse_options if int(opt.split('|')[-1].strip()) in existing_ids]
-        selected_warehouse_access = st.multiselect('Select Warehouses for this User (blank = all warehouses)', warehouse_options, default=default_selected, key='warehouse_access_multiselect')
-        if st.button('Save Warehouse Access', key='save_user_warehouse_access'):
-            execute_query('DELETE FROM user_warehouse_access WHERE username=?', (selected_access_username,))
-            for wh_opt in selected_warehouse_access:
-                wh_id = int(wh_opt.split('|')[-1].strip())
-                execute_query('INSERT INTO user_warehouse_access (username, warehouse_id, can_access) VALUES (?, ?, TRUE) ON CONFLICT (username, warehouse_id) DO UPDATE SET can_access=EXCLUDED.can_access', (selected_access_username, wh_id))
-            clear_cache_after_write()
-            st.success('Warehouse access saved. Blank selection means all warehouse access.')
-            st.rerun()
-
-
-    st.divider()
-    st.subheader('Product / Part Number Data Access')
-    st.info('By default, if no product is selected for a user, the user can access all part numbers. Select one or more part numbers only when you want to restrict access.')
-
-    product_access_users = fetch_all('SELECT id, username, role FROM users ORDER BY username')
-    product_access_rows = fetch_all('SELECT id, product_code, product_name FROM products ORDER BY product_code')
-    if product_access_users and product_access_rows:
-        product_user_labels = [f"{u['username']} | {u['role']}" for u in product_access_users]
-        selected_product_user_label = searchable_selectbox('Select User for Product / Part Number Access', product_user_labels, key='product_access_user_select')
-        selected_product_username = selected_product_user_label.split('|')[0].strip()
-
-        existing_product_access = fetch_all('SELECT product_id FROM user_product_access WHERE username=? AND COALESCE(can_access, TRUE)=TRUE', (selected_product_username,))
-        existing_product_ids = {int(r['product_id']) for r in existing_product_access if r.get('product_id') is not None}
-
-        product_options = [f"{p['product_code']} | {p['product_name']} | {p['id']}" for p in product_access_rows]
-        default_product_selected = [opt for opt in product_options if int(opt.split('|')[-1].strip()) in existing_product_ids]
-
-        selected_product_access = st.multiselect(
-            'Select Part Numbers for this User (blank = all part numbers)',
-            product_options,
-            default=default_product_selected,
-            key='product_access_multiselect'
-        )
-
-        if st.button('Save Product / Part Number Access', key='save_user_product_access'):
-            execute_query('DELETE FROM user_product_access WHERE username=?', (selected_product_username,))
-            for product_opt in selected_product_access:
-                product_id = int(product_opt.split('|')[-1].strip())
-                execute_query(
-                    'INSERT INTO user_product_access (username, product_id, can_access) VALUES (?, ?, TRUE) ON CONFLICT (username, product_id) DO UPDATE SET can_access=EXCLUDED.can_access',
-                    (selected_product_username, product_id)
-                )
-            clear_permission_cache()
-            if selected_product_access:
-                st.success('Product / Part Number access saved for selected parts.')
-            else:
-                st.success('No part numbers selected. User will have access to all part numbers by default.')
-    else:
-        st.info('Create users and products first.')
 
 with admin_tabs[3]:
     st.subheader('Company Management')
@@ -378,7 +308,7 @@ if users_for_modify:
                 )
             else:
                 execute_query(
-                    "INSERT INTO user_page_access (user_id, page_key, can_view, can_edit, can_modify, can_modify) VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO user_page_access (user_id, page_key, can_view, can_edit, can_modify, can_modify) VALUES (?, ?, ?, ?, ?)",
                     (selected_user_modify_id, rr["page_key"], bool(rr["Can View"]), bool(rr["Can Edit"]), bool(rr["Can Modify"]))
                 )
         clear_permission_cache()

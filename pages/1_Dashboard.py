@@ -232,7 +232,6 @@ def dash_calculate_coverage_kpis(product_id, shipment_time_days, two_months_inve
         "bank_status": current_bank_status,
     }
 
-access_notice()
 show_header('Dashboard')
 total_shipments = fetch_all('SELECT COUNT(*) c FROM shipments')[0]['c']
 total_boxes = fetch_all('SELECT COUNT(*) c FROM shipment_boxes')[0]['c']
