@@ -11,7 +11,7 @@ customers = fetch_all('SELECT * FROM customers ORDER BY customer_name')
 ship_to_rows = fetch_all("SELECT * FROM ship_to_masters WHERE COALESCE(is_active, TRUE)=TRUE ORDER BY ship_to_name, ship_to_id")
 warehouses = fetch_all('SELECT * FROM warehouses ORDER BY warehouse_name')
 warehouse_info = {w.get('warehouse_name'): w for w in warehouses}
-products = fetch_all('SELECT * FROM products ORDER BY product_code')
+products = filter_product_rows_for_current_user(fetch_all('SELECT * FROM products ORDER BY product_code'))
 forwarders = fetch_all('SELECT * FROM forwarders ORDER BY forwarder_name')
 incoterms = fetch_all('SELECT * FROM incoterms ORDER BY incoterm_name')
 if not suppliers or not warehouses or (not products) or not customers:
