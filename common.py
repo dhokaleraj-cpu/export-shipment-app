@@ -3408,6 +3408,35 @@ def access_notice():
     except Exception:
         pass
 
+
+def clear_cache_after_write():
+    """Clear Streamlit/app caches safely after DB writes.
+
+    Backward-compatible helper used by Admin and transaction pages.
+    It never raises an error if a specific cache function is missing.
+    """
+    try:
+        if "clear_permission_cache" in globals():
+            clear_permission_cache()
+    except Exception:
+        pass
+
+    try:
+        if "get_cached_fetch_all" in globals() and hasattr(get_cached_fetch_all, "clear"):
+            get_cached_fetch_all.clear()
+    except Exception:
+        pass
+
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
+    try:
+        st.cache_resource.clear()
+    except Exception:
+        pass
+
 def page_setup(cleanup=True):
     """Safe application page setup.
 
