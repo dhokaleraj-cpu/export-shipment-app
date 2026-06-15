@@ -437,6 +437,7 @@ require_page_view('delivery')
 show_edit_permission_status('delivery')
 
 show_header('Delivery Entry', 'Invoice-style FIFO delivery form with multi-pallet selection')
+access_notice()
 
 st.markdown("""
 <style>
@@ -463,7 +464,15 @@ st.markdown('\n        <div class="card" style="margin-bottom:14px;">\n         
 customers = fetch_all('SELECT * FROM customers ORDER BY customer_name')
 terms = fetch_all('SELECT * FROM payment_terms ORDER BY days')
 ship_to_rows = fetch_all("SELECT * FROM ship_to_masters WHERE COALESCE(is_active, TRUE)=TRUE ORDER BY ship_to_name, ship_to_id")
-invoice_shipments = fetch_all('\n            SELECT id, shipment_no, invoice_no, po_number, po_date, shipment_date\n            FROM shipments\n            ORDER BY shipment_date ASC, id ASC\n        ')
+invoice_shipments_all = fetch_all('''
+            SELECT DISTINCT s.id, s.shipment_no, s.invoice_no, s.po_number, s.po_date, s.shipment_date,
+                   s.warehouse_id, w.warehouse_name
+            FROM shipments s
+            JOIN shipment_boxes b ON b.shipment_id = s.id
+            LEFT JOIN warehouses w ON s.warehouse_id = w.id
+            ORDER BY s.shipment_date ASC, s.id ASC
+        ''')
+invoice_shipments = filter_rows_by_user_access(invoice_shipments_all)
 if not customers or not invoice_shipments:
     st.warning('Create Customer Master and Shipment Entry first.')
 else:
@@ -490,7 +499,9 @@ else:
     with extra_col4:
         packaging_details = st.text_input('Packaging Details', key='delivery_packaging_details')
     selected_ship = inv_map[selected_invoice]
+    st.text_input('Linked Warehouse', value=str(selected_ship.get('warehouse_name') or ''), disabled=True, key='delivery_linked_warehouse_display')
     available_rows = fetch_all('\n                SELECT\n                    b.*,\n                    s.shipment_no,\n                    s.invoice_no,\n                    s.shipment_date,\n                    COALESCE(b.po_number, s.po_number) AS po_number,\n                    COALESCE(b.po_date, s.po_date) AS po_date,\n                    p.product_code,\n                    p.product_name,\n                    COALESCE(del.delivered_qty, 0) AS delivered_qty,\n                    b.original_qty - COALESCE(del.delivered_qty, 0) AS balance_qty\n                FROM shipment_boxes b\n                JOIN shipments s ON b.shipment_id = s.id\n                JOIN products p ON b.product_id = p.id\n                LEFT JOIN (\n                    SELECT box_id, SUM(delivered_qty) AS delivered_qty\n                    FROM customer_deliveries\n                    GROUP BY box_id\n                ) del ON b.id = del.box_id\n                WHERE s.id = ?\n                  AND b.original_qty - COALESCE(del.delivered_qty, 0) > 0\n                ORDER BY s.shipment_date ASC, b.pallet_no ASC, b.id ASC\n            ', (selected_ship['id'],))
+    available_rows = filter_rows_by_user_access(available_rows)
     if not available_rows:
         st.warning('No pending pallet quantity available for this original invoice/shipment.')
     else:
@@ -728,6 +739,7 @@ if st.session_state.user['role'] == 'super_admin':
     st.subheader('Edit Delivery Entry')
     cleanup_orphan_transactions()
     old_deliveries = fetch_all('\n                SELECT d.*, c.customer_name, s.invoice_no AS original_invoice_no, s.shipment_no\n                FROM customer_deliveries d\n                JOIN customers c ON d.customer_id = c.id\n                JOIN shipments s ON d.shipment_id = s.id\n                JOIN shipment_boxes b ON d.box_id = b.id\n                ORDER BY d.id DESC\n            ')
+    old_deliveries = filter_rows_by_user_access(old_deliveries)
     if old_deliveries:
         dmap = {f"{d['id']} | {d['delivery_invoice_no']} | {d['customer_name']}": d for d in old_deliveries}
         ed = dmap[st.selectbox('Select Delivery to Edit', list(dmap.keys()), key='edit_delivery_select')]

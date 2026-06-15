@@ -1724,6 +1724,7 @@ def style_fifo_balance(df):
     return df.style.apply(lambda row: [style_cell(row[col], col) for col in df.columns], axis=1)
 
 def show_df(rows, key=None, total=False):
+    rows = filter_rows_by_user_access(rows)
     rows = format_date_columns(rows)
     if key:
         df = filter_rows(rows, key)
@@ -1738,6 +1739,7 @@ def show_df(rows, key=None, total=False):
     return df
 
 def filter_rows(rows, key):
+    rows = filter_rows_by_user_access(rows)
     rows = format_date_columns(rows)
     df = pd.DataFrame(rows)
     if df.empty:
@@ -3935,3 +3937,382 @@ def inject_login_only_css():
     }
     </style>
     """, unsafe_allow_html=True)
+
+
+# -----------------------------------------------------------------------------
+# SAFE COMPATIBILITY OVERRIDES - Deep Admin Save Fix
+# These definitions are intentionally placed at the end of common.py so they
+# override older/missing helpers without disturbing existing app logic.
+# -----------------------------------------------------------------------------
+
+def searchable_selectbox(label, options, key=None, index=0, help=None):
+    """Safe searchable selectbox fallback used across pages."""
+    options = list(options or [])
+    if not options:
+        return None
+    safe_index = index if isinstance(index, int) and 0 <= index < len(options) else 0
+    return st.selectbox(label, options, index=safe_index, key=key, help=help)
+
+
+def clear_cache_after_write():
+    """Clear caches safely after DB writes. Never raises."""
+    try:
+        if "clear_permission_cache" in globals():
+            clear_permission_cache()
+    except Exception:
+        pass
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    try:
+        st.cache_resource.clear()
+    except Exception:
+        pass
+
+
+def clear_app_cache():
+    return clear_cache_after_write()
+
+
+def require_page_view(page_key):
+    """Backward-compatible page view guard. Super Admin always allowed."""
+    try:
+        user = st.session_state.get("user") or {}
+        role = user.get("role")
+        if role == "super_admin":
+            return True
+        username = user.get("username")
+        if not username:
+            st.stop()
+        rows = fetch_all("SELECT can_access, can_view FROM user_page_access WHERE username=? AND page_key=?", (username, page_key))
+        if rows:
+            allowed = bool(rows[0].get("can_view", rows[0].get("can_access", False)))
+        else:
+            defaults = {
+                "admin": {"dashboard", "masters", "shipment", "delivery", "payment", "coverage", "admin", "reports", "overdue"},
+                "user": {"dashboard", "delivery", "coverage", "reports"},
+            }
+            allowed = page_key in defaults.get(role, set())
+        if not allowed:
+            st.error("You do not have View permission for this page. Contact Super Admin.")
+            st.stop()
+        return True
+    except Exception:
+        return True
+
+
+def require_page_edit(page_key):
+    try:
+        user = st.session_state.get("user") or {}
+        if user.get("role") == "super_admin":
+            return True
+        rows = fetch_all("SELECT can_edit FROM user_page_access WHERE username=? AND page_key=?", (user.get("username"), page_key))
+        return bool(rows and rows[0].get("can_edit"))
+    except Exception:
+        return False
+
+
+def current_user_allowed_product_ids():
+    """Product IDs allotted to current user. Empty list means all products."""
+    try:
+        user = st.session_state.get("user") or {}
+        if user.get("role") == "super_admin":
+            return []
+        username = user.get("username")
+        if not username:
+            return []
+        rows = fetch_all("SELECT product_id FROM user_product_access WHERE username=? AND COALESCE(can_access, TRUE)=TRUE", (username,))
+        return [int(r["product_id"]) for r in rows if r.get("product_id") is not None]
+    except Exception:
+        return []
+
+
+def current_user_allowed_warehouse_ids():
+    """Warehouse IDs allotted to current user. Empty list means all warehouses."""
+    try:
+        user = st.session_state.get("user") or {}
+        if user.get("role") == "super_admin":
+            return []
+        username = user.get("username")
+        if not username:
+            return []
+        rows = fetch_all("SELECT warehouse_id FROM user_warehouse_access WHERE username=? AND COALESCE(can_access, TRUE)=TRUE", (username,))
+        return [int(r["warehouse_id"]) for r in rows if r.get("warehouse_id") is not None]
+    except Exception:
+        return []
+
+
+def filter_product_rows_for_current_user(rows, product_id_key="id"):
+    ids = current_user_allowed_product_ids()
+    if not ids:
+        return rows
+    allowed = set(ids)
+    return [r for r in rows or [] if int(r.get(product_id_key) or 0) in allowed]
+
+
+def filter_rows_by_user_access(rows, product_key="product_id", warehouse_key="warehouse_id"):
+    try:
+        product_ids = current_user_allowed_product_ids()
+        warehouse_ids = current_user_allowed_warehouse_ids()
+        product_set = set(product_ids)
+        warehouse_set = set(warehouse_ids)
+        result = []
+        for r in rows or []:
+            ok_product = True
+            ok_warehouse = True
+            if product_ids and product_key in r and r.get(product_key) is not None:
+                ok_product = int(r.get(product_key) or 0) in product_set
+            if warehouse_ids and warehouse_key in r and r.get(warehouse_key) is not None:
+                ok_warehouse = int(r.get(warehouse_key) or 0) in warehouse_set
+            if ok_product and ok_warehouse:
+                result.append(r)
+        return result
+    except Exception:
+        return rows
+
+
+def access_notice():
+    try:
+        user = st.session_state.get("user") or {}
+        if user.get("role") == "super_admin":
+            return
+        product_ids = current_user_allowed_product_ids()
+        wh_ids = current_user_allowed_warehouse_ids()
+        part_msg = "All Part Numbers" if not product_ids else f"{len(product_ids)} allotted Part Number(s)"
+        wh_msg = "All Warehouses" if not wh_ids else f"{len(wh_ids)} allotted Warehouse(s)"
+        st.info(f"Data Access: {part_msg} | {wh_msg}")
+    except Exception:
+        pass
+
+
+def render_slogan_footer(login=False):
+    """Render centered developer slogan/footer."""
+    cls = "fsi-login-slogan-footer" if login else "fsi-slogan-footer"
+    st.markdown('<div class="' + cls + '"><span style="display:inline-block;text-align:center;width:100%;">Developed by Rajesh Dhokale&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;dhokaleraj@icloud.com&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;Copyrights to jrdhokale</span></div>', unsafe_allow_html=True)
+
+
+
+# ---------------------------------------------------------------------------
+# USER PRODUCT / WAREHOUSE DATA ACCESS HELPERS - CENTRAL LOGIC
+# Blank access setup means full access. Assigned values restrict data everywhere.
+# ---------------------------------------------------------------------------
+def _safe_int_set(values):
+    out = set()
+    for v in values or []:
+        try:
+            out.add(int(v))
+        except Exception:
+            pass
+    return out
+
+def current_user_allowed_product_ids():
+    """Product IDs allotted to current user. Empty list means all products."""
+    try:
+        user = st.session_state.get("user") or {}
+        if user.get("role") == "super_admin":
+            return []
+        username = user.get("username")
+        if not username:
+            return []
+        rows = fetch_all(
+            "SELECT product_id FROM user_product_access WHERE username=? AND COALESCE(can_access, TRUE)=TRUE",
+            (username,),
+        )
+        return [int(r["product_id"]) for r in rows if r.get("product_id") is not None]
+    except Exception:
+        return []
+
+def current_user_allowed_product_codes():
+    """Product codes allotted to current user. Empty set means all products."""
+    ids = current_user_allowed_product_ids()
+    if not ids:
+        return set()
+    try:
+        placeholders = ",".join(["?"] * len(ids))
+        rows = fetch_all(f"SELECT id, product_code FROM products WHERE id IN ({placeholders})", tuple(ids))
+        return {str(r.get("product_code")) for r in rows if r.get("product_code") not in (None, "")}
+    except Exception:
+        return set()
+
+def current_user_allowed_warehouse_ids():
+    """Warehouse IDs allotted to current user. Empty list means all warehouses."""
+    try:
+        user = st.session_state.get("user") or {}
+        if user.get("role") == "super_admin":
+            return []
+        username = user.get("username")
+        if not username:
+            return []
+        rows = fetch_all(
+            "SELECT warehouse_id FROM user_warehouse_access WHERE username=? AND COALESCE(can_access, TRUE)=TRUE",
+            (username,),
+        )
+        return [int(r["warehouse_id"]) for r in rows if r.get("warehouse_id") is not None]
+    except Exception:
+        return []
+
+def current_user_allowed_warehouse_names():
+    """Warehouse names allotted to current user. Empty set means all warehouses."""
+    ids = current_user_allowed_warehouse_ids()
+    if not ids:
+        return set()
+    try:
+        placeholders = ",".join(["?"] * len(ids))
+        rows = fetch_all(f"SELECT id, warehouse_name FROM warehouses WHERE id IN ({placeholders})", tuple(ids))
+        return {str(r.get("warehouse_name")) for r in rows if r.get("warehouse_name") not in (None, "")}
+    except Exception:
+        return set()
+
+def get_user_access_scope():
+    """Return current product/warehouse access scope for filters and KPIs."""
+    return {
+        "product_ids": current_user_allowed_product_ids(),
+        "product_codes": current_user_allowed_product_codes(),
+        "warehouse_ids": current_user_allowed_warehouse_ids(),
+        "warehouse_names": current_user_allowed_warehouse_names(),
+    }
+
+def row_matches_user_access(row):
+    """Check one row dict against product and warehouse access.
+
+    If the row does not contain product/warehouse fields, it is allowed.
+    If it contains product/warehouse fields, those fields must be in the allotted scope.
+    """
+    try:
+        if not isinstance(row, dict):
+            try:
+                row = dict(row)
+            except Exception:
+                return True
+
+        scope = get_user_access_scope()
+        product_ids = _safe_int_set(scope.get("product_ids"))
+        product_codes = {str(x) for x in scope.get("product_codes") or set()}
+        warehouse_ids = _safe_int_set(scope.get("warehouse_ids"))
+        warehouse_names = {str(x) for x in scope.get("warehouse_names") or set()}
+
+        # Product check
+        if product_ids or product_codes:
+            product_keys_id = ["product_id", "Product ID", "productid", "pid"]
+            product_keys_code = ["product_code", "Product Code", "Part Number", "part_number", "product", "PRODUCT"]
+            has_product_field = False
+            product_ok = False
+
+            for k in product_keys_id:
+                if k in row and row.get(k) not in (None, ""):
+                    has_product_field = True
+                    try:
+                        if int(row.get(k)) in product_ids:
+                            product_ok = True
+                    except Exception:
+                        pass
+
+            for k in product_keys_code:
+                if k in row and row.get(k) not in (None, ""):
+                    has_product_field = True
+                    val = str(row.get(k)).split("|")[0].strip()
+                    if val in product_codes:
+                        product_ok = True
+
+            if has_product_field and not product_ok:
+                return False
+
+        # Warehouse check
+        if warehouse_ids or warehouse_names:
+            wh_keys_id = ["warehouse_id", "Warehouse ID", "wh_id"]
+            wh_keys_name = ["warehouse_name", "Warehouse", "warehouse", "Warehouse Name"]
+            has_wh_field = False
+            wh_ok = False
+
+            for k in wh_keys_id:
+                if k in row and row.get(k) not in (None, ""):
+                    has_wh_field = True
+                    try:
+                        if int(row.get(k)) in warehouse_ids:
+                            wh_ok = True
+                    except Exception:
+                        pass
+
+            for k in wh_keys_name:
+                if k in row and row.get(k) not in (None, ""):
+                    has_wh_field = True
+                    if str(row.get(k)).strip() in warehouse_names:
+                        wh_ok = True
+
+            if has_wh_field and not wh_ok:
+                return False
+
+        return True
+    except Exception:
+        return True
+
+def filter_rows_by_user_access(rows, product_key="product_id", warehouse_key="warehouse_id"):
+    """Filter row dictionaries by allotted product and warehouse. Empty allotment means all."""
+    try:
+        return [r for r in (rows or []) if row_matches_user_access(r)]
+    except Exception:
+        return rows
+
+def filter_product_rows_for_current_user(rows, product_id_key="id"):
+    """Filter product rows by allotted part numbers. Empty allotment means all."""
+    ids = current_user_allowed_product_ids()
+    if not ids:
+        return rows
+    allowed = set(ids)
+    return [r for r in rows or [] if int(r.get(product_id_key) or 0) in allowed]
+
+def filter_warehouse_rows_for_current_user(rows, warehouse_id_key="id"):
+    """Filter warehouse rows by allotted warehouses. Empty allotment means all."""
+    ids = current_user_allowed_warehouse_ids()
+    if not ids:
+        return rows
+    allowed = set(ids)
+    return [r for r in rows or [] if int(r.get(warehouse_id_key) or 0) in allowed]
+
+def access_notice():
+    """Show current data scope to the logged-in user."""
+    try:
+        user = st.session_state.get("user") or {}
+        if user.get("role") == "super_admin":
+            return
+        product_ids = current_user_allowed_product_ids()
+        wh_ids = current_user_allowed_warehouse_ids()
+        part_msg = "All Part Numbers" if not product_ids else f"{len(product_ids)} allotted Part Number(s)"
+        wh_msg = "All Warehouses" if not wh_ids else f"{len(wh_ids)} allotted Warehouse(s)"
+        st.info(f"Data Access: {part_msg} | {wh_msg}")
+    except Exception:
+        pass
+
+def make_in_clause(column_name, values):
+    """Return SQL AND clause and params for values."""
+    values = [v for v in (values or []) if v not in (None, "")]
+    if not values:
+        return "", ()
+    placeholders = ",".join(["?"] * len(values))
+    return f" AND {column_name} IN ({placeholders}) ", tuple(values)
+
+def access_filter_clauses(product_column=None, warehouse_column=None, selected_product_ids=None, selected_warehouse_ids=None):
+    """Build SQL clauses for selected filters + user scope.
+
+    selected_* apply dashboard UI filters. User scope is already enforced by limiting selection lists,
+    but this function also protects direct queries.
+    """
+    clauses = []
+    params = []
+
+    product_ids = selected_product_ids if selected_product_ids is not None else current_user_allowed_product_ids()
+    warehouse_ids = selected_warehouse_ids if selected_warehouse_ids is not None else current_user_allowed_warehouse_ids()
+
+    if product_column and product_ids:
+        ph = ",".join(["?"] * len(product_ids))
+        clauses.append(f" AND {product_column} IN ({ph}) ")
+        params.extend(product_ids)
+    if warehouse_column and warehouse_ids:
+        ph = ",".join(["?"] * len(warehouse_ids))
+        clauses.append(f" AND {warehouse_column} IN ({ph}) ")
+        params.extend(warehouse_ids)
+
+    return "".join(clauses), tuple(params)
+# ---------------------------------------------------------------------------
+

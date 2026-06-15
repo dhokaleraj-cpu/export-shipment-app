@@ -6,6 +6,7 @@ require_page_view('masters')
 show_edit_permission_status('masters')
 
 show_header('Masters')
+access_notice()
 if not current_user_can_edit('masters'):
     st.info('You have View permission for Masters. Edit permission is disabled for this user.')
 mtab = st.tabs(['Customer', 'Supplier', 'Warehouse', 'Product', 'Payment Terms', 'Incoterm', 'Forwarder', 'Ship To'])

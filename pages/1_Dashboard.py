@@ -232,42 +232,219 @@ def dash_calculate_coverage_kpis(product_id, shipment_time_days, two_months_inve
         "bank_status": current_bank_status,
     }
 
+
 show_header('Dashboard')
-total_shipments = fetch_all('SELECT COUNT(*) c FROM shipments')[0]['c']
-total_boxes = fetch_all('SELECT COUNT(*) c FROM shipment_boxes')[0]['c']
-total_customers = fetch_all('SELECT COUNT(*) c FROM customers')[0]['c']
-qty = fetch_all('\n        SELECT IFNULL((SELECT SUM(original_qty) FROM shipment_boxes),0) original_qty,\n               IFNULL((SELECT SUM(delivered_qty) FROM customer_deliveries),0) delivered_qty,\n               IFNULL((SELECT SUM(sale_amount) FROM customer_deliveries),0) total_sale\n    ')[0]
-balance_qty = qty['original_qty'] - qty['delivered_qty']
-stock_amount_row = fetch_all("""
-    SELECT COALESCE(SUM(
-        CASE
-            WHEN UPPER(COALESCE(b.currency,'USD')) = 'USD'
-            THEN (b.original_qty - COALESCE(d.delivered_qty,0)) * COALESCE(b.unit_price,0)
-            ELSE (b.original_qty - COALESCE(d.delivered_qty,0)) * COALESCE(b.unit_price,0)
-        END
-    ),0) AS total_stock_balance_amount
-    FROM shipment_boxes b
-    LEFT JOIN (
-        SELECT box_id, SUM(delivered_qty) AS delivered_qty
-        FROM customer_deliveries
-        GROUP BY box_id
-    ) d ON b.id = d.box_id
-""")[0]
-total_stock_balance_amount = float(stock_amount_row.get('total_stock_balance_amount') or 0)
+require_page_view('dashboard')
+access_notice()
+
+# ---------------------------------------------------------------------------
+# Dashboard filters: product, warehouse and period.
+# Default = all products/warehouses available to the logged-in user.
+# ---------------------------------------------------------------------------
+st.markdown(
+    '<div style="font-family:Aptos,Arial,sans-serif;font-size:26px;font-weight:900;color:#003B73;padding:8px 0 10px 0;">Dashboard Filters</div>',
+    unsafe_allow_html=True
+)
+
 try:
-    overdue_count = len(overdue_rows())
-    overdue_amount = sum((float(r.get('pending_amount') or 0) for r in overdue_rows()))
+    all_products_for_dash = filter_product_rows_for_current_user(fetch_all("""
+        SELECT id, product_code, product_name, two_months_inventory, lcr_weekly, mcr_weekly
+        FROM products
+        ORDER BY product_code
+    """))
 except Exception:
-    overdue_count = 0
-    overdue_amount = 0
+    all_products_for_dash = []
+
+try:
+    all_warehouses_for_dash = filter_warehouse_rows_for_current_user(fetch_all("""
+        SELECT id, warehouse_name, shipment_time_days
+        FROM warehouses
+        ORDER BY warehouse_name
+    """))
+except Exception:
+    all_warehouses_for_dash = []
+
+df1, df2, df3, df4 = st.columns([2.2, 2.0, 1.1, 1.1])
+
+with df1:
+    product_option_map = {
+        f"{p.get('product_code','')} | {p.get('product_name','')} | {p.get('id')}": p
+        for p in all_products_for_dash
+    }
+    selected_product_labels = st.multiselect(
+        "Product / Part Number",
+        list(product_option_map.keys()),
+        default=list(product_option_map.keys()),
+        key="dashboard_multi_product_filter",
+        help="Default all allowed products. Select one or multiple products to filter dashboard."
+    )
+    selected_product_ids = [int(product_option_map[x]["id"]) for x in selected_product_labels if x in product_option_map]
+
+with df2:
+    warehouse_option_map = {
+        f"{w.get('warehouse_name','')} | {w.get('id')}": w
+        for w in all_warehouses_for_dash
+    }
+    selected_warehouse_labels = st.multiselect(
+        "Warehouse",
+        list(warehouse_option_map.keys()),
+        default=list(warehouse_option_map.keys()),
+        key="dashboard_multi_warehouse_filter",
+        help="Default all allowed warehouses. Select one or multiple warehouses to filter dashboard."
+    )
+    selected_warehouse_ids = [int(warehouse_option_map[x]["id"]) for x in selected_warehouse_labels if x in warehouse_option_map]
+
+with df3:
+    dashboard_from_date = st.date_input("From Date", value=date(date.today().year, 1, 1), key="dashboard_from_date")
+
+with df4:
+    dashboard_to_date = st.date_input("To Date", value=date.today(), key="dashboard_to_date")
+
+if dashboard_from_date > dashboard_to_date:
+    st.warning("From Date is after To Date. Please correct the period.")
+    dashboard_from_date, dashboard_to_date = dashboard_to_date, dashboard_from_date
+
+def _dash_in_clause(column_name, values):
+    values = [int(v) for v in (values or [])]
+    if not values:
+        return "", []
+    return f" AND {column_name} IN ({','.join(['?'] * len(values))}) ", values
+
+def _dash_date_clause(column_name):
+    return f" AND {column_name} IS NOT NULL AND {column_name}::date BETWEEN ?::date AND ?::date ", [str(dashboard_from_date), str(dashboard_to_date)]
+
+def _dash_fetch_one(query, params=()):
+    rows = fetch_all(query, tuple(params))
+    return rows[0] if rows else {}
+
+def _dash_float(v):
+    try:
+        return float(v or 0)
+    except Exception:
+        return 0.0
+
+# If no products or warehouses exist after access filtering, show zero dashboard instead of exposing all data.
+product_filter_clause, product_filter_params = _dash_in_clause("b.product_id", selected_product_ids)
+warehouse_filter_clause, warehouse_filter_params = _dash_in_clause("s.warehouse_id", selected_warehouse_ids)
+shipment_date_clause, shipment_date_params = _dash_date_clause("s.shipment_date")
+
+delivery_product_clause, delivery_product_params = _dash_in_clause("b.product_id", selected_product_ids)
+delivery_warehouse_clause, delivery_warehouse_params = _dash_in_clause("s.warehouse_id", selected_warehouse_ids)
+delivery_date_clause, delivery_date_params = _dash_date_clause("d.delivery_date")
+
+# ---------------------------------------------------------------------------
+# Main Dashboard KPIs filtered by selected products, warehouses and period.
+# ---------------------------------------------------------------------------
+try:
+    total_shipments_row = _dash_fetch_one(f"""
+        SELECT COUNT(DISTINCT s.id) AS c
+        FROM shipments s
+        LEFT JOIN shipment_boxes b ON b.shipment_id = s.id
+        WHERE 1=1
+        {product_filter_clause}
+        {warehouse_filter_clause}
+        {shipment_date_clause}
+    """, product_filter_params + warehouse_filter_params + shipment_date_params)
+    total_shipments = int(total_shipments_row.get("c") or 0)
+
+    total_boxes_row = _dash_fetch_one(f"""
+        SELECT COUNT(b.id) AS c
+        FROM shipment_boxes b
+        JOIN shipments s ON b.shipment_id = s.id
+        WHERE 1=1
+        {product_filter_clause}
+        {warehouse_filter_clause}
+        {shipment_date_clause}
+    """, product_filter_params + warehouse_filter_params + shipment_date_params)
+    total_boxes = int(total_boxes_row.get("c") or 0)
+
+    total_customers = int((_dash_fetch_one("SELECT COUNT(*) AS c FROM customers").get("c") or 0))
+
+    original_qty_row = _dash_fetch_one(f"""
+        SELECT COALESCE(SUM(b.original_qty),0) AS original_qty
+        FROM shipment_boxes b
+        JOIN shipments s ON b.shipment_id = s.id
+        WHERE 1=1
+        {product_filter_clause}
+        {warehouse_filter_clause}
+        {shipment_date_clause}
+    """, product_filter_params + warehouse_filter_params + shipment_date_params)
+    original_qty = _dash_float(original_qty_row.get("original_qty"))
+
+    delivery_summary_row = _dash_fetch_one(f"""
+        SELECT COALESCE(SUM(d.delivered_qty),0) AS delivered_qty,
+               COALESCE(SUM(d.sale_amount),0) AS total_sale
+        FROM customer_deliveries d
+        LEFT JOIN shipment_boxes b ON d.box_id = b.id
+        LEFT JOIN shipments s ON d.shipment_id = s.id
+        WHERE 1=1
+        {delivery_product_clause}
+        {delivery_warehouse_clause}
+        {delivery_date_clause}
+    """, delivery_product_params + delivery_warehouse_params + delivery_date_params)
+    delivered_qty = _dash_float(delivery_summary_row.get("delivered_qty"))
+    total_sale = _dash_float(delivery_summary_row.get("total_sale"))
+    balance_qty = original_qty - delivered_qty
+
+    stock_amount_row = _dash_fetch_one(f"""
+        SELECT COALESCE(SUM(
+            (COALESCE(b.original_qty,0) - COALESCE(d.delivered_qty,0)) * COALESCE(b.unit_price,0)
+        ),0) AS total_stock_balance_amount
+        FROM shipment_boxes b
+        JOIN shipments s ON b.shipment_id = s.id
+        LEFT JOIN (
+            SELECT box_id, SUM(delivered_qty) AS delivered_qty
+            FROM customer_deliveries
+            GROUP BY box_id
+        ) d ON b.id = d.box_id
+        WHERE 1=1
+        {product_filter_clause}
+        {warehouse_filter_clause}
+        {shipment_date_clause}
+    """, product_filter_params + warehouse_filter_params + shipment_date_params)
+    total_stock_balance_amount = _dash_float(stock_amount_row.get("total_stock_balance_amount"))
+
+    overdue_row = _dash_fetch_one(f"""
+        SELECT COUNT(*) AS overdue_count,
+               COALESCE(SUM(pending_amount),0) AS overdue_amount
+        FROM (
+            SELECT d.delivery_invoice_no,
+                   MAX(d.payment_due_date) AS payment_due_date,
+                   COALESCE(SUM(d.sale_amount),0) - COALESCE((
+                       SELECT SUM(p.payment_amount)
+                       FROM payments p
+                       JOIN customer_deliveries d2 ON p.delivery_id = d2.id
+                       WHERE d2.delivery_invoice_no = d.delivery_invoice_no
+                   ),0) AS pending_amount
+            FROM customer_deliveries d
+            LEFT JOIN shipment_boxes b ON d.box_id = b.id
+            LEFT JOIN shipments s ON d.shipment_id = s.id
+            WHERE 1=1
+            {delivery_product_clause}
+            {delivery_warehouse_clause}
+            AND d.payment_due_date IS NOT NULL
+            AND d.payment_due_date::date <= CURRENT_DATE
+            AND d.payment_due_date::date BETWEEN ?::date AND ?::date
+            GROUP BY d.delivery_invoice_no
+        ) x
+        WHERE pending_amount > 0
+    """, delivery_product_params + delivery_warehouse_params + [str(dashboard_from_date), str(dashboard_to_date)])
+    overdue_count = int(overdue_row.get("overdue_count") or 0)
+    overdue_amount = _dash_float(overdue_row.get("overdue_amount"))
+
+except Exception as dash_error:
+    st.error(f"Dashboard KPI calculation failed: {dash_error}")
+    total_shipments = total_boxes = total_customers = overdue_count = 0
+    original_qty = delivered_qty = total_sale = balance_qty = total_stock_balance_amount = overdue_amount = 0.0
+
 labels = [
-    ('TOTAL SHIPMENTS', total_shipments, 'green'),
-    ('TOTAL BOXES', total_boxes, 'teal'),
-    ('DELIVERED QTY', qty['delivered_qty'], 'orange'),
-    ('BALANCE QTY', balance_qty, 'blue'),
-    ('TOTAL SALE', round(qty['total_sale'], 2), 'yellow'),
+    ('TOTAL SHIPMENTS', f"{total_shipments:,}", 'green'),
+    ('TOTAL BOXES', f"{total_boxes:,}", 'teal'),
+    ('DELIVERED QTY', f"{delivered_qty:,.0f}", 'orange'),
+    ('BALANCE QTY', f"{balance_qty:,.0f}", 'blue'),
+    ('TOTAL SALE', f"{total_sale:,.2f}", 'yellow'),
     ('WAREHOUSE STOCK AMOUNT', f'$ {total_stock_balance_amount:,.2f}', 'blue'),
-    ('OVERDUE PAYMENTS', overdue_count, 'red'),
+    ('OVERDUE PAYMENTS', f"{overdue_count:,}", 'red'),
     ('OVERDUE PAYMENT AMOUNT', f'{overdue_amount:,.2f}', 'red'),
 ]
 cols = st.columns(len(labels))
@@ -280,8 +457,12 @@ for col, (lab, val, cls) in zip(cols, labels):
             else '#B00020'
         )
         local_dash_card(lab, val, card_color)
-ui_spacer(60)
 
+ui_spacer(38)
+
+# ---------------------------------------------------------------------------
+# Coverage Plan Dashboard KPIs filtered by multiple selected products/warehouses.
+# ---------------------------------------------------------------------------
 st.divider()
 st.markdown(
     '<div style="font-family:Aptos,Arial,sans-serif;font-size:32px;font-weight:900;color:#003B73;padding:12px 0 14px 0;line-height:1.2;">Coverage Plan Dashboard</div>',
@@ -289,94 +470,68 @@ st.markdown(
 )
 
 try:
-    dash_products = fetch_all("""
-        SELECT id, product_code, product_name, lcr_weekly, mcr_weekly, two_months_inventory
-        FROM products
-        ORDER BY product_code
-    """)
-    dash_warehouses = fetch_all("""
-        SELECT id, warehouse_name, shipment_time_days
-        FROM warehouses
-        ORDER BY warehouse_name
-    """)
+    selected_products_for_coverage = [p for p in all_products_for_dash if int(p.get("id")) in set(selected_product_ids)]
+    selected_warehouses_for_coverage = [w for w in all_warehouses_for_dash if int(w.get("id")) in set(selected_warehouse_ids)]
 
-    if not dash_products:
-        st.info("Create Product Master to view Coverage Plan Dashboard.")
+    if not selected_products_for_coverage:
+        st.info("No product available for your access/filter selection.")
     else:
-        dash_product_map = {f"{p['product_code']} | {p['product_name']}": p for p in dash_products}
-        dash_product_labels = list(dash_product_map.keys())
-        dash_default_index = 0
-        for i, label in enumerate(dash_product_labels):
-            if str(dash_product_map[label].get("product_code") or "") == "40257237":
-                dash_default_index = i
-                break
+        # Use max shipment time from selected warehouses. If no warehouse is selected, use 0/fallback.
+        if selected_warehouses_for_coverage:
+            dash_shipment_time_days = max([int(w.get("shipment_time_days") or 0) for w in selected_warehouses_for_coverage])
+        else:
+            dash_shipment_time_days = 0
 
-        dfilter1, dfilter2 = st.columns([1.4, 0.9])
-        with dfilter1:
-            selected_dash_product_label = st.selectbox(
-                "Coverage Product",
-                dash_product_labels,
-                index=dash_default_index,
-                key="dashboard_coverage_product_select"
-            )
-        selected_dash_product = dash_product_map[selected_dash_product_label]
+        agg_next_dates = []
+        agg_next_qty = 0.0
+        agg_stock_at_wh = 0.0
+        agg_wh_bank = 0.0
+        agg_bank_status = 0.0
+        agg_two_months_inventory = 0.0
 
-        with dfilter2:
-            if dash_warehouses:
-                dash_warehouse_map = {w["warehouse_name"]: w for w in dash_warehouses}
-                selected_dash_wh = st.selectbox(
-                    "Coverage Warehouse",
-                    list(dash_warehouse_map.keys()),
-                    key="dashboard_coverage_warehouse_select"
-                )
-                dash_shipment_time_days = int(dash_warehouse_map[selected_dash_wh].get("shipment_time_days") or 0)
-            else:
-                dash_shipment_time_days = 0
-                st.warning("Create Warehouse Master to show Shipment Time.")
+        for prod in selected_products_for_coverage:
+            prod_inventory = dash_safe_float(prod.get("two_months_inventory"))
+            agg_two_months_inventory += prod_inventory
+            kpi = dash_calculate_coverage_kpis(prod["id"], dash_shipment_time_days, prod_inventory)
+            if kpi.get("next_shipment_date"):
+                agg_next_dates.append(kpi.get("next_shipment_date"))
+            agg_next_qty += dash_safe_float(kpi.get("next_shipment_qty"))
+            agg_stock_at_wh += dash_safe_float(kpi.get("stock_at_wh"))
+            agg_wh_bank += dash_safe_float(kpi.get("wh_bank"))
+            agg_bank_status += dash_safe_float(kpi.get("bank_status"))
 
-        dash_two_months_inventory = dash_safe_float(selected_dash_product.get("two_months_inventory"))
-        dash_kpis = dash_calculate_coverage_kpis(
-            selected_dash_product["id"],
-            dash_shipment_time_days,
-            dash_two_months_inventory
-        )
+        next_date_value = min(agg_next_dates) if agg_next_dates else None
+        product_value = "ALL" if len(selected_products_for_coverage) == len(all_products_for_dash) else f"{len(selected_products_for_coverage)} PRODUCTS"
+        shipment_time_value = f"{dash_shipment_time_days} Days" if dash_shipment_time_days else "-"
 
         dk1, dk2, dk3, dk4 = st.columns(4)
         with dk1:
             dash_coverage_kpi_card(
                 "NEXT SHIPMENT DATE",
-                format_date_ddmmyyyy(dash_kpis["next_shipment_date"]) if dash_kpis["next_shipment_date"] else "-",
+                format_date_ddmmyyyy(next_date_value) if next_date_value else "-",
                 "#B72C24",
                 "#ffffff",
                 "#B72C24"
             )
         with dk2:
-            dash_coverage_kpi_card(
-                "NEXT SHIPMENT QTY",
-                f"{dash_kpis['next_shipment_qty']:,.0f}",
-                "#EE9337",
-                "#ffffff",
-                "#EE9337"
-            )
+            dash_coverage_kpi_card("NEXT SHIPMENT QTY", f"{agg_next_qty:,.0f}", "#EE9337", "#ffffff", "#EE9337")
         with dk3:
-            dash_coverage_kpi_card("PRODUCT", selected_dash_product["product_code"], "#1A5E99")
+            dash_coverage_kpi_card("PRODUCT", product_value, "#1A5E99")
         with dk4:
-            dash_coverage_kpi_card("SHIPMENT TIME", f"{dash_shipment_time_days} Days", "#1A5E99")
+            dash_coverage_kpi_card("SHIPMENT TIME", shipment_time_value, "#1A5E99")
 
         dk5, dk6, dk7, dk8 = st.columns(4)
         with dk5:
-            dash_coverage_kpi_card("STOCK AT WH", f"{dash_kpis['stock_at_wh']:,.0f}", "#1A5E99")
+            dash_coverage_kpi_card("STOCK AT WH", f"{agg_stock_at_wh:,.0f}", "#1A5E99")
         with dk6:
-            dash_coverage_kpi_card("WH BANK", f"{dash_kpis['wh_bank']:,.0f}", "#1A5E99")
+            dash_coverage_kpi_card("WH BANK", f"{agg_wh_bank:,.0f}", "#1A5E99")
         with dk7:
-            bank_color = "#B72C24" if dash_kpis["bank_status"] < 0 else "#15803D"
-            dash_coverage_kpi_card("BANK STATUS", f"{dash_kpis['bank_status']:,.0f}", bank_color, "#ffffff", bank_color)
+            bank_color = "#B72C24" if agg_bank_status < 0 else "#15803D"
+            dash_coverage_kpi_card("BANK STATUS", f"{agg_bank_status:,.0f}", bank_color, "#ffffff", bank_color)
         with dk8:
-            dash_coverage_kpi_card("TWO MONTHS INVENTORY", f"{dash_two_months_inventory:,.0f}", "#1A5E99")
+            dash_coverage_kpi_card("TWO MONTHS INVENTORY", f"{agg_two_months_inventory:,.0f}", "#1A5E99")
 
 except Exception as coverage_dash_error:
     st.warning(f"Coverage Plan Dashboard could not load: {coverage_dash_error}")
 
-
 render_slogan_footer()
-st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)

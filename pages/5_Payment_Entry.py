@@ -6,7 +6,9 @@ require_page_view('payment')
 show_edit_permission_status('payment')
 
 show_header('Payment Entry')
+access_notice()
 deliveries = fetch_all('\n            SELECT\n                MIN(d.id) AS id,\n                d.delivery_invoice_no,\n                s.invoice_no AS original_invoice_no,\n                s.shipment_no,\n                c.customer_name,\n                d.currency,\n                MAX(d.payment_due_date) AS payment_due_date,\n                SUM(d.sale_amount) AS total_invoice_amount,\n                COALESCE((\n                    SELECT SUM(p.payment_amount)\n                    FROM payments p\n                    JOIN customer_deliveries d2 ON p.delivery_id = d2.id\n                    WHERE d2.delivery_invoice_no = d.delivery_invoice_no\n                ), 0) AS paid_amount,\n                SUM(d.sale_amount) - COALESCE((\n                    SELECT SUM(p.payment_amount)\n                    FROM payments p\n                    JOIN customer_deliveries d2 ON p.delivery_id = d2.id\n                    WHERE d2.delivery_invoice_no = d.delivery_invoice_no\n                ), 0) AS pending_amount\n            FROM customer_deliveries d\n            JOIN customers c ON d.customer_id = c.id\n            JOIN shipments s ON d.shipment_id = s.id\n            GROUP BY d.delivery_invoice_no, s.invoice_no, s.shipment_no, c.customer_name, d.currency\n            HAVING\n    SUM(d.sale_amount) - COALESCE((\n        SELECT SUM(p.payment_amount)\n        FROM payments p\n        JOIN customer_deliveries d2 ON p.delivery_id = d2.id\n        WHERE d2.delivery_invoice_no = d.delivery_invoice_no\n    ), 0) > 0\n            ORDER BY payment_due_date\n        ')
+deliveries = filter_rows_by_user_access(deliveries)
 if not deliveries:
     st.warning('No pending delivery invoices available.')
 else:
@@ -30,6 +32,7 @@ else:
 st.divider()
 st.subheader('Last Payment Entries')
 payment_action_rows = fetch_all('\n            SELECT p.id, p.payment_received_date, d.delivery_invoice_no, s.invoice_no AS original_invoice_no,\n                   c.customer_name, p.payment_amount, p.payment_reference, p.remarks\n            FROM payments p\n            JOIN customer_deliveries d ON p.delivery_id = d.id\n            JOIN shipments s ON d.shipment_id = s.id\n            JOIN customers c ON d.customer_id = c.id\n            ORDER BY p.id DESC\n            LIMIT 50\n        ')
+payment_action_rows = filter_rows_by_user_access(payment_action_rows)
 selected_payment_action, _ = transaction_selector(payment_action_rows, 'payment_transaction_selector', 'payment_reference')
 pay_action_col1, pay_action_col2 = st.columns(2)
 with pay_action_col1:
@@ -51,6 +54,7 @@ if st.session_state.user['role'] == 'super_admin':
     st.subheader('Super Admin: Edit Old Payment Entries')
     cleanup_orphan_transactions()
     old_payments = fetch_all('\n                SELECT p.*, d.delivery_invoice_no, c.customer_name, s.invoice_no AS original_invoice_no\n                FROM payments p\n                JOIN customer_deliveries d ON p.delivery_id = d.id\n                JOIN customers c ON d.customer_id = c.id\n                JOIN shipments s ON d.shipment_id = s.id\n                ORDER BY p.id DESC\n            ')
+    old_payments = filter_rows_by_user_access(old_payments)
     if old_payments:
         pmap = {f"{p['id']} | {p['delivery_invoice_no']} | Amount {p['payment_amount']}": p for p in old_payments}
         selected_payment_key = searchable_selectbox('Select Payment to Edit', list(pmap.keys()), key='edit_payment_select')

@@ -460,6 +460,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 show_header("Coverage Plan", "Weekly customer forecast, warehouse stock and shipment planning")
+access_notice()
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def load_coverage_products():
@@ -485,11 +486,11 @@ with refresh_col:
         clear_app_cache()
         st.rerun()
 
-products = load_coverage_products()
-warehouses = load_coverage_warehouses()
+products = filter_product_rows_for_current_user(load_coverage_products())
+warehouses = filter_warehouse_rows_for_current_user(load_coverage_warehouses())
 
 if not products:
-    st.warning("Please create Product Master first.")
+    st.warning("No Coverage Plan product is available for your user access. Ask Super Admin to allot the required Part Number, or leave Product Access blank for all parts.")
 else:
     product_map = {f"{p['product_code']} | {p['product_name']}": p for p in products}
     product_labels = list(product_map.keys())

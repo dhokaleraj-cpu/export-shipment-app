@@ -6,12 +6,13 @@ require_page_edit('shipment')
 show_edit_permission_status('shipment')
 
 show_header('Shipment Entry with Pallet / Product Rows')
+access_notice()
 suppliers = fetch_all('SELECT * FROM suppliers ORDER BY supplier_name')
 customers = fetch_all('SELECT * FROM customers ORDER BY customer_name')
 ship_to_rows = fetch_all("SELECT * FROM ship_to_masters WHERE COALESCE(is_active, TRUE)=TRUE ORDER BY ship_to_name, ship_to_id")
-warehouses = fetch_all('SELECT * FROM warehouses ORDER BY warehouse_name')
+warehouses = filter_warehouse_rows_for_current_user(fetch_all('SELECT * FROM warehouses ORDER BY warehouse_name'))
 warehouse_info = {w.get('warehouse_name'): w for w in warehouses}
-products = fetch_all('SELECT * FROM products ORDER BY product_code')
+products = filter_product_rows_for_current_user(fetch_all('SELECT * FROM products ORDER BY product_code'))
 forwarders = fetch_all('SELECT * FROM forwarders ORDER BY forwarder_name')
 incoterms = fetch_all('SELECT * FROM incoterms ORDER BY incoterm_name')
 if not suppliers or not warehouses or (not products) or not customers:
@@ -223,11 +224,12 @@ else:
             else:
                 st.error('Wrong password. Delete cancelled.')
     st.subheader('Saved Shipment / Pallet Stock')
-    show_filtered_df(fetch_all('\n                SELECT s.shipment_no, s.invoice_no, b.fifo_row_id, b.pallet_no, b.box_no, p.product_code, p.product_name,\n                       b.po_number, b.po_date, b.original_qty, b.unit_price, b.currency, b.amount\n                FROM shipment_boxes b\n                JOIN shipments s ON b.shipment_id = s.id\n                JOIN products p ON b.product_id = p.id\n                ORDER BY b.id DESC\n            '), 'auto_filter_key_1', total=True)
+    show_filtered_df(filter_rows_by_user_access(fetch_all('\n                SELECT s.shipment_no, s.invoice_no, b.fifo_row_id, b.pallet_no, b.box_no, p.product_code, p.product_name,\n                       b.product_id, s.warehouse_id, w.warehouse_name,\n                       b.po_number, b.po_date, b.original_qty, b.unit_price, b.currency, b.amount\n                FROM shipment_boxes b\n                JOIN shipments s ON b.shipment_id = s.id\n                JOIN products p ON b.product_id = p.id\n                LEFT JOIN warehouses w ON s.warehouse_id = w.id\n                ORDER BY b.id DESC\n            ')), 'auto_filter_key_1', total=True)
     if st.session_state.user['role'] == 'super_admin':
         st.divider()
         st.subheader('Super Admin: Edit Old Shipment Header')
         old_shipments = fetch_all('\n                    SELECT s.*, sup.supplier_name, w.warehouse_name, c.customer_name, stm.ship_to_name, stm.ship_to_id\n                    FROM shipments s\n                    LEFT JOIN suppliers sup ON s.supplier_id = sup.id\n                    LEFT JOIN warehouses w ON s.warehouse_id = w.id\n                    LEFT JOIN customers c ON s.customer_id = c.id\n                    LEFT JOIN ship_to_masters stm ON s.ship_to_master_id = stm.id\n                    ORDER BY s.id DESC\n                ')
+        old_shipments = filter_rows_by_user_access(old_shipments)
         if old_shipments:
             ship_map = {f"{s['id']} | {s['shipment_no']} | Invoice {s['invoice_no']}": s for s in old_shipments}
             default_ship_key = None
@@ -278,6 +280,7 @@ else:
         st.divider()
         st.subheader('Super Admin: Edit Old Pallet / Product Entry')
         old_rows = fetch_all('\n                    SELECT b.id, b.fifo_row_id, s.shipment_no, s.invoice_no, b.pallet_no, b.box_no,\n                           p.product_code, p.product_name, b.po_number, b.po_date, b.original_qty, b.unit_price, b.currency, b.amount\n                    FROM shipment_boxes b\n                    JOIN shipments s ON b.shipment_id = s.id\n                    JOIN products p ON b.product_id = p.id\n                    ORDER BY b.id DESC\n                ')
+        old_rows = filter_rows_by_user_access(old_rows)
         if old_rows:
             row_map = {f"{r['id']} | {r['shipment_no']} | Pallet {r['pallet_no']} | {r['product_code']} | Qty {r['original_qty']}": r for r in old_rows}
             selected_old_key = searchable_selectbox('Select Old Row to Edit', list(row_map.keys()), key='super_edit_old_row')

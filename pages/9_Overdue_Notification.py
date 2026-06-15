@@ -6,6 +6,7 @@ require_page_view('overdue')
 show_edit_permission_status('overdue')
 
 show_header('Email Notification Settings')
+access_notice()
 st.info('Use Gmail App Password, not your normal Gmail password. Google Account → Security → 2-Step Verification → App Passwords.')
 settings = get_notification_settings()
 ns1, ns2 = st.columns(2)
