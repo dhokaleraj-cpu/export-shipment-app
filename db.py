@@ -247,6 +247,14 @@ def verify_user(username, password):
 def init_db():
     """Lightweight migrations for existing Supabase/PostgreSQL database."""
     migrations = [
+        'CREATE INDEX IF NOT EXISTS idx_shipments_invoice_no ON shipments(invoice_no)',
+        'CREATE INDEX IF NOT EXISTS idx_shipments_warehouse_id ON shipments(warehouse_id)',
+        'CREATE INDEX IF NOT EXISTS idx_shipment_boxes_shipment_id ON shipment_boxes(shipment_id)',
+        'CREATE INDEX IF NOT EXISTS idx_shipment_boxes_product_id ON shipment_boxes(product_id)',
+        'CREATE INDEX IF NOT EXISTS idx_customer_deliveries_delivery_date ON customer_deliveries(delivery_date)',
+        'CREATE INDEX IF NOT EXISTS idx_customer_deliveries_shipment_id ON customer_deliveries(shipment_id)',
+        'CREATE INDEX IF NOT EXISTS idx_customer_deliveries_box_id ON customer_deliveries(box_id)',
+        'CREATE INDEX IF NOT EXISTS idx_customer_deliveries_invoice_no ON customer_deliveries(delivery_invoice_no)',
         'CREATE TABLE IF NOT EXISTS user_product_access (\n        id SERIAL PRIMARY KEY,\n        username TEXT NOT NULL,\n        product_id INTEGER NOT NULL,\n        can_access BOOLEAN DEFAULT TRUE,\n        UNIQUE(username, product_id)\n    )',
         'CREATE TABLE IF NOT EXISTS user_warehouse_access (\n        id SERIAL PRIMARY KEY,\n        username TEXT NOT NULL,\n        warehouse_id INTEGER NOT NULL,\n        can_access BOOLEAN DEFAULT TRUE,\n        UNIQUE(username, warehouse_id)\n    )',
         'ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS warehouse_id INTEGER',

@@ -352,8 +352,13 @@ Delivery Date: {invoice.get('delivery_date','')}"""
 
 
 def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
-    """Fetch saved delivery invoice details and line items for PDF reprint."""
-    header_rows = fetch_all("""
+    """Fetch saved delivery invoice details and line items for PDF reprint.
+
+    Access is applied at line-item SQL level before PDF generation.
+    """
+    access_sql, access_params = _delivery_access_filter_sql("b", "s")
+
+    header_rows = fetch_all(f"""
         SELECT
             d.delivery_invoice_no,
             MIN(d.delivery_date) AS delivery_date,
@@ -370,6 +375,8 @@ def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
             c.email AS customer_email,
             s.invoice_no AS original_invoice_no,
             s.shipment_no,
+            MAX(s.warehouse_id) AS warehouse_id,
+            MAX(w.warehouse_name) AS warehouse_name,
             stm.ship_to_name,
             stm.ship_to_id,
             stm.addressline1 AS ship_to_addressline1,
@@ -381,15 +388,19 @@ def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
         FROM customer_deliveries d
         JOIN customers c ON d.customer_id = c.id
         JOIN shipments s ON d.shipment_id = s.id
+        JOIN shipment_boxes b ON d.box_id = b.id
+        JOIN products p ON b.product_id = p.id
+        LEFT JOIN warehouses w ON s.warehouse_id = w.id
         LEFT JOIN ship_to_masters stm ON d.ship_to_master_id = stm.id
         WHERE d.delivery_invoice_no=?
+        {access_sql}
         GROUP BY d.delivery_invoice_no, c.customer_name, c.address, c.company_code, c.phone, c.email,
                  s.invoice_no, s.shipment_no, stm.ship_to_name, stm.ship_to_id,
                  stm.addressline1, stm.addressline2, stm.addressline3,
                  stm.vendor_gstin, stm.vendor_phone, stm.vendor_email
         ORDER BY MIN(d.id)
         LIMIT 1
-    """, (delivery_invoice_no,))
+    """, (delivery_invoice_no,) + access_params)
     if not header_rows:
         return None, []
 
@@ -397,7 +408,7 @@ def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
     invoice["seller_name"] = "Four Star Industries Pvt. Ltd."
     invoice["seller_address"] = ""
 
-    item_rows = fetch_all("""
+    item_rows = fetch_all(f"""
         SELECT
             d.delivery_invoice_no,
             s.invoice_no AS original_invoice_no,
@@ -405,6 +416,9 @@ def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
             b.po_date,
             b.pallet_no,
             b.box_no,
+            b.product_id,
+            s.warehouse_id,
+            w.warehouse_name,
             p.product_code,
             p.product_name,
             d.delivered_qty AS qty,
@@ -415,10 +429,14 @@ def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
         JOIN shipments s ON d.shipment_id = s.id
         JOIN shipment_boxes b ON d.box_id = b.id
         JOIN products p ON b.product_id = p.id
+        LEFT JOIN warehouses w ON s.warehouse_id = w.id
         WHERE d.delivery_invoice_no=?
+        {access_sql}
         ORDER BY COALESCE(b.fifo_row_id,b.id), b.pallet_no, p.product_code
-    """, (delivery_invoice_no,))
+    """, (delivery_invoice_no,) + access_params)
     line_items = [dict(r) for r in item_rows]
+    if not line_items:
+        return None, []
     return invoice, line_items
 
 
@@ -435,6 +453,71 @@ page_setup()
 
 require_page_view('delivery')
 show_edit_permission_status('delivery')
+
+
+# Fast delivery-page access helpers.
+# Blank Product Access = all products; blank Warehouse Access = all warehouses.
+def _delivery_access_filter_sql(product_alias="b", warehouse_alias="s"):
+    clauses = []
+    params = []
+    try:
+        product_ids = current_user_allowed_product_ids()
+    except Exception:
+        product_ids = []
+    try:
+        warehouse_ids = current_user_allowed_warehouse_ids()
+    except Exception:
+        warehouse_ids = []
+
+    if product_ids:
+        placeholders = ",".join(["?"] * len(product_ids))
+        clauses.append(f" AND {product_alias}.product_id IN ({placeholders}) ")
+        params.extend(product_ids)
+    if warehouse_ids:
+        placeholders = ",".join(["?"] * len(warehouse_ids))
+        clauses.append(f" AND {warehouse_alias}.warehouse_id IN ({placeholders}) ")
+        params.extend(warehouse_ids)
+    return "".join(clauses), tuple(params)
+
+
+def generate_delivery_invoice_no(original_invoice_no, delivery_date_value):
+    """Generate Delivery Invoice No from Shipment Entry Original Invoice Number.
+
+    Format: ED900003-MMDDYY-01
+    Sequence is counted for same original invoice number and delivery date.
+    """
+    original_invoice_no = str(original_invoice_no or "").strip()
+    if not original_invoice_no:
+        return ""
+    try:
+        date_part = delivery_date_value.strftime("%m%d%y")
+        delivery_date_text = str(delivery_date_value)
+    except Exception:
+        parsed_date = parse_db_date(delivery_date_value) or date.today()
+        date_part = parsed_date.strftime("%m%d%y")
+        delivery_date_text = str(parsed_date)
+
+    prefix = f"{original_invoice_no}-{date_part}-"
+    rows = fetch_all("""
+        SELECT DISTINCT d.delivery_invoice_no
+        FROM customer_deliveries d
+        JOIN shipments s ON d.shipment_id = s.id
+        WHERE s.invoice_no=?
+          AND d.delivery_date::date=?::date
+          AND d.delivery_invoice_no LIKE ?
+    """, (original_invoice_no, delivery_date_text, prefix + "%"))
+
+    max_seq = 0
+    for r in rows:
+        value = str(r.get("delivery_invoice_no") or "")
+        if value.startswith(prefix):
+            suffix = value.replace(prefix, "", 1).split("-")[0]
+            try:
+                max_seq = max(max_seq, int(suffix))
+            except Exception:
+                pass
+    return f"{prefix}{max_seq + 1:02d}"
+
 
 show_header('Delivery Entry', 'Invoice-style FIFO delivery form with multi-pallet selection')
 access_notice()
@@ -464,15 +547,17 @@ st.markdown('\n        <div class="card" style="margin-bottom:14px;">\n         
 customers = fetch_all('SELECT * FROM customers ORDER BY customer_name')
 terms = fetch_all('SELECT * FROM payment_terms ORDER BY days')
 ship_to_rows = fetch_all("SELECT * FROM ship_to_masters WHERE COALESCE(is_active, TRUE)=TRUE ORDER BY ship_to_name, ship_to_id")
-invoice_shipments_all = fetch_all('''
+invoice_access_sql, invoice_access_params = _delivery_access_filter_sql("b", "s")
+invoice_shipments = fetch_all(f'''
             SELECT DISTINCT s.id, s.shipment_no, s.invoice_no, s.po_number, s.po_date, s.shipment_date,
                    s.warehouse_id, w.warehouse_name
             FROM shipments s
             JOIN shipment_boxes b ON b.shipment_id = s.id
             LEFT JOIN warehouses w ON s.warehouse_id = w.id
+            WHERE 1=1
+            {invoice_access_sql}
             ORDER BY s.shipment_date ASC, s.id ASC
-        ''')
-invoice_shipments = filter_rows_by_user_access(invoice_shipments_all)
+        ''', invoice_access_params)
 if not customers or not invoice_shipments:
     st.warning('Create Customer Master and Shipment Entry first.')
 else:
@@ -484,11 +569,18 @@ else:
     with ctop1:
         st.markdown('<div class="input-section-title">Original Invoice Number with Shipment Number</div>', unsafe_allow_html=True)
         selected_invoice = st.selectbox('Original Invoice Number with Shipment Number', list(inv_map.keys()), key='delivery_original_invoice_ship', label_visibility='collapsed')
+    selected_ship = inv_map[selected_invoice]
     invoice_top_col1, invoice_top_col2 = st.columns(2)
     with invoice_top_col1:
-        delivery_invoice_no = st.text_input('Delivery Invoice Number', key='delivery_invoice_v10')
-    with invoice_top_col2:
         delivery_date = st.date_input('Delivery Date', value=date.today(), key='delivery_date_v10')
+    auto_delivery_invoice_no = generate_delivery_invoice_no(selected_ship.get('invoice_no'), delivery_date)
+    auto_source_key = f"{selected_ship.get('invoice_no')}|{delivery_date}"
+    if st.session_state.get('delivery_invoice_auto_source') != auto_source_key:
+        st.session_state['delivery_invoice_v10'] = auto_delivery_invoice_no
+        st.session_state['delivery_invoice_auto_source'] = auto_source_key
+    with invoice_top_col2:
+        delivery_invoice_no = st.text_input('Delivery Invoice Number', key='delivery_invoice_v10', help='Auto format: Shipment Entry Original Invoice Number + MMDDYY + running sequence, e.g. ED900003-050626-01')
+        st.caption(f"Auto generated from Shipment Entry Original Invoice No: {selected_ship.get('invoice_no') or '-'}")
     extra_col1, extra_col2, extra_col3, extra_col4 = st.columns(4)
     with extra_col1:
         vehicle_number = st.text_input('Vehicle Number', key='delivery_vehicle_number')
@@ -498,10 +590,36 @@ else:
         asn_date = st.date_input('ASN Date', value=date.today(), key='delivery_asn_date')
     with extra_col4:
         packaging_details = st.text_input('Packaging Details', key='delivery_packaging_details')
-    selected_ship = inv_map[selected_invoice]
     st.text_input('Linked Warehouse', value=str(selected_ship.get('warehouse_name') or ''), disabled=True, key='delivery_linked_warehouse_display')
-    available_rows = fetch_all('\n                SELECT\n                    b.*,\n                    s.shipment_no,\n                    s.invoice_no,\n                    s.shipment_date,\n                    COALESCE(b.po_number, s.po_number) AS po_number,\n                    COALESCE(b.po_date, s.po_date) AS po_date,\n                    p.product_code,\n                    p.product_name,\n                    COALESCE(del.delivered_qty, 0) AS delivered_qty,\n                    b.original_qty - COALESCE(del.delivered_qty, 0) AS balance_qty\n                FROM shipment_boxes b\n                JOIN shipments s ON b.shipment_id = s.id\n                JOIN products p ON b.product_id = p.id\n                LEFT JOIN (\n                    SELECT box_id, SUM(delivered_qty) AS delivered_qty\n                    FROM customer_deliveries\n                    GROUP BY box_id\n                ) del ON b.id = del.box_id\n                WHERE s.id = ?\n                  AND b.original_qty - COALESCE(del.delivered_qty, 0) > 0\n                ORDER BY s.shipment_date ASC, b.pallet_no ASC, b.id ASC\n            ', (selected_ship['id'],))
-    available_rows = filter_rows_by_user_access(available_rows)
+    available_access_sql, available_access_params = _delivery_access_filter_sql("b", "s")
+    available_rows = fetch_all(f"""
+        SELECT
+            b.*,
+            s.shipment_no,
+            s.invoice_no,
+            s.shipment_date,
+            s.warehouse_id,
+            w.warehouse_name,
+            COALESCE(b.po_number, s.po_number) AS po_number,
+            COALESCE(b.po_date, s.po_date) AS po_date,
+            p.product_code,
+            p.product_name,
+            COALESCE(del.delivered_qty, 0) AS delivered_qty,
+            b.original_qty - COALESCE(del.delivered_qty, 0) AS balance_qty
+        FROM shipment_boxes b
+        JOIN shipments s ON b.shipment_id = s.id
+        JOIN products p ON b.product_id = p.id
+        LEFT JOIN warehouses w ON s.warehouse_id = w.id
+        LEFT JOIN (
+            SELECT box_id, SUM(delivered_qty) AS delivered_qty
+            FROM customer_deliveries
+            GROUP BY box_id
+        ) del ON b.id = del.box_id
+        WHERE s.id = ?
+          AND b.original_qty - COALESCE(del.delivered_qty, 0) > 0
+          {available_access_sql}
+        ORDER BY s.shipment_date ASC, b.pallet_no ASC, b.id ASC
+    """, (selected_ship['id'],) + available_access_params)
     if not available_rows:
         st.warning('No pending pallet quantity available for this original invoice/shipment.')
     else:
@@ -616,7 +734,9 @@ else:
                 print_data = build_delivery_invoice_print_data(delivery_invoice_no.strip()) or first_print
                 if print_data:
                     st.session_state.last_delivery_print = print_data
+                st.session_state['delivery_invoice_auto_source'] = ''
                 st.success('Delivery saved successfully. Email notification attempted if enabled. Print popup opened.')
+                st.rerun()
 if 'last_delivery_print' in st.session_state:
     html_doc = delivery_note_html(st.session_state.last_delivery_print)
     print_popup(html_doc)
@@ -625,22 +745,30 @@ if 'last_delivery_print' in st.session_state:
 st.divider()
 show_header("Reprint Delivery Invoice PDF", "Generate saved Delivery Invoice again in the approved PDF format")
 
-saved_delivery_invoices_for_reprint = fetch_all("""
+reprint_access_sql, reprint_access_params = _delivery_access_filter_sql("b", "s")
+saved_delivery_invoices_for_reprint = fetch_all(f"""
     SELECT
         d.delivery_invoice_no,
         MIN(d.delivery_date) AS delivery_date,
         c.customer_name,
         s.invoice_no AS original_invoice_no,
+        MAX(s.warehouse_id) AS warehouse_id,
+        MAX(w.warehouse_name) AS warehouse_name,
         SUM(d.delivered_qty) AS total_qty,
         SUM(d.sale_amount) AS total_amount,
         MAX(d.currency) AS currency
     FROM customer_deliveries d
     JOIN customers c ON d.customer_id = c.id
     JOIN shipments s ON d.shipment_id = s.id
+    JOIN shipment_boxes b ON d.box_id = b.id
+    JOIN products p ON b.product_id = p.id
+    LEFT JOIN warehouses w ON s.warehouse_id = w.id
+    WHERE 1=1
+    {reprint_access_sql}
     GROUP BY d.delivery_invoice_no, c.customer_name, s.invoice_no
     ORDER BY MIN(d.id) DESC
     LIMIT 200
-""")
+""", reprint_access_params)
 
 if saved_delivery_invoices_for_reprint:
     reprint_options = [
@@ -671,7 +799,33 @@ else:
 
 st.divider()
 st.subheader('Last Delivery Entries - Delivery Invoice Wise')
-delivery_invoice_rows = fetch_all('\n            SELECT d.delivery_invoice_no,\n                   MIN(d.id) AS first_id,\n                   MAX(d.delivery_date) AS delivery_date,\n                   MAX(d.payment_due_date) AS payment_due_date,\n                   c.customer_name,\n                   s.invoice_no AS original_invoice_no,\n                   s.shipment_no,\n                   d.currency,\n                   SUM(d.delivered_qty) AS total_qty,\n                   SUM(d.sale_amount) AS total_amount,\n                   COUNT(*) AS product_rows\n            FROM customer_deliveries d\n            JOIN customers c ON d.customer_id = c.id\n            JOIN shipments s ON d.shipment_id = s.id\n            GROUP BY d.delivery_invoice_no, c.customer_name, c.company_code, s.invoice_no, s.shipment_no, d.currency\n            ORDER BY first_id DESC\n            LIMIT 30\n        ')
+delivery_list_access_sql, delivery_list_access_params = _delivery_access_filter_sql("b", "s")
+delivery_invoice_rows = fetch_all(f"""
+    SELECT d.delivery_invoice_no,
+           MIN(d.id) AS first_id,
+           MAX(d.delivery_date) AS delivery_date,
+           MAX(d.payment_due_date) AS payment_due_date,
+           c.customer_name,
+           s.invoice_no AS original_invoice_no,
+           s.shipment_no,
+           MAX(s.warehouse_id) AS warehouse_id,
+           MAX(w.warehouse_name) AS warehouse_name,
+           d.currency,
+           SUM(d.delivered_qty) AS total_qty,
+           SUM(d.sale_amount) AS total_amount,
+           COUNT(*) AS product_rows
+    FROM customer_deliveries d
+    JOIN customers c ON d.customer_id = c.id
+    JOIN shipments s ON d.shipment_id = s.id
+    JOIN shipment_boxes b ON d.box_id = b.id
+    JOIN products p ON b.product_id = p.id
+    LEFT JOIN warehouses w ON s.warehouse_id = w.id
+    WHERE 1=1
+    {delivery_list_access_sql}
+    GROUP BY d.delivery_invoice_no, c.customer_name, c.company_code, s.invoice_no, s.shipment_no, d.currency
+    ORDER BY first_id DESC
+    LIMIT 50
+""", delivery_list_access_params)
 if not delivery_invoice_rows:
     st.info('No delivery invoice entries available.')
 else:
@@ -732,7 +886,22 @@ else:
         st.dataframe(style_total_row(summary_df), use_container_width=True, hide_index=True)
         export_buttons(add_total_row(summary_df), "delivery_invoice_summary_total_row")
     st.markdown('### Delivery Invoice Product Details')
-    detail_rows = fetch_all('\n                SELECT d.id, d.delivery_invoice_no, d.delivery_date, s.invoice_no AS original_invoice_no,\n                       s.shipment_no, p.product_code, p.product_name, b.pallet_no, b.box_no,\n                       d.delivered_qty, d.unit_price, d.currency, d.sale_amount, d.payment_due_date, d.vehicle_number, d.asn_number, d.asn_date, d.packaging_details\n                FROM customer_deliveries d\n                JOIN shipments s ON d.shipment_id = s.id\n                JOIN shipment_boxes b ON d.box_id = b.id\n                JOIN products p ON b.product_id = p.id\n                WHERE d.delivery_invoice_no=?\n                ORDER BY d.id\n            ', (selected_delivery_invoice_no,))
+    detail_access_sql, detail_access_params = _delivery_access_filter_sql("b", "s")
+    detail_rows = fetch_all(f"""
+        SELECT d.id, d.delivery_invoice_no, d.delivery_date, s.invoice_no AS original_invoice_no,
+               s.shipment_no, s.warehouse_id, w.warehouse_name, b.product_id,
+               p.product_code, p.product_name, b.pallet_no, b.box_no,
+               d.delivered_qty, d.unit_price, d.currency, d.sale_amount, d.payment_due_date,
+               d.vehicle_number, d.asn_number, d.asn_date, d.packaging_details
+        FROM customer_deliveries d
+        JOIN shipments s ON d.shipment_id = s.id
+        JOIN shipment_boxes b ON d.box_id = b.id
+        JOIN products p ON b.product_id = p.id
+        LEFT JOIN warehouses w ON s.warehouse_id = w.id
+        WHERE d.delivery_invoice_no=?
+        {detail_access_sql}
+        ORDER BY d.id
+    """, (selected_delivery_invoice_no,) + detail_access_params)
     show_filtered_df(edit_button_column(detail_rows, 'delivery'), f'delivery_invoice_detail_{selected_delivery_invoice_no}', total=True)
 if st.session_state.user['role'] == 'super_admin':
     st.divider()
@@ -768,7 +937,8 @@ if st.session_state.user['role'] == 'super_admin':
 st.divider()
 st.markdown('<div class="sap-subtitle">Export Saved Delivery Invoice</div>', unsafe_allow_html=True)
 try:
-    saved_delivery_invoices = fetch_all("""
+    saved_access_sql, saved_access_params = _delivery_access_filter_sql("b", "s")
+    saved_delivery_invoices = fetch_all(f"""
         SELECT d.delivery_invoice_no,
                MIN(d.id) AS first_id,
                MAX(d.delivery_date) AS delivery_date,
@@ -784,6 +954,8 @@ try:
                c.email AS customer_email,
                s.invoice_no AS original_invoice_no,
                s.shipment_no,
+               MAX(s.warehouse_id) AS warehouse_id,
+               MAX(w.warehouse_name) AS warehouse_name,
                d.currency,
                SUM(d.delivered_qty) AS total_qty,
                SUM(d.sale_amount) AS total_amount,
@@ -791,10 +963,16 @@ try:
         FROM customer_deliveries d
         JOIN customers c ON d.customer_id = c.id
         JOIN shipments s ON d.shipment_id = s.id
-        GROUP BY d.delivery_invoice_no, c.customer_name, c.company_code, s.invoice_no, s.shipment_no, d.currency
+        JOIN shipment_boxes b ON d.box_id = b.id
+        JOIN products p ON b.product_id = p.id
+        LEFT JOIN warehouses w ON s.warehouse_id = w.id
+        WHERE 1=1
+        {saved_access_sql}
+        GROUP BY d.delivery_invoice_no, c.customer_name, c.company_code, c.address, c.phone, c.email,
+                 s.invoice_no, s.shipment_no, d.currency
         ORDER BY first_id DESC
         LIMIT 100
-    """)
+    """, saved_access_params)
     if not saved_delivery_invoices:
         st.info("No saved delivery invoices available for export.")
     else:
@@ -809,8 +987,10 @@ try:
         )
         selected_saved_invoice = saved_invoice_map[selected_saved_invoice_key]
 
-        saved_line_rows = fetch_all("""
-            SELECT d.*, b.pallet_no, b.box_no, b.fifo_row_id, p.product_code, p.product_name,
+        saved_line_access_sql, saved_line_access_params = _delivery_access_filter_sql("b", "s")
+        saved_line_rows = fetch_all(f"""
+            SELECT d.*, b.pallet_no, b.box_no, b.fifo_row_id, b.product_id, s.warehouse_id, w.warehouse_name,
+                   p.product_code, p.product_name,
                    COALESCE(d.po_number, b.po_number, s.po_number) AS po_number_linked,
                    COALESCE(d.po_date, b.po_date, s.po_date) AS po_date_linked,
                    stm.ship_to_name, stm.ship_to_id, stm.addressline1, stm.addressline2, stm.addressline3,
@@ -819,10 +999,12 @@ try:
             JOIN shipment_boxes b ON d.box_id = b.id
             JOIN shipments s ON d.shipment_id = s.id
             JOIN products p ON b.product_id = p.id
+            LEFT JOIN warehouses w ON s.warehouse_id = w.id
             LEFT JOIN ship_to_masters stm ON d.ship_to_master_id = stm.id
             WHERE d.delivery_invoice_no=?
+            {saved_line_access_sql}
             ORDER BY COALESCE(b.fifo_row_id, b.id), b.pallet_no
-        """, (selected_saved_invoice["delivery_invoice_no"],))
+        """, (selected_saved_invoice["delivery_invoice_no"],) + saved_line_access_params)
 
         if saved_line_rows:
             first_line = saved_line_rows[0]

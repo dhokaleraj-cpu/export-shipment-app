@@ -2153,6 +2153,7 @@ def build_delivery_invoice_print_data(delivery_invoice_no):
                s.shipment_no, s.invoice_no AS original_invoice_no,
                stm.ship_to_name, stm.ship_to_id, stm.addressline1 AS ship_to_addressline1, stm.addressline2 AS ship_to_addressline2, stm.addressline3 AS ship_to_addressline3,
                stm.vendor_gstin AS ship_to_vendor_gstin, stm.vendor_phone AS ship_to_vendor_phone, stm.vendor_email AS ship_to_vendor_email,
+               b.product_id, s.warehouse_id, w.warehouse_name,
                p.product_code, p.product_name,
                COALESCE(d.po_number, s.po_number, p.po_number) AS po_number,
                COALESCE(d.po_date, s.po_date, p.po_date) AS po_date,
@@ -2162,10 +2163,12 @@ def build_delivery_invoice_print_data(delivery_invoice_no):
         JOIN shipments s ON d.shipment_id = s.id
         JOIN shipment_boxes b ON d.box_id = b.id
         JOIN products p ON b.product_id = p.id
+        LEFT JOIN warehouses w ON s.warehouse_id = w.id
         LEFT JOIN ship_to_masters stm ON d.ship_to_master_id = stm.id
         WHERE d.delivery_invoice_no=?
         ORDER BY d.id
     """, (delivery_invoice_no,))
+    rows = filter_rows_by_user_access(rows)
     if not rows:
         return None
 
