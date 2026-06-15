@@ -22,6 +22,43 @@ import pandas as pd
 
 import streamlit as st
 
+
+# ---------------------------------------------------------------------------
+# Persistent save message helper
+# Keeps "Data saved successfully" visible after st.rerun().
+# ---------------------------------------------------------------------------
+if "_fsi_original_st_success" not in globals():
+    _fsi_original_st_success = st.success
+
+    def _fsi_persistent_success(message, *args, **kwargs):
+        try:
+            st.session_state["_fsi_flash_success"] = str(message)
+        except Exception:
+            pass
+        return _fsi_original_st_success(message, *args, **kwargs)
+
+    st.success = _fsi_persistent_success
+
+def set_success_message(message="Data saved successfully."):
+    try:
+        st.session_state["_fsi_flash_success"] = str(message)
+    except Exception:
+        pass
+
+def render_success_message():
+    try:
+        msg = st.session_state.pop("_fsi_flash_success", "")
+        if msg:
+            _fsi_original_st_success(msg)
+    except Exception:
+        pass
+
+def rerun_with_success(message="Data saved successfully."):
+    set_success_message(message)
+    st.rerun()
+# ---------------------------------------------------------------------------
+
+
 import streamlit.components.v1 as components
 
 from reportlab.lib import colors
@@ -1691,6 +1728,7 @@ def show_header(title, subtitle="EXPORT SHIPMENT MONITORING SYSTEM"):
         """,
         unsafe_allow_html=True
     )
+    render_success_message()
 
 
 def add_total_row(df):
@@ -2680,6 +2718,7 @@ def page_setup(title=None, cleanup=False):
     require_login()
     require_page_access_for_current_page()
     top_layout()
+    render_success_message()
     if "filter_key_counter" not in st.session_state:
         st.session_state.filter_key_counter = {}
     else:
@@ -3796,7 +3835,58 @@ def inject_exact_ui_css():
             font-size:24px !important;
         }
     }
-    </style>
+    
+
+    /* ADMIN SCROLL AND SAVED-DATA VISIBILITY FIX */
+    html, body, .stApp, [data-testid="stAppViewContainer"], section.main, .main {
+        min-height: 100% !important;
+        height: auto !important;
+        overflow-y: auto !important;
+        overscroll-behavior-y: auto !important;
+    }
+    div[data-testid="stVerticalBlock"], div[data-testid="stForm"], div[data-testid="stTabs"] {
+        overflow: visible !important;
+    }
+    div[data-testid="stTabs"] [role="tabpanel"] {
+        max-height: none !important;
+        overflow: visible !important;
+    }
+    .block-container {
+        padding-bottom: 5rem !important;
+    }
+    .fsi-login-slogan-footer {
+        pointer-events: none !important;
+    }
+    .admin-saved-data-card {
+        border: 1px solid #CBD5E1;
+        border-radius: 12px;
+        background: #F8FAFC;
+        padding: 12px 14px;
+        margin: 10px 0 14px 0;
+        font-family: Aptos, Arial, sans-serif;
+        font-weight: 800;
+        color: #0F172A;
+    }
+    .admin-saved-data-card b {
+        color: #003B73;
+    }
+
+
+
+    /* ADMIN HEADER RESTORE / SIDEBAR CONTROL HIDE */
+    div[data-testid="collapsedControl"],
+    button[data-testid="collapsedControl"],
+    [data-testid="collapsedControl"],
+    .st-emotion-cache-1pbsqtx,
+    .st-emotion-cache-1gwvy71 {
+        display: none !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+    }
+
+</style>
     """, unsafe_allow_html=True)
 
 
@@ -4318,4 +4408,25 @@ def access_filter_clauses(product_column=None, warehouse_column=None, selected_p
 
     return "".join(clauses), tuple(params)
 # ---------------------------------------------------------------------------
+
+
+
+
+def render_linked_data_card(title, items):
+    """Render a compact card showing values already linked to the current selected field."""
+    try:
+        if not items:
+            return
+        parts = []
+        if isinstance(items, dict):
+            iterable = items.items()
+        else:
+            iterable = items
+        for k, v in iterable:
+            if v not in (None, ""):
+                parts.append(f"<b>{html.escape(str(k))}:</b> {html.escape(str(v))}")
+        if parts:
+            st.markdown('<div class="admin-saved-data-card"><b>' + html.escape(str(title)) + '</b><br>' + " &nbsp; | &nbsp; ".join(parts) + '</div>', unsafe_allow_html=True)
+    except Exception:
+        pass
 

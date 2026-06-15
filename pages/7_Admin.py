@@ -88,9 +88,8 @@ def _ensure_admin_tables():
             execute_query(sql)
         except Exception:
             pass
-
-
-require_page_view('admin')
+page_setup()
+st.markdown('<div id="admin-scroll-top-anchor"></div>', unsafe_allow_html=True)
 show_header('Admin Control Panel', 'Settings, User Management, Page Controls, Warehouse and Product Access')
 _ensure_admin_tables()
 
@@ -107,7 +106,7 @@ with admin_tabs[0]:
         if old_password and new_password and verify_user(current_user.get('username'), old_password):
             if _safe_exec('UPDATE users SET password_hash=? WHERE username=?', (hash_password(new_password), current_user.get('username'))):
                 _admin_safe_clear_cache()
-                st.success('Password changed successfully.')
+                set_success_message('Password changed successfully.')
         else:
             st.error('Current password is incorrect or new password is blank.')
 
@@ -135,7 +134,7 @@ with admin_tabs[1]:
                     ok = _safe_exec('UPDATE users SET role=?, is_active=? WHERE username=?', (new_user_role, bool(new_user_active), new_username.strip()))
                 if ok:
                     _admin_safe_clear_cache()
-                    st.success('User updated.')
+                    set_success_message('User updated.')
                     st.rerun()
             else:
                 if not new_user_password.strip():
@@ -143,7 +142,7 @@ with admin_tabs[1]:
                 else:
                     if _safe_exec('INSERT INTO users (username, password_hash, role, is_active) VALUES (?, ?, ?, ?)', (new_username.strip(), hash_password(new_user_password), new_user_role, bool(new_user_active))):
                         _admin_safe_clear_cache()
-                        st.success('User created.')
+                        set_success_message('User created.')
                         st.rerun()
 
     st.divider()
@@ -198,7 +197,7 @@ with admin_tabs[1]:
                         ok_all = _safe_exec('UPDATE users SET is_active=? WHERE id=?', (bool(modified_active), selected_modify_id)) and ok_all
                     if ok_all:
                         _admin_safe_clear_cache()
-                        st.success('Selected user details updated successfully.')
+                        set_success_message('Selected user details updated successfully.')
                         st.rerun()
     user_rows = _safe_rows('SELECT id, username, role, is_active FROM users ORDER BY id')
     if user_rows:
@@ -214,6 +213,11 @@ with admin_tabs[2]:
         user_labels = [f"{u['username']} | {u['role']}" for u in users_for_access]
         selected_user_label = st.selectbox('Select User for Page Access', user_labels, key='page_access_user_select')
         selected_username = selected_user_label.split(' | ')[0]
+        saved_access_preview = _safe_rows('SELECT page_key, can_view, can_edit, can_modify FROM user_page_access WHERE username=? ORDER BY page_key', (selected_username,))
+        if saved_access_preview:
+            st.markdown('<div class="admin-saved-data-card"><b>Saved controls currently linked to this user:</b> ' + ', '.join([f"{r.get('page_key')}: V={r.get('can_view')} E={r.get('can_edit')} M={r.get('can_modify')}" for r in saved_access_preview]) + '</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="admin-saved-data-card"><b>Saved controls currently linked to this user:</b> No custom page controls saved. Role defaults are active.</div>', unsafe_allow_html=True)
         selected_user_row = next((u for u in users_for_access if u['username'] == selected_username), None)
         existing_perms = get_user_page_permissions(selected_username)
         is_super_selected = bool(selected_user_row and selected_user_row.get('role') == 'super_admin')
@@ -263,13 +267,13 @@ with admin_tabs[2]:
                     """, (selected_username, page['key'], can_view, can_view, can_edit, can_modify)) and ok_all
                 if ok_all:
                     _admin_safe_clear_cache()
-                    st.success('Page controls saved successfully.')
+                    set_success_message('Page controls saved successfully.')
                     st.rerun()
         with creset:
             if st.button('Reset to Role Default', key='reset_page_controls'):
                 if _safe_exec('DELETE FROM user_page_access WHERE username=?', (selected_username,)):
                     _admin_safe_clear_cache()
-                    st.success('Page controls reset to role defaults.')
+                    set_success_message('Page controls reset to role defaults.')
                     st.rerun()
         access_rows = _safe_rows('SELECT username, page_key, can_view, can_edit, can_modify, updated_at FROM user_page_access ORDER BY username, page_key')
         if access_rows:
@@ -290,6 +294,11 @@ with admin_tabs[3]:
         selected_access_username = selected_access_user_label.split('|')[0].strip()
         existing_access = _safe_rows('SELECT warehouse_id FROM user_warehouse_access WHERE username=? AND COALESCE(can_access, TRUE)=TRUE', (selected_access_username,))
         existing_ids = {int(r['warehouse_id']) for r in existing_access if r.get('warehouse_id') is not None}
+        if existing_ids:
+            saved_wh_names = [str(w.get('warehouse_name')) for w in access_warehouses if int(w.get('id')) in existing_ids]
+            st.markdown('<div class="admin-saved-data-card"><b>Saved warehouses linked to this user:</b> ' + ', '.join(saved_wh_names) + '</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="admin-saved-data-card"><b>Saved warehouses linked to this user:</b> All Warehouses (blank access selection)</div>', unsafe_allow_html=True)
         warehouse_options = [f"{w['warehouse_name']} | {w['id']}" for w in access_warehouses]
         default_selected = [opt for opt in warehouse_options if int(opt.split('|')[-1].strip()) in existing_ids]
         selected_warehouse_access = st.multiselect('Select Warehouses for this User (blank = all warehouses)', warehouse_options, default=default_selected, key='warehouse_access_multiselect')
@@ -300,7 +309,7 @@ with admin_tabs[3]:
                 ok_all = _safe_exec('INSERT INTO user_warehouse_access (username, warehouse_id, can_access) VALUES (?, ?, TRUE) ON CONFLICT (username, warehouse_id) DO UPDATE SET can_access=EXCLUDED.can_access', (selected_access_username, wh_id)) and ok_all
             if ok_all:
                 _admin_safe_clear_cache()
-                st.success('Warehouse access saved. Blank selection means all warehouses.')
+                set_success_message('Warehouse access saved. Blank selection means all warehouses.')
                 st.rerun()
     else:
         st.info('Create users and warehouses first.')
@@ -317,6 +326,11 @@ with admin_tabs[4]:
         selected_product_username = selected_product_user_label.split('|')[0].strip()
         existing_product_access = _safe_rows('SELECT product_id FROM user_product_access WHERE username=? AND COALESCE(can_access, TRUE)=TRUE', (selected_product_username,))
         existing_product_ids = {int(r['product_id']) for r in existing_product_access if r.get('product_id') is not None}
+        if existing_product_ids:
+            saved_product_names = [f"{p.get('product_code')} | {p.get('product_name','')}" for p in product_access_rows if int(p.get('id')) in existing_product_ids]
+            st.markdown('<div class="admin-saved-data-card"><b>Saved part numbers linked to this user:</b> ' + ', '.join(saved_product_names) + '</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="admin-saved-data-card"><b>Saved part numbers linked to this user:</b> All Part Numbers (blank access selection)</div>', unsafe_allow_html=True)
         product_options = [f"{p['product_code']} | {p.get('product_name','')} | {p['id']}" for p in product_access_rows]
         default_product_selected = [opt for opt in product_options if int(opt.split('|')[-1].strip()) in existing_product_ids]
         selected_product_access = st.multiselect('Select Part Numbers for this User (blank = all part numbers)', product_options, default=default_product_selected, key='product_access_multiselect')
@@ -327,7 +341,7 @@ with admin_tabs[4]:
                 ok_all = _safe_exec('INSERT INTO user_product_access (username, product_id, can_access) VALUES (?, ?, TRUE) ON CONFLICT (username, product_id) DO UPDATE SET can_access=EXCLUDED.can_access', (selected_product_username, product_id)) and ok_all
             if ok_all:
                 _admin_safe_clear_cache()
-                st.success('Product / Part Number access saved. Blank selection means all part numbers.')
+                set_success_message('Product / Part Number access saved. Blank selection means all part numbers.')
                 st.rerun()
     else:
         st.info('Create users and products first.')
@@ -351,3 +365,5 @@ with admin_tabs[6]:
         st.info('System settings form is not available in this version.')
 
 render_slogan_footer()
+
+st.markdown('<div style="height:24px"></div><a href="#admin-scroll-top-anchor" style="font-weight:900;color:#003B73;">Back to Top - Admin</a>', unsafe_allow_html=True)
