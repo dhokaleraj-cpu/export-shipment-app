@@ -247,6 +247,7 @@ def verify_user(username, password):
 def init_db():
     """Lightweight migrations for existing Supabase/PostgreSQL database."""
     migrations = [
+        'ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS packaging_remark TEXT',
         'CREATE INDEX IF NOT EXISTS idx_shipments_invoice_no ON shipments(invoice_no)',
         'CREATE INDEX IF NOT EXISTS idx_shipments_warehouse_id ON shipments(warehouse_id)',
         'CREATE INDEX IF NOT EXISTS idx_shipment_boxes_shipment_id ON shipment_boxes(shipment_id)',

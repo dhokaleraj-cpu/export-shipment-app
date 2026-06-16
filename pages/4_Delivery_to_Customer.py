@@ -270,7 +270,13 @@ Delivery Date: {invoice.get('delivery_date','')}"""
         story.append(Spacer(1, 28))
 
     packaging = str(invoice.get("packaging_details") or "")
-    packaging_value = Paragraph(packaging.replace("\n", "<br/>"), normal)
+    packaging_remark = str(invoice.get("packaging_remark") or "")
+    packaging_text = ""
+    if packaging:
+        packaging_text += "Packaging Details: " + packaging
+    if packaging_remark:
+        packaging_text += ("\n" if packaging_text else "") + "Remarks: " + packaging_remark
+    packaging_value = Paragraph(packaging_text.replace("\n", "<br/>"), normal)
 
     bank_details = Paragraph(
         "<b>BANK DETAILS:</b><br/>"
@@ -367,6 +373,7 @@ def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
             MAX(d.asn_number) AS asn_number,
             MAX(d.asn_date) AS asn_date,
             MAX(d.packaging_details) AS packaging_details,
+            MAX(d.packaging_remark) AS packaging_remark,
             MAX(d.currency) AS currency,
             c.customer_name,
             c.address AS customer_address,
@@ -519,6 +526,11 @@ def generate_delivery_invoice_no(original_invoice_no, delivery_date_value):
     return f"{prefix}{max_seq + 1:02d}"
 
 
+try:
+    execute_query("ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS packaging_remark TEXT")
+except Exception:
+    pass
+
 show_header('Delivery Entry', 'Invoice-style FIFO delivery form with multi-pallet selection')
 access_notice()
 
@@ -549,13 +561,29 @@ terms = fetch_all('SELECT * FROM payment_terms ORDER BY days')
 ship_to_rows = fetch_all("SELECT * FROM ship_to_masters WHERE COALESCE(is_active, TRUE)=TRUE ORDER BY ship_to_name, ship_to_id")
 invoice_access_sql, invoice_access_params = _delivery_access_filter_sql("b", "s")
 invoice_shipments = fetch_all(f'''
-            SELECT DISTINCT s.id, s.shipment_no, s.invoice_no, s.po_number, s.po_date, s.shipment_date,
-                   s.warehouse_id, w.warehouse_name
+            SELECT
+                s.id,
+                s.shipment_no,
+                s.invoice_no,
+                s.po_number,
+                s.po_date,
+                s.shipment_date,
+                s.warehouse_id,
+                w.warehouse_name,
+                SUM(b.original_qty - COALESCE(del.delivered_qty, 0)) AS balance_qty
             FROM shipments s
             JOIN shipment_boxes b ON b.shipment_id = s.id
             LEFT JOIN warehouses w ON s.warehouse_id = w.id
+            LEFT JOIN (
+                SELECT box_id, SUM(delivered_qty) AS delivered_qty
+                FROM customer_deliveries
+                GROUP BY box_id
+            ) del ON b.id = del.box_id
             WHERE 1=1
+              AND b.original_qty - COALESCE(del.delivered_qty, 0) > 0
             {invoice_access_sql}
+            GROUP BY s.id, s.shipment_no, s.invoice_no, s.po_number, s.po_date, s.shipment_date, s.warehouse_id, w.warehouse_name
+            HAVING SUM(b.original_qty - COALESCE(del.delivered_qty, 0)) > 0
             ORDER BY s.shipment_date ASC, s.id ASC
         ''', invoice_access_params)
 if not customers or not invoice_shipments:
@@ -564,7 +592,7 @@ else:
     customer_map = {x['customer_name']: x['id'] for x in customers}
     term_map = {f"{x['term_name']} - {x['days']} days": x for x in terms}
     ship_to_map = {f"{x['ship_to_name']} | {x.get('ship_to_id') or '-'}": x for x in ship_to_rows}
-    inv_map = {f"{s['invoice_no']} | Shipment {s['shipment_no']} | PO {s.get('po_number') or '-'} | Date {s['shipment_date']}": s for s in invoice_shipments}
+    inv_map = {f"{s['invoice_no']} | Shipment {s['shipment_no']} | Balance {float(s.get('balance_qty') or 0):,.0f} | PO {s.get('po_number') or '-'} | Date {s['shipment_date']}": s for s in invoice_shipments}
     ctop1, ctop2 = st.columns(2)
     with ctop1:
         st.markdown('<div class="input-section-title">Original Invoice Number with Shipment Number</div>', unsafe_allow_html=True)
@@ -581,7 +609,7 @@ else:
     with invoice_top_col2:
         delivery_invoice_no = st.text_input('Delivery Invoice Number', key='delivery_invoice_v10', help='Auto format: Shipment Entry Original Invoice Number + MMDDYY + running sequence, e.g. ED900003-050626-01')
         st.caption(f"Auto generated from Shipment Entry Original Invoice No: {selected_ship.get('invoice_no') or '-'}")
-    extra_col1, extra_col2, extra_col3, extra_col4 = st.columns(4)
+    extra_col1, extra_col2, extra_col3, extra_col4, extra_col5 = st.columns(5)
     with extra_col1:
         vehicle_number = st.text_input('Vehicle Number', key='delivery_vehicle_number')
     with extra_col2:
@@ -590,6 +618,8 @@ else:
         asn_date = st.date_input('ASN Date', value=date.today(), key='delivery_asn_date')
     with extra_col4:
         packaging_details = st.text_input('Packaging Details', key='delivery_packaging_details')
+    with extra_col5:
+        packaging_remark = st.text_input('Remarks', key='delivery_remarks')
     st.text_input('Linked Warehouse', value=str(selected_ship.get('warehouse_name') or ''), disabled=True, key='delivery_linked_warehouse_display')
     available_access_sql, available_access_params = _delivery_access_filter_sql("b", "s")
     available_rows = fetch_all(f"""
@@ -704,11 +734,11 @@ else:
                     execute_query('''
                                 INSERT INTO customer_deliveries
                                 (shipment_id, box_id, customer_id, ship_to_master_id, delivery_date, delivered_qty, delivery_invoice_no,
-                                 vehicle_number, asn_number, asn_date, packaging_details,
+                                 vehicle_number, asn_number, asn_date, packaging_details, packaging_remark,
                                  payment_term_id, payment_terms_days, payment_due_date, unit_price, currency, sale_amount, attachment_path, po_number, po_date)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             ''', (row['shipment_id'], row['id'], customer_map[customer], selected_ship_to.get('id'), str(delivery_date), qty, delivery_invoice_no.strip(),
-                                vehicle_number.strip(), asn_number.strip(), str(asn_date), packaging_details.strip(),
+                                vehicle_number.strip(), asn_number.strip(), str(asn_date), packaging_details.strip(), packaging_remark.strip(),
                                 term['id'], term['days'], str(payment_due_date), price, row['currency'], amount, path, row.get('po_number', ''), row.get('po_date', None)))
                     if first_print is None:
                         first_print = {'customer_name': customer,
@@ -892,7 +922,7 @@ else:
                s.shipment_no, s.warehouse_id, w.warehouse_name, b.product_id,
                p.product_code, p.product_name, b.pallet_no, b.box_no,
                d.delivered_qty, d.unit_price, d.currency, d.sale_amount, d.payment_due_date,
-               d.vehicle_number, d.asn_number, d.asn_date, d.packaging_details
+               d.vehicle_number, d.asn_number, d.asn_date, d.packaging_details, d.packaging_remark
         FROM customer_deliveries d
         JOIN shipments s ON d.shipment_id = s.id
         JOIN shipment_boxes b ON d.box_id = b.id
@@ -925,10 +955,11 @@ if st.session_state.user['role'] == 'super_admin':
             ed_asn_no = st.text_input('Edit ASN Number', ed.get('asn_number') or '', key='edit_delivery_asn_no')
             ed_asn_date = st.text_input('Edit ASN Date YYYY-MM-DD', ed.get('asn_date') or '', key='edit_delivery_asn_date')
             ed_packaging = st.text_input('Edit Packaging Details', ed.get('packaging_details') or '', key='edit_delivery_packaging')
+            ed_packaging_remark = st.text_input('Edit Remarks', ed.get('packaging_remark') or '', key='edit_delivery_remarks')
         ed_amount = ed_qty * ed_price
         st.markdown(f'<div class="total-box">New Sale Amount: {ed_amount:,.2f} {ed_currency}</div>', unsafe_allow_html=True)
         if st.button('Update Delivery', type='primary', key='update_delivery'):
-            execute_query('\n                        UPDATE customer_deliveries\n                        SET delivery_invoice_no=?, delivery_date=?, delivered_qty=?, unit_price=?, currency=?, sale_amount=?, payment_due_date=?, vehicle_number=?, asn_number=?, asn_date=?, packaging_details=?\n                        WHERE id=?\n                    ', (ed_inv, ed_date, ed_qty, ed_price, ed_currency, ed_amount, ed_due, ed_vehicle, ed_asn_no, ed_asn_date or None, ed_packaging, ed['id']))
+            execute_query('\n                        UPDATE customer_deliveries\n                        SET delivery_invoice_no=?, delivery_date=?, delivered_qty=?, unit_price=?, currency=?, sale_amount=?, payment_due_date=?, vehicle_number=?, asn_number=?, asn_date=?, packaging_details=?\n                        WHERE id=?\n                    ', (ed_inv, ed_date, ed_qty, ed_price, ed_currency, ed_amount, ed_due, ed_vehicle, ed_asn_no, ed_asn_date or None, ed_packaging, ed_packaging_remark, ed['id']))
             st.success('Delivery updated successfully.')
             st.rerun()
 
@@ -947,6 +978,7 @@ try:
                MAX(d.asn_number) AS asn_number,
                MAX(d.asn_date) AS asn_date,
                MAX(d.packaging_details) AS packaging_details,
+               MAX(d.packaging_remark) AS packaging_remark,
                c.customer_name,
                c.address AS customer_address,
                c.company_code AS customer_company_code,
@@ -1029,6 +1061,7 @@ try:
                 "asn_number": selected_saved_invoice.get("asn_number", ""),
                 "asn_date": str(selected_saved_invoice.get("asn_date") or ""),
                 "packaging_details": selected_saved_invoice.get("packaging_details", ""),
+                "packaging_remark": selected_saved_invoice.get("packaging_remark", ""),
                 "ship_to_name": first_line.get("ship_to_name", ""),
                 "ship_to_id": first_line.get("ship_to_id", ""),
                 "ship_to_addressline1": first_line.get("addressline1", ""),
@@ -1158,7 +1191,8 @@ def delivery_invoice_print_html(invoice, line_items):
                     <div>Vehicle No.: {html.escape(str(invoice.get('vehicle_number','')))}</div>
                     <div>ASN No.: {html.escape(str(invoice.get('asn_number','')))}</div>
                     <div>ASN Date: {html.escape(str(invoice.get('asn_date','')))}</div>
-                    <div>Packaging: {html.escape(str(invoice.get('packaging_details','')))}</div>
+                    <div>Packaging Details: {html.escape(str(invoice.get('packaging_details','')))}</div>
+                    <div>Remarks: {html.escape(str(invoice.get('packaging_remark','')))}</div>
                 </div>
             </div>
         </div>
