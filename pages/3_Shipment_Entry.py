@@ -238,7 +238,27 @@ else:
             ship_keys = list(ship_map.keys())
             default_ship_index = ship_keys.index(default_ship_key) if default_ship_key in ship_keys else 0
             selected_ship_key = searchable_selectbox('Select Shipment to Edit', ship_keys, key='edit_shipment_header_select', default_index=default_ship_index)
-            edit_ship = ship_map[selected_ship_key]
+            selected_ship_id = int(str(selected_ship_key).split(' | ')[0].strip())
+
+            # Re-fetch the exact selected shipment by ID to avoid stale/mismatched header values.
+            exact_ship_rows = fetch_all('''
+                    SELECT s.*, sup.supplier_name, w.warehouse_name, c.customer_name, stm.ship_to_name, stm.ship_to_id
+                    FROM shipments s
+                    LEFT JOIN suppliers sup ON s.supplier_id = sup.id
+                    LEFT JOIN warehouses w ON s.warehouse_id = w.id
+                    LEFT JOIN customers c ON s.customer_id = c.id
+                    LEFT JOIN ship_to_masters stm ON s.ship_to_master_id = stm.id
+                    WHERE s.id=?
+                    LIMIT 1
+                ''', (selected_ship_id,))
+            edit_ship = dict(exact_ship_rows[0]) if exact_ship_rows else dict(ship_map[selected_ship_key])
+            st.session_state.edit_shipment_id = selected_ship_id
+
+            st.info(
+                f"Loaded selected shipment ID {edit_ship.get('id')} | Shipment No: {edit_ship.get('shipment_no')} | "
+                f"Original Invoice: {edit_ship.get('invoice_no')}"
+            )
+
             suppliers2 = fetch_all('SELECT * FROM suppliers ORDER BY supplier_name')
             warehouses2 = fetch_all('SELECT * FROM warehouses ORDER BY warehouse_name')
             customers2 = fetch_all('SELECT * FROM customers ORDER BY customer_name')
@@ -251,27 +271,31 @@ else:
             warehouse_id_map = {x['warehouse_name']: x['id'] for x in warehouses2}
             customer_id_map = {x['customer_name']: x['id'] for x in customers2}
             ship_to_id_map = {f"{x['ship_to_name']} | {x.get('ship_to_id') or '-'}": x['id'] for x in ship_to2}
+
+            # Dynamic keys are mandatory here. Fixed keys keep previous shipment data in Streamlit session_state.
+            edit_key_suffix = str(selected_ship_id)
+
             sh1, sh2 = st.columns(2)
             with sh1:
-                edit_shipment_no = st.text_input('Edit Shipment Number', edit_ship['shipment_no'], key='edit_header_shipment_no')
-                edit_invoice_no = st.text_input('Edit Original Invoice Number', edit_ship['invoice_no'], key='edit_header_invoice_no')
-                edit_shipment_date = st.text_input('Edit Shipment Date YYYY-MM-DD', edit_ship['shipment_date'] or '', key='edit_header_date')
+                edit_shipment_no = st.text_input('Edit Shipment Number', edit_ship.get('shipment_no') or '', key=f'edit_header_shipment_no_{edit_key_suffix}')
+                edit_invoice_no = st.text_input('Edit Original Invoice Number', edit_ship.get('invoice_no') or '', key=f'edit_header_invoice_no_{edit_key_suffix}')
+                edit_shipment_date = st.text_input('Edit Shipment Date YYYY-MM-DD', str(edit_ship.get('shipment_date') or ''), key=f'edit_header_date_{edit_key_suffix}')
             with sh2:
                 current_supplier = edit_ship.get('supplier_name') if edit_ship.get('supplier_name') in supplier_names else supplier_names[0] if supplier_names else ''
                 current_warehouse = edit_ship.get('warehouse_name') if edit_ship.get('warehouse_name') in warehouse_names else warehouse_names[0] if warehouse_names else ''
-                edit_supplier = st.selectbox('Edit Supplier', supplier_names, index=supplier_names.index(current_supplier) if current_supplier in supplier_names else 0, key='edit_header_supplier')
-                edit_warehouse = st.selectbox('Edit Warehouse', warehouse_names, index=warehouse_names.index(current_warehouse) if current_warehouse in warehouse_names else 0, key='edit_header_warehouse')
-                edit_remarks = st.text_area('Edit Remarks', edit_ship['remarks'] or '', key='edit_header_remarks')
+                edit_supplier = st.selectbox('Edit Supplier', supplier_names, index=supplier_names.index(current_supplier) if current_supplier in supplier_names else 0, key=f'edit_header_supplier_{edit_key_suffix}')
+                edit_warehouse = st.selectbox('Edit Warehouse', warehouse_names, index=warehouse_names.index(current_warehouse) if current_warehouse in warehouse_names else 0, key=f'edit_header_warehouse_{edit_key_suffix}')
+                edit_remarks = st.text_area('Edit Remarks', edit_ship.get('remarks') or '', key=f'edit_header_remarks_{edit_key_suffix}')
                 current_customer = edit_ship.get('customer_name') if edit_ship.get('customer_name') in customer_names else customer_names[0] if customer_names else ''
-                edit_customer = st.selectbox('Edit Customer', customer_names, index=customer_names.index(current_customer) if current_customer in customer_names else 0, key='edit_header_customer')
+                edit_customer = st.selectbox('Edit Customer', customer_names, index=customer_names.index(current_customer) if current_customer in customer_names else 0, key=f'edit_header_customer_{edit_key_suffix}')
                 current_ship_to_label = next((lbl for lbl in ship_to_labels if lbl.startswith(str(edit_ship.get('ship_to_name') or '') + ' |')), ship_to_labels[0] if ship_to_labels else '')
-                edit_ship_to = st.selectbox('Edit Ship To', ship_to_labels, index=ship_to_labels.index(current_ship_to_label) if current_ship_to_label in ship_to_labels else 0, key='edit_header_ship_to')
-            if st.button('Update Shipment Header', type='primary', key='update_shipment_header'):
+                edit_ship_to = st.selectbox('Edit Ship To', ship_to_labels, index=ship_to_labels.index(current_ship_to_label) if current_ship_to_label in ship_to_labels else 0, key=f'edit_header_ship_to_{edit_key_suffix}')
+            if st.button('Update Shipment Header', type='primary', key=f'update_shipment_header_{edit_key_suffix}'):
                 if not edit_shipment_no.strip() or not edit_invoice_no.strip():
                     st.error('Shipment Number and Original Invoice Number are mandatory.')
                 else:
                     try:
-                        execute_query('\n                                    UPDATE shipments\n                                    SET shipment_no=?, invoice_no=?, shipment_date=?, supplier_id=?, warehouse_id=?, customer_id=?, ship_to_master_id=?, remarks=?\n                                    WHERE id=?\n                                ', (edit_shipment_no.strip(), edit_invoice_no.strip(), edit_shipment_date.strip(), supplier_id_map[edit_supplier], warehouse_id_map[edit_warehouse], customer_id_map.get(edit_customer), ship_to_id_map.get(edit_ship_to), edit_remarks, edit_ship['id']))
+                        execute_query('\n                                    UPDATE shipments\n                                    SET shipment_no=?, invoice_no=?, shipment_date=?, supplier_id=?, warehouse_id=?, customer_id=?, ship_to_master_id=?, remarks=?\n                                    WHERE id=?\n                                ', (edit_shipment_no.strip(), edit_invoice_no.strip(), edit_shipment_date.strip(), supplier_id_map[edit_supplier], warehouse_id_map[edit_warehouse], customer_id_map.get(edit_customer), ship_to_id_map.get(edit_ship_to), edit_remarks, selected_ship_id))
                         st.success('Shipment header updated successfully.')
                         st.rerun()
                     except sqlite3.IntegrityError:

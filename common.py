@@ -4430,3 +4430,23 @@ def render_linked_data_card(title, items):
     except Exception:
         pass
 
+
+# ---------------------------------------------------------------------------
+# Searchable selectbox compatibility override
+# Accepts both index= and default_index= to support older/newer page calls.
+# ---------------------------------------------------------------------------
+def searchable_selectbox(label, options, key=None, index=0, default_index=None, help=None, **kwargs):
+    options = list(options or [])
+    if not options:
+        return None
+    if default_index is not None:
+        index = default_index
+    try:
+        index = int(index)
+    except Exception:
+        index = 0
+    if index < 0 or index >= len(options):
+        index = 0
+    return st.selectbox(label, options, index=index, key=key, help=help, **kwargs)
+# ---------------------------------------------------------------------------
+
