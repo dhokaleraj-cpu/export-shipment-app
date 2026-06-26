@@ -1492,6 +1492,9 @@ APP_PAGE_DEFINITIONS = [
     {"label": "Masters", "target": "pages/2_Masters.py", "key": "masters", "default_roles": ["admin", "super_admin"]},
     {"label": "Shipment Entry", "target": "pages/3_Shipment_Entry.py", "key": "shipment", "default_roles": ["admin", "super_admin"]},
     {"label": "Delivery", "target": "pages/4_Delivery_to_Customer.py", "key": "delivery", "default_roles": ["user", "admin", "super_admin"]},
+    {"label": "Reprint Invoice", "target": "pages/10_Reprint_Invoice.py", "key": "delivery_reprint", "default_roles": ["admin", "super_admin"]},
+    {"label": "FIFO Available Pallets", "target": "pages/11_FIFO_Available_Pallets.py", "key": "delivery_fifo", "default_roles": ["user", "admin", "super_admin"]},
+    {"label": "Edit Delivery Invoice", "target": "pages/12_Edit_Delivery_Invoice.py", "key": "delivery_edit", "default_roles": ["admin", "super_admin"]},
     {"label": "Payment", "target": "pages/5_Payment_Entry.py", "key": "payment", "default_roles": ["admin", "super_admin"]},
     {"label": "Coverage Plan", "target": "pages/6_Coverage_Plan.py", "key": "coverage", "default_roles": ["user", "admin", "super_admin"]},
     {"label": "Admin", "target": "pages/7_Admin.py", "key": "admin", "default_roles": ["admin", "super_admin"]},
@@ -1622,7 +1625,12 @@ def current_user_can_edit(page_key=None):
 
 def get_allowed_nav_items(user=None):
     user = user or st.session_state.get('user', {})
-    return [(p['label'], p['target']) for p in APP_PAGE_DEFINITIONS if can_user_access_page(p, user)]
+    hidden_top_nav_keys = {'delivery_reprint', 'delivery_fifo', 'delivery_edit'}
+    return [
+        (p['label'], p['target'])
+        for p in APP_PAGE_DEFINITIONS
+        if p.get('key') not in hidden_top_nav_keys and can_user_access_page(p, user)
+    ]
 
 def detect_current_page_target():
     import inspect
@@ -4448,5 +4456,26 @@ def searchable_selectbox(label, options, key=None, index=0, default_index=None, 
     if index < 0 or index >= len(options):
         index = 0
     return st.selectbox(label, options, index=index, key=key, help=help, **kwargs)
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Searchable selectbox compatibility override for split pages.
+# Accepts both index= and default_index=.
+# ---------------------------------------------------------------------------
+def searchable_selectbox(label, options, key=None, index=0, default_index=None, help=None, help_text=None, **kwargs):
+    options = list(options or [])
+    if not options:
+        st.warning(f"No options available for {label}.")
+        return None
+    if default_index is not None:
+        index = default_index
+    try:
+        index = int(index)
+    except Exception:
+        index = 0
+    if index < 0 or index >= len(options):
+        index = 0
+    return st.selectbox(label, options, index=index, key=key, help=help or help_text, **kwargs)
 # ---------------------------------------------------------------------------
 
