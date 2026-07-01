@@ -690,5 +690,194 @@ def render_delivery_subnav(active_key="delivery"):
                 st.page_link(target, label=label)
 
 
+
+
+
+def fetch_delivery_invoice_headers(selected_product_id=None, selected_invoice_no=None):
+    """Delivery invoice headers available for current user's product/warehouse access."""
+    access_sql, access_params = _delivery_access_filter_sql("b", "s")
+    part_sql, part_params = selected_part_sql(selected_product_id, "b")
+    invoice_sql = ""
+    invoice_params = ()
+    if selected_invoice_no:
+        invoice_sql = " AND s.invoice_no=? "
+        invoice_params = (selected_invoice_no,)
+
+    return fetch_all(f"""
+        SELECT
+            d.delivery_invoice_no,
+            MIN(d.id) AS first_id,
+            MAX(d.delivery_date) AS delivery_date,
+            MAX(d.payment_due_date) AS payment_due_date,
+            MAX(d.vehicle_number) AS vehicle_number,
+            MAX(d.asn_number) AS asn_number,
+            MAX(d.asn_date) AS asn_date,
+            MAX(d.packaging_details) AS packaging_details,
+            MAX(d.packaging_remark) AS packaging_remark,
+            MAX(d.customer_id) AS customer_id,
+            MAX(d.ship_to_master_id) AS ship_to_master_id,
+            MAX(d.payment_term_id) AS payment_term_id,
+            MAX(d.payment_terms_days) AS payment_terms_days,
+            c.customer_name,
+            s.invoice_no AS original_invoice_no,
+            s.shipment_no,
+            MAX(s.warehouse_id) AS warehouse_id,
+            MAX(w.warehouse_name) AS warehouse_name,
+            d.currency,
+            SUM(d.delivered_qty) AS total_qty,
+            SUM(d.sale_amount) AS total_amount,
+            COUNT(*) AS product_rows
+        FROM customer_deliveries d
+        JOIN customers c ON d.customer_id = c.id
+        JOIN shipments s ON d.shipment_id = s.id
+        JOIN shipment_boxes b ON d.box_id = b.id
+        JOIN products p ON b.product_id = p.id
+        LEFT JOIN warehouses w ON s.warehouse_id = w.id
+        WHERE 1=1
+        {access_sql}
+        {part_sql}
+        {invoice_sql}
+        GROUP BY d.delivery_invoice_no, c.customer_name, s.invoice_no, s.shipment_no, d.currency
+        ORDER BY MIN(d.id) DESC
+    """, access_params + part_params + invoice_params)
+
+
+def fetch_delivery_invoice_rows(delivery_invoice_no, selected_product_id=None):
+    """Rows of one delivery invoice with pallet/product data."""
+    access_sql, access_params = _delivery_access_filter_sql("b", "s")
+    part_sql, part_params = selected_part_sql(selected_product_id, "b")
+    return fetch_all(f"""
+        SELECT
+            d.*,
+            c.customer_name,
+            s.invoice_no AS original_invoice_no,
+            s.shipment_no,
+            s.warehouse_id,
+            w.warehouse_name,
+            b.product_id,
+            p.product_code,
+            p.product_name,
+            b.pallet_no,
+            b.box_no,
+            b.fifo_row_id,
+            b.original_qty,
+            b.unit_price AS shipment_unit_price,
+            b.currency AS shipment_currency
+        FROM customer_deliveries d
+        JOIN customers c ON d.customer_id = c.id
+        JOIN shipments s ON d.shipment_id = s.id
+        JOIN shipment_boxes b ON d.box_id = b.id
+        JOIN products p ON b.product_id = p.id
+        LEFT JOIN warehouses w ON s.warehouse_id = w.id
+        WHERE d.delivery_invoice_no=?
+        {access_sql}
+        {part_sql}
+        ORDER BY d.id
+    """, (delivery_invoice_no,) + access_params + part_params)
+
+
+def fetch_available_pallets_for_edit(selected_ship_id=None, selected_product_id=None, include_box_id=None):
+    """Available pallets for adding/changing delivery rows.
+
+    include_box_id lets the currently linked pallet remain selectable even if balance is zero.
+    """
+    access_sql, access_params = _delivery_access_filter_sql("b", "s")
+    part_sql, part_params = selected_part_sql(selected_product_id, "b")
+    ship_sql = ""
+    ship_params = ()
+    if selected_ship_id:
+        ship_sql = " AND s.id=? "
+        ship_params = (selected_ship_id,)
+    include_sql = ""
+    include_params = ()
+    if include_box_id:
+        include_sql = " OR b.id=? "
+        include_params = (include_box_id,)
+
+    return fetch_all(f"""
+        SELECT
+            b.*,
+            s.shipment_no,
+            s.invoice_no,
+            s.shipment_date,
+            s.warehouse_id,
+            w.warehouse_name,
+            p.product_code,
+            p.product_name,
+            COALESCE(del.delivered_qty, 0) AS delivered_qty,
+            b.original_qty - COALESCE(del.delivered_qty, 0) AS balance_qty
+        FROM shipment_boxes b
+        JOIN shipments s ON b.shipment_id = s.id
+        JOIN products p ON b.product_id = p.id
+        LEFT JOIN warehouses w ON s.warehouse_id = w.id
+        LEFT JOIN (
+            SELECT box_id, SUM(delivered_qty) AS delivered_qty
+            FROM customer_deliveries
+            GROUP BY box_id
+        ) del ON b.id = del.box_id
+        WHERE (
+            b.original_qty - COALESCE(del.delivered_qty, 0) > 0
+            {include_sql}
+        )
+        {ship_sql}
+        {access_sql}
+        {part_sql}
+        ORDER BY s.shipment_date ASC, COALESCE(b.fifo_row_id,b.id), b.pallet_no, b.id
+    """, include_params + ship_params + access_params + part_params)
+
+
+
+
+
+def fetch_delivery_invoice_headers_for_edit(selected_product_id=None, date_from=None, date_to=None):
+    """Delivery invoice headers for Edit page filtered by part, date range and user access."""
+    access_sql, access_params = _delivery_access_filter_sql("b", "s")
+    part_sql, part_params = selected_part_sql(selected_product_id, "b")
+    date_sql = ""
+    date_params = ()
+    if date_from and date_to:
+        date_sql = " AND d.delivery_date::date BETWEEN ?::date AND ?::date "
+        date_params = (str(date_from), str(date_to))
+
+    return fetch_all(f"""
+        SELECT
+            d.delivery_invoice_no,
+            MIN(d.id) AS first_id,
+            MAX(d.delivery_date) AS delivery_date,
+            MAX(d.payment_due_date) AS payment_due_date,
+            MAX(d.vehicle_number) AS vehicle_number,
+            MAX(d.asn_number) AS asn_number,
+            MAX(d.asn_date) AS asn_date,
+            MAX(d.packaging_details) AS packaging_details,
+            MAX(d.packaging_remark) AS packaging_remark,
+            MAX(d.customer_id) AS customer_id,
+            MAX(d.ship_to_master_id) AS ship_to_master_id,
+            MAX(d.payment_term_id) AS payment_term_id,
+            MAX(d.payment_terms_days) AS payment_terms_days,
+            c.customer_name,
+            s.invoice_no AS original_invoice_no,
+            s.shipment_no,
+            MAX(s.id) AS shipment_id,
+            MAX(s.warehouse_id) AS warehouse_id,
+            MAX(w.warehouse_name) AS warehouse_name,
+            d.currency,
+            SUM(d.delivered_qty) AS total_qty,
+            SUM(d.sale_amount) AS total_amount,
+            COUNT(*) AS product_rows
+        FROM customer_deliveries d
+        JOIN customers c ON d.customer_id = c.id
+        JOIN shipments s ON d.shipment_id = s.id
+        JOIN shipment_boxes b ON d.box_id = b.id
+        JOIN products p ON b.product_id = p.id
+        LEFT JOIN warehouses w ON s.warehouse_id = w.id
+        WHERE 1=1
+        {access_sql}
+        {part_sql}
+        {date_sql}
+        GROUP BY d.delivery_invoice_no, c.customer_name, s.invoice_no, s.shipment_no, d.currency
+        ORDER BY MAX(d.delivery_date) DESC, MIN(d.id) DESC
+    """, access_params + part_params + date_params)
+
+
 # Allow split Delivery pages to import internal helper names such as _delivery_access_filter_sql.
 __all__ = [name for name in globals() if not name.startswith("__")]

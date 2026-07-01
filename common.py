@@ -1491,11 +1491,15 @@ APP_PAGE_DEFINITIONS = [
     {"label": "Dashboard", "target": "pages/1_Dashboard.py", "key": "dashboard", "default_roles": ["user", "admin", "super_admin"]},
     {"label": "Masters", "target": "pages/2_Masters.py", "key": "masters", "default_roles": ["admin", "super_admin"]},
     {"label": "Shipment Entry", "target": "pages/3_Shipment_Entry.py", "key": "shipment", "default_roles": ["admin", "super_admin"]},
+    {"label": "Last Shipments", "target": "pages/13_Last_Shipments.py", "key": "shipment_last", "default_roles": ["admin", "super_admin"]},
+    {"label": "Edit Shipment", "target": "pages/14_Edit_Shipment.py", "key": "shipment_edit", "default_roles": ["admin", "super_admin"]},
     {"label": "Delivery", "target": "pages/4_Delivery_to_Customer.py", "key": "delivery", "default_roles": ["user", "admin", "super_admin"]},
     {"label": "Reprint Invoice", "target": "pages/10_Reprint_Invoice.py", "key": "delivery_reprint", "default_roles": ["admin", "super_admin"]},
     {"label": "FIFO Available Pallets", "target": "pages/11_FIFO_Available_Pallets.py", "key": "delivery_fifo", "default_roles": ["user", "admin", "super_admin"]},
     {"label": "Edit Delivery Invoice", "target": "pages/12_Edit_Delivery_Invoice.py", "key": "delivery_edit", "default_roles": ["admin", "super_admin"]},
     {"label": "Payment", "target": "pages/5_Payment_Entry.py", "key": "payment", "default_roles": ["admin", "super_admin"]},
+    {"label": "Payment Due", "target": "pages/18_Payment_Due.py", "key": "payment_due", "default_roles": ["admin", "super_admin"]},
+    {"label": "Edit Payment", "target": "pages/19_Edit_Payment.py", "key": "payment_edit", "default_roles": ["admin", "super_admin"]},
     {"label": "Coverage Plan", "target": "pages/6_Coverage_Plan.py", "key": "coverage", "default_roles": ["user", "admin", "super_admin"]},
     {"label": "Admin", "target": "pages/7_Admin.py", "key": "admin", "default_roles": ["admin", "super_admin"]},
     {"label": "Reports", "target": "pages/8_Reports.py", "key": "reports", "default_roles": ["user", "admin", "super_admin"]},
@@ -1625,7 +1629,7 @@ def current_user_can_edit(page_key=None):
 
 def get_allowed_nav_items(user=None):
     user = user or st.session_state.get('user', {})
-    hidden_top_nav_keys = {'delivery_reprint', 'delivery_fifo', 'delivery_edit'}
+    hidden_top_nav_keys = {'delivery_reprint', 'delivery_fifo', 'delivery_edit', 'shipment_last', 'shipment_edit', 'payment_due', 'payment_edit'}
     return [
         (p['label'], p['target'])
         for p in APP_PAGE_DEFINITIONS
@@ -4478,4 +4482,52 @@ def searchable_selectbox(label, options, key=None, index=0, default_index=None, 
         index = 0
     return st.selectbox(label, options, index=index, key=key, help=help or help_text, **kwargs)
 # ---------------------------------------------------------------------------
+
+
+
+
+def _render_module_subnav(title, active_key, items):
+    allowed_items = []
+    for key, label, target in items:
+        try:
+            page_def = get_page_definition_by_key(key)
+            if page_def and can_user_access_page(page_def):
+                allowed_items.append((key, label, target))
+        except Exception:
+            allowed_items.append((key, label, target))
+    if not allowed_items:
+        return
+    st.markdown(
+        f"""
+        <div style="border:1px solid #d9e2ec;border-radius:14px;background:#ffffff;
+                    padding:10px 12px;margin:8px 0 16px 0;box-shadow:0 2px 8px rgba(15,23,42,.06);">
+            <div style="font-weight:900;color:#003B73;font-size:14px;margin-bottom:8px;">{title}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    cols = st.columns(len(allowed_items))
+    for col, (key, label, target) in zip(cols, allowed_items):
+        with col:
+            if key == active_key:
+                st.markdown(
+                    f"<div style='background:#003B73;color:white;border-radius:10px;padding:9px 10px;text-align:center;font-weight:900;'>{label}</div>",
+                    unsafe_allow_html=True
+                )
+            else:
+                st.page_link(target, label=label)
+
+def render_shipment_subnav(active_key="shipment"):
+    _render_module_subnav("Shipment", active_key, [
+        ("shipment", "Shipment Entry", "pages/3_Shipment_Entry.py"),
+        ("shipment_last", "Last Shipments", "pages/13_Last_Shipments.py"),
+        ("shipment_edit", "Edit Shipment", "pages/14_Edit_Shipment.py"),
+    ])
+
+def render_payment_subnav(active_key="payment"):
+    _render_module_subnav("Payment", active_key, [
+        ("payment", "Payment Entry", "pages/5_Payment_Entry.py"),
+        ("payment_due", "Payment Due", "pages/18_Payment_Due.py"),
+        ("payment_edit", "Edit Payment", "pages/19_Edit_Payment.py"),
+    ])
 
