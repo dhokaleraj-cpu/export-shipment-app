@@ -241,7 +241,49 @@ def get_week_qty_maps(product_id, shipment_time_days):
         if wk:
             shipment_by_week[wk.isoformat()] = safe_float(rr.get("shipment_delivery_qty"))
 
-    return shipment_by_week, delivered_by_week
+    # Original Invoice Numbers falling into the same calculated warehouse-delivery week.
+    try:
+        invoice_week_rows = fetch_all("""
+            SELECT date_trunc(
+                       'week',
+                       (
+                           s.shipment_date::date
+                           + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
+                       )
+                   )::date AS week_start,
+                   STRING_AGG(DISTINCT s.invoice_no, ', ' ORDER BY s.invoice_no) AS original_invoice_numbers
+            FROM shipment_boxes b
+            JOIN shipments s ON b.shipment_id = s.id
+            WHERE b.product_id=?
+              AND s.shipment_date IS NOT NULL
+              AND COALESCE(s.invoice_no,'') <> ''
+            GROUP BY date_trunc(
+                       'week',
+                       (
+                           s.shipment_date::date
+                           + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
+                       )
+                   )::date
+        """, (int(shipment_time_days or 0), product_id, int(shipment_time_days or 0)))
+    except Exception:
+        invoice_week_rows = fetch_all("""
+            SELECT date_trunc('week', (s.shipment_date::date + (?::int * INTERVAL '1 day')))::date AS week_start,
+                   STRING_AGG(DISTINCT s.invoice_no, ', ' ORDER BY s.invoice_no) AS original_invoice_numbers
+            FROM shipment_boxes b
+            JOIN shipments s ON b.shipment_id = s.id
+            WHERE b.product_id=?
+              AND s.shipment_date IS NOT NULL
+              AND COALESCE(s.invoice_no,'') <> ''
+            GROUP BY date_trunc('week', (s.shipment_date::date + (?::int * INTERVAL '1 day')))::date
+        """, (int(shipment_time_days or 0), product_id, int(shipment_time_days or 0)))
+
+    original_invoice_by_week = {}
+    for rr in invoice_week_rows:
+        wk = parse_db_date(rr.get("week_start"))
+        if wk:
+            original_invoice_by_week[wk.isoformat()] = rr.get("original_invoice_numbers") or ""
+
+    return shipment_by_week, delivered_by_week, original_invoice_by_week
 
 
 def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months_inventory, visible_start_week=None, max_rows=None):
@@ -253,7 +295,7 @@ def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months
     - Suggested Shipment Qty is shown in the shortage week.
     - KPI Next Shipment Date/Qty ignores past shipment dates and uses only today/future dates.
     """
-    shipment_by_week, delivered_by_week = get_week_qty_maps(product_id, shipment_time_days)
+    shipment_by_week, delivered_by_week, original_invoice_by_week = get_week_qty_maps(product_id, shipment_time_days)
 
     calculated = []
     update_params = []
@@ -272,6 +314,7 @@ def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months
         week_key = week_start.isoformat()
 
         shipment_delivery_qty = safe_float(shipment_by_week.get(week_key, 0))
+        original_invoice_numbers = original_invoice_by_week.get(week_key, "")
         raw_customer_forecast = safe_float(r.get("customer_forecast"))
         delivered_to_customer = safe_float(delivered_by_week.get(week_key, 0))
         stored_stock = safe_float(r.get("stock_at_wh"))
@@ -306,6 +349,7 @@ def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months
             "id": r["id"],
             "week_no": r.get("week_no"),
             "plan_date": week_key,
+            "original_invoice_numbers": original_invoice_numbers,
             "shipment_delivery_qty": round(shipment_delivery_qty, 2),
             "stock_at_wh": round(stock_at_wh, 2),
             "customer_forecast": round(customer_forecast, 2),
@@ -601,6 +645,7 @@ else:
         vertical_rows.append({
             "Week No": source_row.get("week_no"),
             "Week Start From": format_date_ddmmyyyy(source_row.get("plan_date")),
+            "Original Invoice Number": source_row.get("original_invoice_numbers") or "",
             "Shipment Delivery to Warehouse": source_row.get("shipment_delivery_qty"),
             "Stock at WH": source_row.get("stock_at_wh"),
             "Customer Forecast": source_row.get("customer_forecast"),

@@ -323,15 +323,6 @@ def _dash_float(v):
     except Exception:
         return 0.0
 
-# If no products or warehouses exist after access filtering, show zero dashboard instead of exposing all data.
-product_filter_clause, product_filter_params = _dash_in_clause("b.product_id", selected_product_ids)
-warehouse_filter_clause, warehouse_filter_params = _dash_in_clause("s.warehouse_id", selected_warehouse_ids)
-shipment_date_clause, shipment_date_params = _dash_date_clause("s.shipment_date")
-
-delivery_product_clause, delivery_product_params = _dash_in_clause("b.product_id", selected_product_ids)
-delivery_warehouse_clause, delivery_warehouse_params = _dash_in_clause("s.warehouse_id", selected_warehouse_ids)
-delivery_date_clause, delivery_date_params = _dash_date_clause("d.delivery_date")
-
 # ---------------------------------------------------------------------------
 # Main Dashboard KPIs filtered by selected products, warehouses and period.
 # ---------------------------------------------------------------------------
@@ -519,7 +510,6 @@ try:
             dash_coverage_kpi_card("PRODUCT", product_value, "#1A5E99")
         with dk4:
             dash_coverage_kpi_card("SHIPMENT TIME", shipment_time_value, "#1A5E99")
-
         dk5, dk6, dk7, dk8 = st.columns(4)
         with dk5:
             dash_coverage_kpi_card("STOCK AT WH", f"{agg_stock_at_wh:,.0f}", "#1A5E99")
