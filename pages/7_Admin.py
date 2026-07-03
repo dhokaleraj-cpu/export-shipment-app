@@ -53,6 +53,17 @@ def _role_default_view(page, role):
     return False
 
 
+def _role_default_add(page, role):
+    if role == "super_admin":
+        return True
+    key = page.get("key")
+    if role == "admin":
+        return key not in ["admin"]
+    if role == "user":
+        return key in ["delivery"]
+    return False
+
+
 def _role_default_edit(page, role):
     if role == "super_admin":
         return True
@@ -66,6 +77,7 @@ def _role_default_edit(page, role):
 
 def _ensure_admin_tables():
     statements = [
+        "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_add BOOLEAN DEFAULT TRUE",
         "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_modify BOOLEAN DEFAULT FALSE",
         "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         """CREATE TABLE IF NOT EXISTS user_warehouse_access (
@@ -205,66 +217,69 @@ with admin_tabs[1]:
 
 with admin_tabs[2]:
     require_roles(('super_admin',))
-    st.subheader('Page Wise User Controls - View / Edit / Modify')
-    st.info('Set View, Edit and Modify permission separately. Super Admin always has all access.')
+    st.subheader('Page Wise User Controls - Add / View / Edit')
+    st.info('Set Add, View and Edit permission separately. Super Admin always has all access.')
     ensure_page_access_table()
     users_for_access = _safe_rows('SELECT username, role, is_active FROM users ORDER BY username')
     if users_for_access:
         user_labels = [f"{u['username']} | {u['role']}" for u in users_for_access]
         selected_user_label = st.selectbox('Select User for Page Access', user_labels, key='page_access_user_select')
         selected_username = selected_user_label.split(' | ')[0]
-        saved_access_preview = _safe_rows('SELECT page_key, can_view, can_edit, can_modify FROM user_page_access WHERE username=? ORDER BY page_key', (selected_username,))
+        saved_access_preview = _safe_rows('SELECT page_key, can_view, can_add, can_edit, can_modify FROM user_page_access WHERE username=? ORDER BY page_key', (selected_username,))
         if saved_access_preview:
-            st.markdown('<div class="admin-saved-data-card"><b>Saved controls currently linked to this user:</b> ' + ', '.join([f"{r.get('page_key')}: V={r.get('can_view')} E={r.get('can_edit')} M={r.get('can_modify')}" for r in saved_access_preview]) + '</div>', unsafe_allow_html=True)
+            st.markdown('<div class="admin-saved-data-card"><b>Saved controls currently linked to this user:</b> ' + ', '.join([f"{r.get('page_key')}: A={r.get('can_add')} V={r.get('can_view')} E={r.get('can_edit')}" for r in saved_access_preview]) + '</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="admin-saved-data-card"><b>Saved controls currently linked to this user:</b> No custom page controls saved. Role defaults are active.</div>', unsafe_allow_html=True)
         selected_user_row = next((u for u in users_for_access if u['username'] == selected_username), None)
         existing_perms = get_user_page_permissions(selected_username)
         is_super_selected = bool(selected_user_row and selected_user_row.get('role') == 'super_admin')
+        selected_add_values = {}
         selected_view_values = {}
         selected_edit_values = {}
-        selected_modify_values = {}
         header_cols = st.columns([2.4, 1, 1, 1])
         with header_cols[0]: st.markdown('**Page / Module**')
-        with header_cols[1]: st.markdown('**View**')
-        with header_cols[2]: st.markdown('**Edit**')
-        with header_cols[3]: st.markdown('**Modify**')
+        with header_cols[1]: st.markdown('**Add**')
+        with header_cols[2]: st.markdown('**View**')
+        with header_cols[3]: st.markdown('**Edit**')
         for page in APP_PAGE_DEFINITIONS:
             existing = existing_perms.get(page['key'], {})
             if is_super_selected:
-                default_view = default_edit = default_modify = True
+                default_add = default_view = default_edit = True
             elif isinstance(existing, dict) and page['key'] in existing_perms:
                 default_view = bool(existing.get('can_view', existing.get('can_access', False)))
-                default_edit = bool(existing.get('can_edit', False))
-                default_modify = bool(existing.get('can_modify', default_edit))
+                default_add = bool(existing.get('can_add', existing.get('can_edit', False))) and default_view
+                default_edit = bool(existing.get('can_edit', existing.get('can_modify', False))) and default_view
             else:
                 default_view = _role_default_view(page, selected_user_row.get('role')) if selected_user_row else False
+                default_add = _role_default_add(page, selected_user_row.get('role')) if selected_user_row else False
                 default_edit = _role_default_edit(page, selected_user_row.get('role')) if selected_user_row else False
-                default_modify = default_edit
             row_cols = st.columns([2.4, 1, 1, 1])
             with row_cols[0]: st.markdown(f"**{page['label']}**")
-            with row_cols[1]: selected_view_values[page['key']] = st.checkbox('View', value=bool(default_view), key=f"view_{selected_username}_{page['key']}", disabled=is_super_selected, label_visibility='collapsed')
-            with row_cols[2]: selected_edit_values[page['key']] = st.checkbox('Edit', value=bool(default_edit), key=f"edit_{selected_username}_{page['key']}", disabled=is_super_selected, label_visibility='collapsed')
-            with row_cols[3]: selected_modify_values[page['key']] = st.checkbox('Modify', value=bool(default_modify), key=f"modify_{selected_username}_{page['key']}", disabled=is_super_selected, label_visibility='collapsed')
+            with row_cols[1]: selected_add_values[page['key']] = st.checkbox('Add', value=bool(default_add), key=f"add_{selected_username}_{page['key']}", disabled=is_super_selected, label_visibility='collapsed')
+            with row_cols[2]: selected_view_values[page['key']] = st.checkbox('View', value=bool(default_view), key=f"view_{selected_username}_{page['key']}", disabled=is_super_selected, label_visibility='collapsed')
+            with row_cols[3]: selected_edit_values[page['key']] = st.checkbox('Edit', value=bool(default_edit), key=f"edit_{selected_username}_{page['key']}", disabled=is_super_selected, label_visibility='collapsed')
         csave, creset = st.columns([1, 1])
         with csave:
-            if st.button('Save View / Edit / Modify Controls', type='primary', key='save_page_controls'):
+            if st.button('Save Add / View / Edit Controls', type='primary', key='save_page_controls'):
                 ok_all = True
                 for page in APP_PAGE_DEFINITIONS:
                     can_view = bool(selected_view_values.get(page['key'], False))
+                    can_add = bool(selected_add_values.get(page['key'], False)) and can_view
                     can_edit = bool(selected_edit_values.get(page['key'], False)) and can_view
-                    can_modify = bool(selected_modify_values.get(page['key'], False)) and can_view
+                    # legacy can_modify is kept in DB and mirrors new Edit for old code safety.
+                    can_modify = can_edit
                     ok_all = _safe_exec("""
-                        INSERT INTO user_page_access (username, page_key, can_access, can_view, can_edit, can_modify)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT INTO user_page_access (username, page_key, can_access, can_view, can_add, can_edit, can_modify)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT (username, page_key)
                         DO UPDATE SET
                             can_access=EXCLUDED.can_access,
                             can_view=EXCLUDED.can_view,
+                            can_add=EXCLUDED.can_add,
                             can_edit=EXCLUDED.can_edit,
                             can_modify=EXCLUDED.can_modify,
                             updated_at=CURRENT_TIMESTAMP
-                    """, (selected_username, page['key'], can_view, can_view, can_edit, can_modify)) and ok_all
+                    """, (selected_username, page['key'], can_view, can_view, can_add, can_edit, can_modify)) and ok_all
                 if ok_all:
                     _admin_safe_clear_cache()
                     set_success_message('Page controls saved successfully.')
@@ -275,7 +290,7 @@ with admin_tabs[2]:
                     _admin_safe_clear_cache()
                     set_success_message('Page controls reset to role defaults.')
                     st.rerun()
-        access_rows = _safe_rows('SELECT username, page_key, can_view, can_edit, can_modify, updated_at FROM user_page_access ORDER BY username, page_key')
+        access_rows = _safe_rows('SELECT username, page_key, can_add, can_view, can_edit, updated_at FROM user_page_access ORDER BY username, page_key')
         if access_rows:
             st.markdown('### Saved Page Access Records')
             st.dataframe(pd.DataFrame(access_rows), use_container_width=True, hide_index=True)

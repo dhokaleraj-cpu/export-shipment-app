@@ -1509,8 +1509,13 @@ APP_PAGE_DEFINITIONS = [
 def ensure_page_access_table():
     """Create/upgrade page-wise permissions.
 
-    can_view controls whether a module is visible/openable.
-    can_edit is stored for page-wise edit control and can be used by pages to disable save/update/delete actions.
+    Rights:
+    - can_view: user can open/view the page.
+    - can_add: user can add/save new records on the page.
+    - can_edit: user can edit/modify existing records on the page.
+    Legacy:
+    - can_access is retained for compatibility.
+    - can_modify is migrated into can_edit.
     """
     try:
         execute_query("""
@@ -1520,7 +1525,9 @@ def ensure_page_access_table():
                 page_key TEXT NOT NULL,
                 can_access BOOLEAN DEFAULT TRUE,
                 can_view BOOLEAN DEFAULT TRUE,
+                can_add BOOLEAN DEFAULT TRUE,
                 can_edit BOOLEAN DEFAULT TRUE,
+                can_modify BOOLEAN DEFAULT FALSE,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(username, page_key)
             )
@@ -1529,8 +1536,13 @@ def ensure_page_access_table():
         pass
     for sql in [
         "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_view BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_add BOOLEAN DEFAULT TRUE",
         "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_edit BOOLEAN DEFAULT TRUE",
-        "UPDATE user_page_access SET can_view=COALESCE(can_view, can_access, TRUE), can_edit=COALESCE(can_edit, can_access, TRUE)",
+        "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_modify BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "UPDATE user_page_access SET can_view=COALESCE(can_view, can_access, TRUE)",
+        "UPDATE user_page_access SET can_add=COALESCE(can_add, can_edit, can_modify, can_access, TRUE)",
+        "UPDATE user_page_access SET can_edit=COALESCE(can_edit, can_modify, can_access, TRUE)",
     ]:
         try:
             execute_query(sql)
@@ -1560,15 +1572,23 @@ def get_user_page_permissions(username):
         return st.session_state[cache_key]
     try:
         ensure_page_access_table()
-        rows = fetch_all('SELECT page_key, can_view, can_edit, can_access FROM user_page_access WHERE username=?', (username,))
+        rows = fetch_all(
+            'SELECT page_key, can_view, can_add, can_edit, can_modify, can_access FROM user_page_access WHERE username=?',
+            (username,)
+        )
         result = {}
         for r in rows:
             can_view = r.get('can_view')
+            can_add = r.get('can_add')
             can_edit = r.get('can_edit')
+            can_modify = r.get('can_modify')
             legacy = r.get('can_access')
             result[str(r.get('page_key'))] = {
                 'can_view': bool(legacy if can_view is None else can_view),
-                'can_edit': bool(legacy if can_edit is None else can_edit),
+                # Preserve old behavior: previous Edit/Modify controls also grant Add unless Add is explicitly stored.
+                'can_add': bool((can_edit if can_add is None else can_add) if legacy is None else (can_add if can_add is not None else legacy)),
+                # New Edit means edit/modify existing records. Legacy Modify is merged into Edit.
+                'can_edit': bool(legacy if can_edit is None and can_modify is None else (can_edit if can_edit is not None else can_modify)),
             }
         st.session_state[cache_key] = result
         return result
@@ -1579,6 +1599,14 @@ def get_user_page_permissions(username):
 
 def _role_default_view(page_def, role):
     return role in page_def.get('default_roles', [])
+
+def _role_default_add(page_def, role):
+    # Default Add follows prior edit/save behavior.
+    if role == 'super_admin':
+        return True
+    if role == 'admin':
+        return page_def['key'] != 'admin'
+    return False
 
 def _role_default_edit(page_def, role):
     # User role can view assigned operational pages, but edit permissions default to admin/super_admin.
@@ -1604,6 +1632,22 @@ def can_user_access_page(page_def, user=None):
         return bool(item)
     return _role_default_view(page_def, role)
 
+def can_user_add_page(page_def, user=None):
+    if not page_def:
+        return True
+    user = user or st.session_state.get('user', {})
+    role = user.get('role', '')
+    username = user.get('username', '')
+    if role == 'super_admin':
+        return True
+    perms = get_user_page_permissions(username)
+    if page_def['key'] in perms:
+        item = perms[page_def['key']]
+        if isinstance(item, dict):
+            return bool(item.get('can_add', False)) and bool(item.get('can_view', False))
+        return bool(item)
+    return _role_default_add(page_def, role)
+
 def can_user_edit_page(page_def, user=None):
     if not page_def:
         return True
@@ -1626,6 +1670,13 @@ def current_user_can_edit(page_key=None):
     else:
         page_def = get_page_definition_by_target(detect_current_page_target())
     return can_user_edit_page(page_def)
+
+def current_user_can_add(page_key=None):
+    if page_key:
+        page_def = get_page_definition_by_key(page_key)
+    else:
+        page_def = get_page_definition_by_target(detect_current_page_target())
+    return can_user_add_page(page_def)
 
 def get_allowed_nav_items(user=None):
     user = user or st.session_state.get('user', {})
@@ -3084,8 +3135,18 @@ def require_page_view(page_key):
         st.error("You do not have View permission for this module. Contact Super Admin.")
         st.stop()
 
+def require_page_add(page_key):
+    """Allow adding/saving new records based on Page Controls Add rights."""
+    page_def = get_page_definition_by_key(page_key)
+    if page_def and not can_user_access_page(page_def):
+        st.error("You do not have View permission for this module. Contact Super Admin.")
+        st.stop()
+    if page_def and not can_user_add_page(page_def):
+        st.error("You have View permission but not Add permission for this module. Contact Super Admin.")
+        st.stop()
+
 def require_page_edit(page_key):
-    """Allow data entry/edit based on Page Controls Edit rights."""
+    """Allow editing/modifying existing records based on Page Controls Edit rights."""
     page_def = get_page_definition_by_key(page_key)
     if page_def and not can_user_access_page(page_def):
         st.error("You do not have View permission for this module. Contact Super Admin.")
@@ -3095,11 +3156,10 @@ def require_page_edit(page_key):
         st.stop()
 
 def show_edit_permission_status(page_key):
-    """Small helper to show whether current user can edit the module."""
-    if current_user_can_edit(page_key):
-        st.caption("Edit permission: Enabled for this user.")
-    else:
-        st.caption("Edit permission: View only.")
+    """Small helper to show current user's Add/Edit status."""
+    add_status = "Add: Enabled" if current_user_can_add(page_key) else "Add: Disabled"
+    edit_status = "Edit: Enabled" if current_user_can_edit(page_key) else "Edit: Disabled"
+    st.caption(f"{add_status} | {edit_status}")
 
 
 def searchable_selectbox(label, options, key, default_index=0, help_text=None):
@@ -4531,3 +4591,5 @@ def render_payment_subnav(active_key="payment"):
         ("payment_edit", "Edit Payment", "pages/19_Edit_Payment.py"),
     ])
 
+# Export all helpers, including legacy underscore helpers used by pages.
+__all__ = [name for name in globals() if not name.startswith('__')]

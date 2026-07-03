@@ -8,6 +8,10 @@ show_edit_permission_status('payment')
 show_header('Payment Entry')
 access_notice()
 render_payment_subnav('payment')
+if current_user_can_add('payment'):
+    st.caption('Payment Add permission: Enabled for this user.')
+else:
+    st.caption('Payment Add permission: Disabled. User can view pending invoices but cannot save new payment entries.')
 payment_product_ids = current_user_allowed_product_ids()
 payment_warehouse_ids = current_user_allowed_warehouse_ids()
 payment_access_clauses = []
@@ -106,11 +110,16 @@ else:
         payment_reference = st.text_input('Payment Reference', key='payment_reference')
         attachment = st.file_uploader('Attach Payment File', key='auto_file_uploader_3')
         remarks = st.text_area('Remarks', key='auto_textarea_2')
-    if st.button('Save Payment', type='primary', key='save_payment'):
+    if st.button('Save Payment', type='primary', key='save_payment', disabled=not current_user_can_add('payment')):
+        if not current_user_can_add('payment'):
+            st.error('You do not have Add permission for Payment Entry. Contact Super Admin.')
+            st.stop()
         path = save_upload(attachment, f"payment_{selected_delivery['delivery_invoice_no']}")
         execute_query('\n                    INSERT INTO payments (delivery_id, payment_received_date, payment_amount, payment_reference, attachment_path, remarks)\n                    VALUES (?, ?, ?, ?, ?, ?)\n                ', (selected_delivery['id'], str(payment_received_date), payment_amount, payment_reference, path, remarks))
         notify_event('payment', 'Payment Received', f"Delivery Invoice: {selected_delivery['delivery_invoice_no']}\nCustomer: {selected_delivery['customer_name']}\nAmount Received: {payment_amount}\nReference: {payment_reference}")
-        st.success('Payment saved successfully. Email notification attempted if enabled.')
+        set_success_message('Payment saved successfully. Email notification attempted if enabled.')
+        clear_cache_after_write()
+        st.rerun()
 st.divider()
 st.subheader('Last Payment Entries')
 payment_action_rows = fetch_all('\n            SELECT p.id, p.payment_received_date, d.delivery_invoice_no, s.invoice_no AS original_invoice_no,\n                   c.customer_name, p.payment_amount, p.payment_reference, p.remarks\n            FROM payments p\n            JOIN customer_deliveries d ON p.delivery_id = d.id\n            JOIN shipments s ON d.shipment_id = s.id\n            JOIN customers c ON d.customer_id = c.id\n            ORDER BY p.id DESC\n            LIMIT 50\n        ')
