@@ -189,55 +189,9 @@ else:
         clear_cache_after_write()
         st.rerun()
 
-# ---------------------------------------------------------------------------
-# Last payment entries: visible by View rights. Modify/Delete restricted by Edit.
-# ---------------------------------------------------------------------------
+# Payment history table removed from Payment Entry for faster loading.
+# Use Payment Due and Edit Payment subpages for review/edit work.
 st.divider()
-st.subheader('Last Payment Entries')
-payment_action_rows = fetch_all("""
-    SELECT
-        p.id,
-        p.payment_received_date,
-        d.delivery_invoice_no,
-        s.invoice_no AS original_invoice_no,
-        s.shipment_no,
-        w.warehouse_name,
-        b.product_id,
-        c.customer_name,
-        p.payment_amount,
-        p.payment_reference,
-        p.remarks
-    FROM payments p
-    JOIN customer_deliveries d ON p.delivery_id = d.id
-    JOIN shipments s ON d.shipment_id = s.id
-    JOIN shipment_boxes b ON d.box_id = b.id
-    LEFT JOIN warehouses w ON s.warehouse_id = w.id
-    JOIN customers c ON d.customer_id = c.id
-    ORDER BY p.id DESC
-    LIMIT 50
-""")
-payment_action_rows = filter_rows_by_user_access(payment_action_rows)
-if payment_action_rows:
-    show_filtered_df(payment_action_rows, 'last_payment_entries', total=True)
-else:
-    st.info('No payment records found as per your access.')
-
-if current_user_can_edit('payment'):
-    selected_payment_action, _ = transaction_selector(payment_action_rows, 'payment_transaction_selector', 'payment_reference')
-    pay_action_col1, pay_action_col2 = st.columns(2)
-    with pay_action_col1:
-        if st.button('Reopen Selected Payment for Edit', key='reopen_selected_payment'):
-            if selected_payment_action:
-                st.session_state.edit_payment_id = selected_payment_action['id']
-                reopen_record_message('Payment', selected_payment_action['id'])
-            else:
-                st.warning('Select a payment first.')
-    with pay_action_col2:
-        delete_password_pay = st.text_input('Password to Delete Selected Payment', type='password', key='delete_selected_payment_password')
-        if st.button('Delete Selected Payment', key='delete_selected_payment'):
-            if not selected_payment_action:
-                st.warning('Select a payment first.')
-            elif delete_record_with_password('payments', selected_payment_action['id'], delete_password_pay, f"Payment {selected_payment_action.get('payment_reference', '')}"):
-                st.rerun()
+st.info("Payment history was moved out of this entry screen for faster loading. Use Payment Due or Edit Payment subpages.")
 
 render_slogan_footer()
