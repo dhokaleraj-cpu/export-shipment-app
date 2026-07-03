@@ -15,11 +15,46 @@ if can_add_payment:
 else:
     st.caption('Payment Add permission: Disabled. User can view pending invoices but cannot save new payment entries.')
 
+
+# Fast pending-payment lookup indexes. Non-destructive and safe to run repeatedly.
+for _idx_sql in [
+    "CREATE INDEX IF NOT EXISTS idx_payments_delivery_id ON payments(delivery_id)",
+    "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_invoice_no ON customer_deliveries(delivery_invoice_no)",
+    "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_box_id ON customer_deliveries(box_id)",
+    "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_shipment_id ON customer_deliveries(shipment_id)",
+    "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_due_date ON customer_deliveries(payment_due_date)",
+    "CREATE INDEX IF NOT EXISTS idx_shipment_boxes_product_id ON shipment_boxes(product_id)",
+    "CREATE INDEX IF NOT EXISTS idx_shipments_warehouse_id ON shipments(warehouse_id)",
+    "CREATE INDEX IF NOT EXISTS idx_shipments_invoice_no ON shipments(invoice_no)",
+]:
+    try:
+        execute_query(_idx_sql)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
-# Pending Delivery Invoice query
-# Important: do not rely on Super Admin role. Any user with View can see the
-# form; Save is controlled by Add permission.
+# Fast Pending Delivery Invoice query
 # ---------------------------------------------------------------------------
+# Search is applied inside SQL and only unpaid/pending invoices are returned.
+# Default limit avoids loading all invoices. Paid invoices are excluded by HAVING pending_amount > 0.
+
+st.markdown('<div class="input-section-title">Search Pending Delivery Invoice</div>', unsafe_allow_html=True)
+pending_invoice_search = st.text_input(
+    "Search by Original Invoice / Delivery Invoice / Customer / Shipment",
+    key="payment_pending_invoice_search",
+    placeholder="Type invoice number, delivery invoice, customer or shipment number"
+).strip()
+
+limit_col1, limit_col2 = st.columns([1, 4])
+with limit_col1:
+    pending_limit = st.selectbox(
+        "Max Pending Rows",
+        [50, 100, 200, 500],
+        index=1,
+        key="payment_pending_invoice_limit"
+    )
+
 payment_product_ids = current_user_allowed_product_ids()
 payment_warehouse_ids = current_user_allowed_warehouse_ids()
 payment_access_clauses = []
@@ -32,72 +67,90 @@ if payment_warehouse_ids:
     payment_access_params.extend(payment_warehouse_ids)
 payment_access_sql = "".join(payment_access_clauses)
 
+search_sql = ""
+search_params = []
+if pending_invoice_search:
+    search_sql = """
+        AND (
+            LOWER(COALESCE(base.delivery_invoice_no,'')) LIKE ?
+            OR LOWER(COALESCE(base.original_invoice_no,'')) LIKE ?
+            OR LOWER(COALESCE(base.customer_name,'')) LIKE ?
+            OR LOWER(COALESCE(base.shipment_no,'')) LIKE ?
+            OR LOWER(COALESCE(base.warehouse_name,'')) LIKE ?
+        )
+    """
+    like_value = "%" + pending_invoice_search.lower() + "%"
+    search_params = [like_value, like_value, like_value, like_value, like_value]
+
 deliveries = fetch_all(f"""
+    WITH delivery_base AS (
+        SELECT
+            d.id AS delivery_id,
+            d.delivery_invoice_no,
+            s.invoice_no AS original_invoice_no,
+            s.shipment_no,
+            c.customer_name,
+            b.product_id,
+            s.warehouse_id,
+            w.warehouse_name,
+            d.currency,
+            d.payment_due_date,
+            d.sale_amount
+        FROM customer_deliveries d
+        JOIN customers c ON d.customer_id = c.id
+        JOIN shipments s ON d.shipment_id = s.id
+        JOIN shipment_boxes b ON d.box_id = b.id
+        LEFT JOIN warehouses w ON s.warehouse_id = w.id
+        WHERE COALESCE(d.delivery_invoice_no, '') <> ''
+        {payment_access_sql}
+    ),
+    invoice_totals AS (
+        SELECT
+            MIN(delivery_id) AS id,
+            delivery_invoice_no,
+            MAX(original_invoice_no) AS original_invoice_no,
+            MAX(shipment_no) AS shipment_no,
+            MAX(customer_name) AS customer_name,
+            MAX(product_id) AS product_id,
+            MAX(warehouse_id) AS warehouse_id,
+            MAX(warehouse_name) AS warehouse_name,
+            MAX(currency) AS currency,
+            MAX(payment_due_date) AS payment_due_date,
+            SUM(COALESCE(sale_amount, 0)) AS total_invoice_amount
+        FROM delivery_base
+        GROUP BY delivery_invoice_no
+    ),
+    payment_totals AS (
+        SELECT
+            d.delivery_invoice_no,
+            SUM(COALESCE(p.payment_amount, 0)) AS paid_amount
+        FROM payments p
+        JOIN customer_deliveries d ON p.delivery_id = d.id
+        GROUP BY d.delivery_invoice_no
+    )
     SELECT
-        MIN(d.id) AS id,
-        d.delivery_invoice_no,
-        s.invoice_no AS original_invoice_no,
-        s.shipment_no,
-        c.customer_name,
-        MAX(b.product_id) AS product_id,
-        MAX(s.warehouse_id) AS warehouse_id,
-        MAX(w.warehouse_name) AS warehouse_name,
-        d.currency,
-        MAX(d.payment_due_date) AS payment_due_date,
-        SUM(d.sale_amount) AS total_invoice_amount,
-        COALESCE((
-            SELECT SUM(p.payment_amount)
-            FROM payments p
-            JOIN customer_deliveries d2 ON p.delivery_id = d2.id
-            WHERE d2.delivery_invoice_no = d.delivery_invoice_no
-        ), 0) AS paid_amount,
-        SUM(d.sale_amount) - COALESCE((
-            SELECT SUM(p.payment_amount)
-            FROM payments p
-            JOIN customer_deliveries d2 ON p.delivery_id = d2.id
-            WHERE d2.delivery_invoice_no = d.delivery_invoice_no
-        ), 0) AS pending_amount
-    FROM customer_deliveries d
-    JOIN customers c ON d.customer_id = c.id
-    JOIN shipments s ON d.shipment_id = s.id
-    JOIN shipment_boxes b ON d.box_id = b.id
-    LEFT JOIN warehouses w ON s.warehouse_id = w.id
-    WHERE 1=1
-    {payment_access_sql}
-    GROUP BY d.delivery_invoice_no, s.invoice_no, s.shipment_no, c.customer_name, d.currency
-    HAVING
-        SUM(d.sale_amount) - COALESCE((
-            SELECT SUM(p.payment_amount)
-            FROM payments p
-            JOIN customer_deliveries d2 ON p.delivery_id = d2.id
-            WHERE d2.delivery_invoice_no = d.delivery_invoice_no
-        ), 0) > 0
-    ORDER BY MAX(d.payment_due_date), d.delivery_invoice_no
-""", tuple(payment_access_params))
+        base.id,
+        base.delivery_invoice_no,
+        base.original_invoice_no,
+        base.shipment_no,
+        base.customer_name,
+        base.product_id,
+        base.warehouse_id,
+        base.warehouse_name,
+        base.currency,
+        base.payment_due_date,
+        base.total_invoice_amount,
+        COALESCE(pay.paid_amount, 0) AS paid_amount,
+        base.total_invoice_amount - COALESCE(pay.paid_amount, 0) AS pending_amount
+    FROM invoice_totals base
+    LEFT JOIN payment_totals pay ON base.delivery_invoice_no = pay.delivery_invoice_no
+    WHERE base.total_invoice_amount - COALESCE(pay.paid_amount, 0) > 0
+    {search_sql}
+    ORDER BY base.payment_due_date NULLS LAST, base.delivery_invoice_no
+    LIMIT {int(pending_limit)}
+""", tuple(payment_access_params + search_params))
 
-# A final safety filter. If user has all product/warehouse access, this leaves rows unchanged.
-deliveries = filter_rows_by_user_access(deliveries)
-
-st.markdown('<div class="input-section-title">Search Pending Delivery Invoice</div>', unsafe_allow_html=True)
-pending_invoice_search = st.text_input(
-    "Search by Original Invoice / Delivery Invoice / Customer / Shipment",
-    key="payment_pending_invoice_search",
-    placeholder="Type invoice number, delivery invoice, customer or shipment number"
-).strip().lower()
-
-filtered_deliveries = []
-for d in deliveries or []:
-    search_text = " ".join([
-        str(d.get("original_invoice_no") or ""),
-        str(d.get("delivery_invoice_no") or ""),
-        str(d.get("customer_name") or ""),
-        str(d.get("shipment_no") or ""),
-        str(d.get("warehouse_name") or ""),
-        str(d.get("pending_amount") or ""),
-        str(d.get("currency") or ""),
-    ]).lower()
-    if not pending_invoice_search or pending_invoice_search in search_text:
-        filtered_deliveries.append(d)
+filtered_deliveries = deliveries or []
 
 if not filtered_deliveries:
     st.warning('No pending delivery invoices available for your current product/warehouse access or search text.')
