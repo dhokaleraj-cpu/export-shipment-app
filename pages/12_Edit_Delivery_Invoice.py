@@ -89,24 +89,90 @@ if current_inv_for_print and current_lines_for_print:
     )
 
 # Common invoice/header fields, used by all selected rows and new rows.
+# Use exact saved invoice header values and dynamic Streamlit keys.
+# Fixed keys keep stale values when the user changes Delivery Invoice selection.
 st.divider()
 st.subheader("Common Delivery Invoice Header Fields")
-st.info("After changing pallet rows, use the SAVE buttons at the bottom of this page. PDF print/download will appear after save.")
+st.info("After selecting a Delivery Invoice, these fields are loaded from the original saved delivery record. Use the SAVE buttons at the bottom after editing.")
 st.caption("These common fields will be applied to all selected pallet rows and any new pallet rows added below.")
+
+common_header_source = dict(selected_header or {})
+if current_inv_for_print:
+    # PDF/reprint header query is the most exact saved header source.
+    common_header_source.update(dict(current_inv_for_print))
+
+common_key_suffix = str(selected_delivery_invoice_no or "delivery").replace(" ", "_").replace("/", "_").replace("|", "_").replace("\\", "_")
+
+# If invoice selection changes, remove old common-header widget states so values are fetched from the selected record.
+previous_common_invoice = st.session_state.get("_edit_delivery_previous_invoice_no")
+if previous_common_invoice != selected_delivery_invoice_no:
+    for _k in list(st.session_state.keys()):
+        if str(_k).startswith("edit_common_"):
+            try:
+                del st.session_state[_k]
+            except Exception:
+                pass
+    st.session_state["_edit_delivery_previous_invoice_no"] = selected_delivery_invoice_no
+
+st.markdown(
+    f"""
+    <div class="admin-saved-data-card">
+        <b>Loaded Header From Saved Record:</b>
+        Delivery Invoice: {common_header_source.get('delivery_invoice_no') or '-'} |
+        Delivery Date: {common_header_source.get('delivery_date') or '-'} |
+        Payment Due Date: {common_header_source.get('payment_due_date') or '-'} |
+        Vehicle: {common_header_source.get('vehicle_number') or '-'} |
+        ASN: {common_header_source.get('asn_number') or '-'}
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 common_c1, common_c2, common_c3, common_c4 = st.columns(4)
 with common_c1:
-    common_invoice_no = st.text_input("Delivery Invoice No", selected_header.get("delivery_invoice_no") or "", key="edit_common_delivery_invoice_no")
-    common_delivery_date = st.text_input("Delivery Date YYYY-MM-DD", str(selected_header.get("delivery_date") or ""), key="edit_common_delivery_date")
+    common_invoice_no = st.text_input(
+        "Delivery Invoice No",
+        common_header_source.get("delivery_invoice_no") or "",
+        key=f"edit_common_delivery_invoice_no_{common_key_suffix}"
+    )
+    common_delivery_date = st.text_input(
+        "Delivery Date YYYY-MM-DD",
+        str(common_header_source.get("delivery_date") or ""),
+        key=f"edit_common_delivery_date_{common_key_suffix}"
+    )
 with common_c2:
-    common_due_date = st.text_input("Payment Due Date YYYY-MM-DD", str(selected_header.get("payment_due_date") or ""), key="edit_common_due_date")
-    common_vehicle = st.text_input("Vehicle Number", selected_header.get("vehicle_number") or "", key="edit_common_vehicle")
+    common_due_date = st.text_input(
+        "Payment Due Date YYYY-MM-DD",
+        str(common_header_source.get("payment_due_date") or ""),
+        key=f"edit_common_due_date_{common_key_suffix}"
+    )
+    common_vehicle = st.text_input(
+        "Vehicle Number",
+        common_header_source.get("vehicle_number") or "",
+        key=f"edit_common_vehicle_{common_key_suffix}"
+    )
 with common_c3:
-    common_asn_no = st.text_input("ASN Number", selected_header.get("asn_number") or "", key="edit_common_asn_no")
-    common_asn_date = st.text_input("ASN Date YYYY-MM-DD", str(selected_header.get("asn_date") or ""), key="edit_common_asn_date")
+    common_asn_no = st.text_input(
+        "ASN Number",
+        common_header_source.get("asn_number") or "",
+        key=f"edit_common_asn_no_{common_key_suffix}"
+    )
+    common_asn_date = st.text_input(
+        "ASN Date YYYY-MM-DD",
+        str(common_header_source.get("asn_date") or ""),
+        key=f"edit_common_asn_date_{common_key_suffix}"
+    )
 with common_c4:
-    common_packaging = st.text_input("Packaging Details", selected_header.get("packaging_details") or "", key="edit_common_packaging")
-    common_remarks = st.text_input("Remarks", selected_header.get("packaging_remark") or "", key="edit_common_remarks")
+    common_packaging = st.text_input(
+        "Packaging Details",
+        common_header_source.get("packaging_details") or "",
+        key=f"edit_common_packaging_{common_key_suffix}"
+    )
+    common_remarks = st.text_input(
+        "Remarks",
+        common_header_source.get("packaging_remark") or "",
+        key=f"edit_common_remarks_{common_key_suffix}"
+    )
 
 rows = fetch_delivery_invoice_rows(selected_delivery_invoice_no, selected_product_id=selected_product_id)
 if not rows:
