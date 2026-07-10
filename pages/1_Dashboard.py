@@ -313,6 +313,16 @@ def _dash_in_clause(column_name, values):
 def _dash_date_clause(column_name):
     return f" AND {column_name} IS NOT NULL AND {column_name}::date BETWEEN ?::date AND ?::date ", [str(dashboard_from_date), str(dashboard_to_date)]
 
+# Shared Dashboard SQL filters.
+# These variables are required by the KPI queries below.
+product_filter_clause, product_filter_params = _dash_in_clause("b.product_id", selected_product_ids)
+warehouse_filter_clause, warehouse_filter_params = _dash_in_clause("s.warehouse_id", selected_warehouse_ids)
+shipment_date_clause, shipment_date_params = _dash_date_clause("s.shipment_date")
+
+delivery_product_clause, delivery_product_params = _dash_in_clause("b.product_id", selected_product_ids)
+delivery_warehouse_clause, delivery_warehouse_params = _dash_in_clause("s.warehouse_id", selected_warehouse_ids)
+delivery_date_clause, delivery_date_params = _dash_date_clause("d.delivery_date")
+
 def _dash_fetch_one(query, params=()):
     rows = fetch_all(query, tuple(params))
     return rows[0] if rows else {}
