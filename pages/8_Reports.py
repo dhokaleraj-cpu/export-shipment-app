@@ -241,7 +241,7 @@ elif report == 'Original Invoice Wise Sale Report':
           /*ACCESS_FILTER*/
         GROUP BY s.invoice_no, s.shipment_no, w.warehouse_name, c.customer_name, d.currency
         ORDER BY s.invoice_no
-    """, (invoice_filter, invoice_filter, customer_filter, customer_filter))
+    """, (invoice_filter, invoice_filter, delivery_invoice_filter, delivery_invoice_filter, customer_filter, customer_filter))
 
 elif report == 'Warehouse Wise Sale Report':
     rows = _fetch_report("""
