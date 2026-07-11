@@ -655,6 +655,7 @@ def render_delivery_subnav(active_key="delivery"):
         ("delivery_reprint", "Reprint Invoice", "pages/10_Reprint_Invoice.py"),
         ("delivery_fifo", "FIFO Available Pallets", "pages/11_FIFO_Available_Pallets.py"),
         ("delivery_edit", "Edit Delivery Invoice", "pages/12_Edit_Delivery_Invoice.py"),
+        ("delivery_list", "Delivery Invoice List", "pages/15_Delivery_Invoice_List.py"),
     ]
     allowed_items = []
     for key, label, target in items:
@@ -777,17 +778,14 @@ def fetch_delivery_invoice_rows(delivery_invoice_no, selected_product_id=None):
 
 
 def fetch_available_pallets_for_edit(selected_ship_id=None, selected_product_id=None, include_box_id=None):
-    """Available pallets for adding/changing delivery rows.
+    """Available pallet/box rows for Edit Delivery.
 
-    include_box_id lets the currently linked pallet remain selectable even if balance is zero.
+    User request: allow selection of any available-quantity pallet from the database.
+    selected_ship_id is intentionally ignored so pallets from all shipments can be selected.
+    include_box_id lets the current linked box remain selectable even if balance is zero.
     """
     access_sql, access_params = _delivery_access_filter_sql("b", "s")
     part_sql, part_params = selected_part_sql(selected_product_id, "b")
-    ship_sql = ""
-    ship_params = ()
-    if selected_ship_id:
-        ship_sql = " AND s.id=? "
-        ship_params = (selected_ship_id,)
     include_sql = ""
     include_params = ()
     if include_box_id:
@@ -796,15 +794,25 @@ def fetch_available_pallets_for_edit(selected_ship_id=None, selected_product_id=
 
     return fetch_all(f"""
         SELECT
-            b.*,
+            b.id,
+            b.shipment_id,
+            b.fifo_row_id,
+            b.pallet_no,
+            b.box_no,
+            b.product_id,
+            b.po_number,
+            b.po_date,
+            b.original_qty,
+            b.unit_price,
+            b.currency,
             s.shipment_no,
-            s.invoice_no,
+            s.invoice_no AS original_invoice_no,
             s.shipment_date,
             s.warehouse_id,
             w.warehouse_name,
             p.product_code,
             p.product_name,
-            COALESCE(del.delivered_qty, 0) AS delivered_qty,
+            COALESCE(del.delivered_qty, 0) AS already_delivered_qty,
             b.original_qty - COALESCE(del.delivered_qty, 0) AS balance_qty
         FROM shipment_boxes b
         JOIN shipments s ON b.shipment_id = s.id
@@ -819,11 +827,11 @@ def fetch_available_pallets_for_edit(selected_ship_id=None, selected_product_id=
             b.original_qty - COALESCE(del.delivered_qty, 0) > 0
             {include_sql}
         )
-        {ship_sql}
         {access_sql}
         {part_sql}
-        ORDER BY s.shipment_date ASC, COALESCE(b.fifo_row_id,b.id), b.pallet_no, b.id
-    """, include_params + ship_params + access_params + part_params)
+        ORDER BY s.shipment_date ASC NULLS LAST, COALESCE(b.fifo_row_id,b.id), b.pallet_no, b.id
+        LIMIT 1000
+    """, include_params + access_params + part_params)
 
 
 

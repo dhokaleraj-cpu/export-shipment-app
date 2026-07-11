@@ -61,6 +61,8 @@ def _txt_filter(text):
 def _fetch_report(sql, base_params=(), product_column="b.product_id", warehouse_column="s.warehouse_id"):
     access_sql, access_params = _access_clause(product_column, warehouse_column)
     sql = sql.replace("/*ACCESS_FILTER*/", access_sql)
+    if " limit " not in sql.lower():
+        sql = sql.rstrip().rstrip(";") + f"\n LIMIT {int(row_limit)}"
     return fetch_all(sql, tuple(base_params) + tuple(access_params))
 
 report_options = [
@@ -84,14 +86,24 @@ report_options = [
 report = searchable_selectbox('Select Report', report_options, key='reports_select_report')
 
 st.markdown('<div class="sap-grid-card"><div class="sap-grid-card-title">Report Filters</div>', unsafe_allow_html=True)
-f1, f2, f3 = st.columns(3)
+f1, f2, f3, f4, f5 = st.columns(5)
 with f1:
-    product_filter = _txt_filter(st.text_input('Search Product Code / Name', key='reports_product_filter'))
+    product_filter = _txt_filter(st.text_input('Part Number / Product', key='reports_product_filter'))
 with f2:
-    invoice_filter = _txt_filter(st.text_input('Search Original Invoice Number', key='reports_invoice_filter'))
+    customer_filter = _txt_filter(st.text_input('Customer', key='reports_customer_filter'))
 with f3:
-    customer_filter = _txt_filter(st.text_input('Search Customer / Warehouse', key='reports_customer_filter'))
+    invoice_filter = _txt_filter(st.text_input('Original Invoice Number', key='reports_invoice_filter'))
+with f4:
+    delivery_invoice_filter = _txt_filter(st.text_input('Delivery Invoice Number', key='reports_delivery_invoice_filter'))
+with f5:
+    row_limit = st.selectbox('Rows', [100, 250, 500, 1000, 2000], index=1, key='reports_row_limit')
+generate_report = st.button('Generate Report', type='primary', key='reports_generate_button')
 st.markdown('</div>', unsafe_allow_html=True)
+
+if not generate_report:
+    st.info('Select filters and click Generate Report. Reports are not loaded automatically to keep this page fast.')
+    render_slogan_footer()
+    st.stop()
 
 rows = []
 
@@ -224,6 +236,7 @@ elif report == 'Original Invoice Wise Sale Report':
         LEFT JOIN warehouses w ON s.warehouse_id = w.id
         JOIN customers c ON d.customer_id = c.id
         WHERE (? = '' OR LOWER(s.invoice_no) LIKE LOWER(CONCAT('%', ?, '%')))
+          AND (? = '' OR LOWER(d.delivery_invoice_no) LIKE LOWER(CONCAT('%', ?, '%')))
           AND (? = '' OR LOWER(c.customer_name || ' ' || COALESCE(w.warehouse_name,'')) LIKE LOWER(CONCAT('%', ?, '%')))
           /*ACCESS_FILTER*/
         GROUP BY s.invoice_no, s.shipment_no, w.warehouse_name, c.customer_name, d.currency
@@ -310,7 +323,7 @@ elif report == 'Original Invoice Number Wise Payment Due':
           /*ACCESS_FILTER*/
         GROUP BY s.invoice_no, s.shipment_no, w.warehouse_name, c.customer_name, d.currency
         ORDER BY payment_due_date
-    """, (invoice_filter, invoice_filter, customer_filter, customer_filter, product_filter, product_filter))
+    """, (invoice_filter, invoice_filter, delivery_invoice_filter, delivery_invoice_filter, customer_filter, customer_filter, product_filter, product_filter))
 
 elif report == 'Original Invoice Number Wise Balance Quantity Product Wise':
     rows = _fetch_report("""
@@ -418,13 +431,14 @@ elif report == 'Original Invoice wise payment Balance':
             FROM payments
             GROUP BY delivery_id
         ) pay ON d.id = pay.delivery_id
-        WHERE (? = '' OR LOWER(s.invoice_no || ' ' || d.delivery_invoice_no) LIKE LOWER(CONCAT('%', ?, '%')))
+        WHERE (? = '' OR LOWER(s.invoice_no) LIKE LOWER(CONCAT('%', ?, '%')))
+          AND (? = '' OR LOWER(d.delivery_invoice_no) LIKE LOWER(CONCAT('%', ?, '%')))
           AND (? = '' OR LOWER(c.customer_name || ' ' || COALESCE(w.warehouse_name,'')) LIKE LOWER(CONCAT('%', ?, '%')))
           AND (? = '' OR LOWER(p.product_code || ' ' || p.product_name) LIKE LOWER(CONCAT('%', ?, '%')))
           /*ACCESS_FILTER*/
         GROUP BY s.invoice_no, d.delivery_invoice_no, w.warehouse_name, c.customer_name, pt.term_name, d.currency
         ORDER BY original_invoice_no, payment_due_date
-    """, (invoice_filter, invoice_filter, customer_filter, customer_filter, product_filter, product_filter))
+    """, (invoice_filter, invoice_filter, delivery_invoice_filter, delivery_invoice_filter, customer_filter, customer_filter, product_filter, product_filter))
 
 elif report == 'Delivery Invoice Wise Summary Report':
     rows = _fetch_report("""
@@ -439,13 +453,14 @@ elif report == 'Delivery Invoice Wise Summary Report':
         JOIN shipment_boxes b ON d.box_id = b.id
         JOIN products p ON b.product_id = p.id
         LEFT JOIN warehouses w ON s.warehouse_id = w.id
-        WHERE (? = '' OR LOWER(s.invoice_no || ' ' || d.delivery_invoice_no) LIKE LOWER(CONCAT('%', ?, '%')))
+        WHERE (? = '' OR LOWER(s.invoice_no) LIKE LOWER(CONCAT('%', ?, '%')))
+          AND (? = '' OR LOWER(d.delivery_invoice_no) LIKE LOWER(CONCAT('%', ?, '%')))
           AND (? = '' OR LOWER(c.customer_name || ' ' || COALESCE(w.warehouse_name,'')) LIKE LOWER(CONCAT('%', ?, '%')))
           AND (? = '' OR LOWER(p.product_code || ' ' || p.product_name) LIKE LOWER(CONCAT('%', ?, '%')))
           /*ACCESS_FILTER*/
         GROUP BY d.delivery_invoice_no, c.customer_name, s.invoice_no, s.shipment_no, w.warehouse_name, d.currency
         ORDER BY MIN(d.id) DESC
-    """, (invoice_filter, invoice_filter, customer_filter, customer_filter, product_filter, product_filter))
+    """, (invoice_filter, invoice_filter, delivery_invoice_filter, delivery_invoice_filter, customer_filter, customer_filter, product_filter, product_filter))
 
 elif report == 'Monthly Sales Report - Product and Customer':
     rows = _fetch_report("""

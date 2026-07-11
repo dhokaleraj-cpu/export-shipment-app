@@ -320,7 +320,7 @@ else:
         for p in add_pallet_rows:
             label = (
                 f"BoxID {p.get('id')} | Pallet {p.get('pallet_no')} | Box {p.get('box_no') or '-'} | "
-                f"{p.get('product_code')} | Original Inv {p.get('invoice_no')} | Balance {float(p.get('balance_qty') or 0):,.2f} | Price {p.get('unit_price')} {p.get('currency')}"
+                f"{p.get('product_code')} | Original Inv {p.get('original_invoice_no')} | Balance {float(p.get('balance_qty') or 0):,.2f} | Price {p.get('unit_price')} {p.get('currency')}"
             )
             add_map[label] = p
         selected_add_labels = st.multiselect("Select New Pallets to Add", list(add_map.keys()), key="add_pallets_to_delivery_invoice")
@@ -469,5 +469,47 @@ else:
             set_success_message("Selected new pallet rows added successfully. PDF is ready for print/download.")
             clear_cache_after_write()
             st.rerun()
+
+
+st.divider()
+st.subheader("Delete Delivery Invoice")
+st.warning("Super Admin only. This will delete all delivery rows for the selected Delivery Invoice. Shipment and pallet records will remain available for future delivery.")
+if st.session_state.get("user", {}).get("role") == "super_admin":
+    del_c1, del_c2 = st.columns([2, 1])
+    with del_c1:
+        delete_confirm = st.checkbox(
+            f"I confirm to delete Delivery Invoice {selected_delivery_invoice_no}",
+            key=f"delete_delivery_confirm_{selected_delivery_invoice_no}"
+        )
+    with del_c2:
+        delete_password = st.text_input(
+            "Password",
+            type="password",
+            key=f"delete_delivery_password_{selected_delivery_invoice_no}"
+        )
+    if st.button(
+        "DELETE SELECTED DELIVERY INVOICE",
+        type="secondary",
+        key=f"delete_delivery_invoice_{selected_delivery_invoice_no}",
+        use_container_width=True
+    ):
+        if not delete_confirm:
+            st.error("Please tick confirmation before deleting.")
+        elif not check_delete_password(delete_password):
+            st.error("Wrong password. Delete cancelled.")
+        else:
+            try:
+                execute_query(
+                    "INSERT INTO delete_audit_log (table_name, record_id, deleted_by, details) VALUES (?, ?, ?, ?)",
+                    ("customer_deliveries", 0, st.session_state.user.get("username", ""), f"Deleted Delivery Invoice {selected_delivery_invoice_no}")
+                )
+            except Exception:
+                pass
+            execute_query("DELETE FROM customer_deliveries WHERE delivery_invoice_no=?", (selected_delivery_invoice_no,))
+            set_success_message(f"Delivery Invoice {selected_delivery_invoice_no} deleted successfully.")
+            clear_cache_after_write()
+            st.rerun()
+else:
+    st.info("Delivery Invoice delete is available only for Super Admin.")
 
 render_slogan_footer()

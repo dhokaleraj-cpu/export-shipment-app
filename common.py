@@ -1497,9 +1497,11 @@ APP_PAGE_DEFINITIONS = [
     {"label": "Reprint Invoice", "target": "pages/10_Reprint_Invoice.py", "key": "delivery_reprint", "default_roles": ["admin", "super_admin"]},
     {"label": "FIFO Available Pallets", "target": "pages/11_FIFO_Available_Pallets.py", "key": "delivery_fifo", "default_roles": ["user", "admin", "super_admin"]},
     {"label": "Edit Delivery Invoice", "target": "pages/12_Edit_Delivery_Invoice.py", "key": "delivery_edit", "default_roles": ["admin", "super_admin"]},
+    {"label": "Delivery Invoice List", "target": "pages/15_Delivery_Invoice_List.py", "key": "delivery_list", "default_roles": ["admin", "super_admin"]},
     {"label": "Payment", "target": "pages/5_Payment_Entry.py", "key": "payment", "default_roles": ["admin", "super_admin"]},
     {"label": "Payment Due", "target": "pages/18_Payment_Due.py", "key": "payment_due", "default_roles": ["admin", "super_admin"]},
     {"label": "Edit Payment", "target": "pages/19_Edit_Payment.py", "key": "payment_edit", "default_roles": ["admin", "super_admin"]},
+    {"label": "Payment Received List", "target": "pages/20_Payment_Received_List.py", "key": "payment_list", "default_roles": ["admin", "super_admin"]},
     {"label": "Coverage Plan", "target": "pages/6_Coverage_Plan.py", "key": "coverage", "default_roles": ["user", "admin", "super_admin"]},
     {"label": "Admin", "target": "pages/7_Admin.py", "key": "admin", "default_roles": ["admin", "super_admin"]},
     {"label": "Reports", "target": "pages/8_Reports.py", "key": "reports", "default_roles": ["user", "admin", "super_admin"]},
@@ -1680,7 +1682,7 @@ def current_user_can_add(page_key=None):
 
 def get_allowed_nav_items(user=None):
     user = user or st.session_state.get('user', {})
-    hidden_top_nav_keys = {'delivery_reprint', 'delivery_fifo', 'delivery_edit', 'shipment_last', 'shipment_edit', 'payment_due', 'payment_edit'}
+    hidden_top_nav_keys = {'delivery_reprint', 'delivery_fifo', 'delivery_edit', 'delivery_list', 'shipment_last', 'shipment_edit', 'payment_due', 'payment_edit', 'payment_list'}
     return [
         (p['label'], p['target'])
         for p in APP_PAGE_DEFINITIONS
