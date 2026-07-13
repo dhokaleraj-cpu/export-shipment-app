@@ -16,7 +16,6 @@ from email.message import EmailMessage
 
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 
 import pandas as pd
 
@@ -2013,6 +2012,13 @@ def to_pdf_bytes(df, title):
     return output.getvalue()
 
 def to_image_bytes(df, title):
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as exc:
+        st.warning(f"Image export is unavailable on this server: {exc}")
+        return b""
     fig, ax = plt.subplots(figsize=(12, max(3, len(df) * 0.35 + 1.5)))
     ax.axis("off")
     ax.set_title(title, fontsize=16, fontweight="bold", pad=12)
