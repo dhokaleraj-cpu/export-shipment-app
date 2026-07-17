@@ -293,7 +293,7 @@ with admin_tabs[2]:
         access_rows = _safe_rows('SELECT username, page_key, can_add, can_view, can_edit, updated_at FROM user_page_access ORDER BY username, page_key')
         if access_rows:
             st.markdown('### Saved Page Access Records')
-            st.dataframe(pd.DataFrame(access_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(access_rows), width='stretch', hide_index=True)
     else:
         st.warning('No users found.')
 

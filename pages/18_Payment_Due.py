@@ -12,7 +12,7 @@ if not rows:
     st.info("No pending payment invoices as per product/warehouse access.")
 else:
     df = pd.DataFrame(rows)
-    st.dataframe(style_total_row(df), use_container_width=True, hide_index=True)
+    st.dataframe(style_total_row(df), width='stretch', hide_index=True)
     export_buttons(add_total_row(df), "payment_due_rows")
 
 render_slogan_footer()

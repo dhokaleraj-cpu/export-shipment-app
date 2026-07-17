@@ -92,7 +92,7 @@ else:
         current_ship_to = ship_to_labels[0] if ship_to_labels else ""
         edit_ship_to = st.selectbox("Edit Ship To", ship_to_labels, index=ship_to_labels.index(current_ship_to) if current_ship_to in ship_to_labels else 0, key=f"edit_ship_to_{suffix}")
 
-    if st.button("SAVE - Update Shipment Header & Prepare PDF", type="primary", key=f"save_update_ship_header_{suffix}", use_container_width=True):
+    if st.button("SAVE - Update Shipment Header & Prepare PDF", type="primary", key=f"save_update_ship_header_{suffix}", width='stretch'):
         execute_query("""
             UPDATE shipments
             SET shipment_no=?, invoice_no=?, shipment_date=?, supplier_id=?, warehouse_id=?, customer_id=?, ship_to_master_id=?
@@ -137,7 +137,7 @@ else:
             amount = qty * price
             st.metric("Amount", f"{amount:,.2f} {currency}")
 
-        if st.button("SAVE - Update Pallet / Product Row & Prepare PDF", type="primary", key=f"save_update_pallet_row_{rs}", use_container_width=True):
+        if st.button("SAVE - Update Pallet / Product Row & Prepare PDF", type="primary", key=f"save_update_pallet_row_{rs}", width='stretch'):
             execute_query("""
                 UPDATE shipment_boxes
                 SET fifo_row_id=?, pallet_no=?, box_no=?, po_number=?, po_date=?, original_qty=?, unit_price=?, currency=?, amount=?

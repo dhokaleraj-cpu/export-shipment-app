@@ -664,10 +664,10 @@ else:
     else:
         st.markdown('<div class="sap-grid-card"><div class="sap-grid-card-title">Weekly Calculation Data</div>', unsafe_allow_html=True)
         try:
-            st.dataframe(style_vertical_coverage_grid(vertical_df), use_container_width=True, hide_index=True)
+            st.dataframe(style_vertical_coverage_grid(vertical_df), width='stretch', hide_index=True)
         except Exception as table_error:
             st.warning(f"Coverage table style failed, showing plain table: {table_error}")
-            st.dataframe(vertical_df, use_container_width=True, hide_index=True)
+            st.dataframe(vertical_df, width='stretch', hide_index=True)
         st.markdown("</div>", unsafe_allow_html=True)
         try:
             export_buttons(vertical_df, "coverage_plan_vertical_grid")
@@ -704,10 +704,10 @@ else:
             id_by_label[label] = r["id"]
         input_grid = pd.DataFrame(grid_values)
         try:
-            edited_input_grid = st.data_editor(input_grid, use_container_width=True, key="coverage_forecast_stock_horizontal_grid", num_rows="fixed")
+            edited_input_grid = st.data_editor(input_grid, width='stretch', key="coverage_forecast_stock_horizontal_grid", num_rows="fixed")
         except Exception as editor_error:
             st.warning(f"Forecast / Stock input grid could not load as editor: {editor_error}")
-            st.dataframe(input_grid, use_container_width=True)
+            st.dataframe(input_grid, width='stretch')
             edited_input_grid = input_grid
 
         manual_grid_password = st.text_input(
@@ -758,7 +758,7 @@ else:
         if detail_df.empty:
             st.info("No detailed data available.")
         else:
-            st.dataframe(detail_df, use_container_width=True, hide_index=True)
+            st.dataframe(detail_df, width='stretch', hide_index=True)
 
     st.divider()
     st.markdown('<div class="sap-subtitle">Import Customer Forecast / Stock at WH</div>', unsafe_allow_html=True)
@@ -786,7 +786,7 @@ else:
             if not required_cols.issubset(set(forecast_df.columns)):
                 st.error("Excel must have columns: product_code, plan_date, customer_forecast. Optional column: stock_at_wh")
             else:
-                st.dataframe(forecast_df, use_container_width=True, hide_index=True)
+                st.dataframe(forecast_df, width='stretch', hide_index=True)
                 if st.button("Update Customer Forecast / Stock at WH from Excel", type="primary", key="coverage_import_forecast_btn"):
                     product_lookup = {normalize_product_code_for_import(p.get("product_code")): p for p in products}
                     updated = inserted = skipped = 0

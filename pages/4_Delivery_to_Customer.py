@@ -148,9 +148,11 @@ else:
                     row_po_date_default = date.today()
                 edited_po_date = st.date_input('PO Date', value=row_po_date_default, key=f"delivery_row_po_date_{row['id']}_{i}", label_visibility='collapsed')
             with dc4:
-                qty = st.number_input('Qty', min_value=0.0, max_value=float(row['balance_qty']), value=0.0, step=1.0, key=f"delivery_qty_{row['id']}_{i}", label_visibility='collapsed')
+                qty_key = f"delivery_qty_{row['id']}"
+                qty = st.number_input('Qty', min_value=0.0, max_value=float(row['balance_qty']), value=float(st.session_state.get(qty_key, 0.0) or 0.0), step=1.0, key=qty_key, label_visibility='collapsed')
             with dc5:
-                price = st.number_input('Price', min_value=0.0, value=float(row['unit_price'] or 0), step=1.0, key=f"delivery_price_{row['id']}_{i}", label_visibility='collapsed')
+                price_key = f"delivery_price_{row['id']}"
+                price = st.number_input('Price', min_value=0.0, value=float(st.session_state.get(price_key, row['unit_price'] or 0) or 0), step=1.0, key=price_key, label_visibility='collapsed')
             with dc6:
                 amount = qty * price
                 st.write(f"{amount:,.2f} {row['currency']}")
@@ -159,7 +161,7 @@ else:
             if qty > 0:
                 total_qty += qty
                 total_amount += amount
-                delivery_inputs.append((row, qty, price, amount))
+                delivery_inputs.append((row, qty_key, price_key))
         st.markdown(f'<div class="total-box">Total Delivery Qty: {total_qty} &nbsp;&nbsp; | &nbsp;&nbsp; Total Amount: {total_amount:,.2f}</div>', unsafe_allow_html=True)
         st.caption('Pending pallet list moved to separate page for faster Delivery Entry loading.')
         if st.button('Save Delivery & Print', type='primary', key='save_delivery_fifo'):
@@ -170,7 +172,28 @@ else:
             else:
                 path = save_upload(attachment, f'delivery_{delivery_invoice_no}')
                 first_print = None
-                for row, qty, price, amount in delivery_inputs:
+                save_error = False
+                for row, qty_key, price_key in delivery_inputs:
+                    qty = float(st.session_state.get(qty_key, 0) or 0)
+                    price = float(st.session_state.get(price_key, row.get('unit_price') or 0) or 0)
+                    amount = qty * price
+                    current_balance_rows = fetch_all('''
+                        SELECT b.original_qty - COALESCE(del.delivered_qty, 0) AS balance_qty
+                        FROM shipment_boxes b
+                        LEFT JOIN (
+                            SELECT box_id, SUM(delivered_qty) AS delivered_qty
+                            FROM customer_deliveries
+                            GROUP BY box_id
+                        ) del ON b.id = del.box_id
+                        WHERE b.id=?
+                    ''', (row['id'],))
+                    current_balance = float((current_balance_rows[0].get('balance_qty') if current_balance_rows else row.get('balance_qty')) or 0)
+                    if qty <= 0:
+                        continue
+                    if qty > current_balance:
+                        st.error(f"Qty mismatch for pallet {row.get('pallet_no')}: entered {qty}, available balance is {current_balance}. Refresh and try again.")
+                        save_error = True
+                        continue
                     execute_query('''
                                 INSERT INTO customer_deliveries
                                 (shipment_id, box_id, customer_id, ship_to_master_id, delivery_date, delivered_qty, delivery_invoice_no,
@@ -200,17 +223,32 @@ else:
                                     'ship_to_vendor_gstin': selected_ship_to.get('vendor_gstin', ''),
                                     'ship_to_vendor_phone': selected_ship_to.get('vendor_phone', ''),
                                     'ship_to_vendor_email': selected_ship_to.get('vendor_email', ''), 'shipment_no': row['shipment_no'], 'original_invoice_no': row['invoice_no'], 'delivery_invoice_no': delivery_invoice_no, 'delivery_date': str(delivery_date), 'vehicle_number': vehicle_number.strip(), 'asn_number': asn_number.strip(), 'asn_date': str(asn_date), 'packaging_details': packaging_details.strip(), 'payment_term': selected_term, 'payment_due_date': str(payment_due_date), 'product_code': row['product_code'], 'product_name': row['product_name'], 'po_number': row.get('po_number', ''), 'po_date': row.get('po_date', ''), 'pallet_no': row['pallet_no'], 'box_no': row['box_no'] or '-', 'qty': total_qty, 'unit_price': price, 'currency': row['currency'], 'sale_amount': total_amount}
+                if save_error:
+                    st.stop()
                 notify_event('delivery', 'Delivery Created', f"Delivery Invoice: {delivery_invoice_no}\\nOriginal Invoice: {selected_ship['invoice_no']}\\nCustomer: {customer}\\nQty: {total_qty}\\nAmount: {total_amount}\\nDue Date: {payment_due_date}")
                 print_data = build_delivery_invoice_print_data(delivery_invoice_no.strip()) or first_print
                 if print_data:
                     st.session_state.last_delivery_print = print_data
+                st.session_state.last_delivery_pdf_invoice_no = delivery_invoice_no.strip()
                 st.session_state['delivery_invoice_auto_source'] = ''
                 st.success('Delivery saved successfully. Email notification attempted if enabled. Print popup opened.')
                 st.rerun()
+if 'last_delivery_pdf_invoice_no' in st.session_state:
+    _pdf_invoice_no = st.session_state.get('last_delivery_pdf_invoice_no')
+    _invoice, _lines = get_saved_delivery_invoice_for_pdf(_pdf_invoice_no)
+    if _invoice and _lines:
+        try:
+            _pdf_bytes = delivery_invoice_pdf_bytes(_invoice, _lines)
+            st.download_button('Print / Download Delivery Invoice PDF', _pdf_bytes, f'delivery_invoice_{_pdf_invoice_no}.pdf', mime='application/pdf', key='download_delivery_invoice_pdf_after_save')
+        except Exception as _pdf_error:
+            st.error(f'Delivery Invoice PDF generation failed: {_pdf_error}')
+    else:
+        st.warning('Delivery was saved, but saved invoice lines were not found for PDF generation.')
+    del st.session_state.last_delivery_pdf_invoice_no
 if 'last_delivery_print' in st.session_state:
     html_doc = delivery_note_html(st.session_state.last_delivery_print)
     print_popup(html_doc)
-    st.download_button('Download Delivery Note PDF Only', html_doc, 'delivery_note.pdf', mime='text/html', key='download_delivery_note_html')
+    st.download_button('Download Delivery Invoice HTML Backup', html_doc, 'delivery_invoice_print.html', mime='text/html', key='download_delivery_note_html')
     del st.session_state.last_delivery_print
 
 render_slogan_footer()

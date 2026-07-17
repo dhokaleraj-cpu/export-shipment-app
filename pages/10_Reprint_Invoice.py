@@ -47,14 +47,25 @@ if saved_delivery_invoices_for_reprint:
 
     invoice_for_reprint, line_items_for_reprint = get_saved_delivery_invoice_for_pdf(selected_reprint_invoice_no)
     if invoice_for_reprint and line_items_for_reprint:
-        pdf_bytes_reprint = delivery_invoice_pdf_bytes(invoice_for_reprint, line_items_for_reprint)
-        st.download_button(
-            "Reprint Delivery Invoice PDF",
-            data=pdf_bytes_reprint,
-            file_name=f"delivery_invoice_reprint_{selected_reprint_invoice_no}.pdf",
-            mime="application/pdf",
-            key="reprint_delivery_invoice_pdf_button"
-        )
+        try:
+            pdf_bytes_reprint = delivery_invoice_pdf_bytes(invoice_for_reprint, line_items_for_reprint)
+            st.download_button(
+                "Reprint Delivery Invoice PDF",
+                data=pdf_bytes_reprint,
+                file_name=f"delivery_invoice_reprint_{selected_reprint_invoice_no}.pdf",
+                mime="application/pdf",
+                key="reprint_delivery_invoice_pdf_button"
+            )
+        except Exception as pdf_error:
+            st.error(f"PDF generation failed: {pdf_error}")
+            backup_html = delivery_note_html(build_delivery_invoice_print_data(selected_reprint_invoice_no) or {})
+            st.download_button(
+                "Download Delivery Invoice HTML Backup",
+                data=backup_html,
+                file_name=f"delivery_invoice_reprint_{selected_reprint_invoice_no}.html",
+                mime="text/html",
+                key="reprint_delivery_invoice_html_backup_button"
+            )
     else:
         st.warning("No saved line items found for selected Delivery Invoice.")
 else:

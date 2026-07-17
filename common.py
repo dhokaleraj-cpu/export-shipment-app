@@ -251,6 +251,29 @@ div[data-testid="stButton"] > button {
     }
 }
 
+
+
+/* ACTIVE EDITABLE FIELD HIGHLIGHT - applies only to entry/edit inputs, not KPI cards/data display */
+div[data-testid="stTextInput"] input:focus,
+div[data-testid="stNumberInput"] input:focus,
+div[data-testid="stDateInput"] input:focus,
+div[data-testid="stTextArea"] textarea:focus,
+div[data-testid="stSelectbox"] div[data-baseweb="select"]:focus-within,
+div[data-testid="stMultiSelect"] div[data-baseweb="select"]:focus-within,
+div[data-testid="stFileUploader"] section:focus-within {
+    border: 2px solid #F59E0B !important;
+    box-shadow: 0 0 0 4px rgba(245,158,11,.22) !important;
+    background: #FFF7ED !important;
+    border-radius: 10px !important;
+}
+div[data-testid="stTextInput"] input:focus,
+div[data-testid="stNumberInput"] input:focus,
+div[data-testid="stDateInput"] input:focus,
+div[data-testid="stTextArea"] textarea:focus {
+    color: #0F172A !important;
+    font-weight: 900 !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -287,6 +310,104 @@ st.markdown("""
         font-size: 15px !important;
     }
     .top-nav-wrap [data-testid="stPageLink"] a,
+
+
+    /* Keep Streamlit password visibility icon visible and not clipped */
+    div[data-testid="stTextInput"] { overflow: visible !important; }
+    div[data-testid="stTextInput"] > div { overflow: visible !important; }
+    div[data-testid="stTextInput"] input[type="password"],
+    div[data-testid="stTextInput"] input[type="text"] {
+        padding-right: 44px !important;
+        box-sizing: border-box !important;
+    }
+    div[data-testid="stTextInput"] button,
+    div[data-testid="stTextInput"] [role="button"] {
+        display: flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        width: 36px !important;
+        min-width: 36px !important;
+        right: 4px !important;
+        z-index: 5 !important;
+    }
+
+
+    /* Login password eye icon fix - hide text "visibility" and show only icon */
+    div[data-testid="stTextInput"] div[data-baseweb="input"] {
+        position: relative !important;
+        overflow: visible !important;
+    }
+    div[data-testid="stTextInput"] div[data-baseweb="input"] input[type="password"],
+    div[data-testid="stTextInput"] div[data-baseweb="input"] input[type="text"] {
+        padding-right: 52px !important;
+    }
+    div[data-testid="stTextInput"] button[aria-label*="password"],
+    div[data-testid="stTextInput"] button[title*="password"],
+    div[data-testid="stTextInput"] [role="button"][aria-label*="password"],
+    div[data-testid="stTextInput"] [data-testid*="InputAdornment"] button {
+        width: 38px !important;
+        min-width: 38px !important;
+        max-width: 38px !important;
+        height: 38px !important;
+        padding: 0 !important;
+        margin-right: 4px !important;
+        overflow: hidden !important;
+        color: transparent !important;
+        font-size: 0 !important;
+        line-height: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    div[data-testid="stTextInput"] button[aria-label*="password"] *,
+    div[data-testid="stTextInput"] button[title*="password"] *,
+    div[data-testid="stTextInput"] [role="button"][aria-label*="password"] *,
+    div[data-testid="stTextInput"] [data-testid*="InputAdornment"] button * {
+        color: transparent !important;
+        font-size: 0 !important;
+        line-height: 0 !important;
+        max-width: 0 !important;
+        overflow: hidden !important;
+    }
+    div[data-testid="stTextInput"] button[aria-label*="password"]::before,
+    div[data-testid="stTextInput"] button[title*="password"]::before,
+    div[data-testid="stTextInput"] [role="button"][aria-label*="password"]::before,
+    div[data-testid="stTextInput"] [data-testid*="InputAdornment"] button::before {
+        content: "👁" !important;
+        color: #003B73 !important;
+        font-size: 18px !important;
+        line-height: 1 !important;
+        display: block !important;
+    }
+
+
+    /* Global password eye icon fix - hide Material text and show eye icon only */
+    div[data-testid="stTextInput"] button[aria-label*="password"],
+    div[data-testid="stTextInput"] button[title*="password"],
+    div[data-testid="stTextInput"] [role="button"][aria-label*="password"],
+    div[data-testid="stTextInput"] [data-testid*="InputAdornment"] button {
+        color: transparent !important;
+        font-size: 0 !important;
+        overflow: hidden !important;
+    }
+    div[data-testid="stTextInput"] button[aria-label*="password"] *,
+    div[data-testid="stTextInput"] button[title*="password"] *,
+    div[data-testid="stTextInput"] [role="button"][aria-label*="password"] *,
+    div[data-testid="stTextInput"] [data-testid*="InputAdornment"] button * {
+        color: transparent !important;
+        font-size: 0 !important;
+        overflow: hidden !important;
+    }
+    div[data-testid="stTextInput"] button[aria-label*="password"]::before,
+    div[data-testid="stTextInput"] button[title*="password"]::before,
+    div[data-testid="stTextInput"] [role="button"][aria-label*="password"]::before,
+    div[data-testid="stTextInput"] [data-testid*="InputAdornment"] button::before {
+        content: "👁" !important;
+        color: #003B73 !important;
+        font-size: 18px !important;
+        line-height: 1 !important;
+    }
+
     div[data-testid="stButton"] > button {
         min-height: 34px !important;
         font-size: 13px !important;
@@ -1837,7 +1958,7 @@ def show_df(rows, key=None, total=False):
     if df.empty:
         st.info("No data available.")
     else:
-        st.dataframe(style_total_row(df), use_container_width=True, hide_index=True)
+        st.dataframe(style_total_row(df), width='stretch', hide_index=True)
     return df
 
 def filter_rows(rows, key):
@@ -1879,13 +2000,13 @@ def show_filtered_df(rows, key, total=False):
     if total:
         df = add_total_row(df)
     if not df.empty:
-        st.dataframe(style_total_row(df), use_container_width=True, hide_index=True)
+        st.dataframe(style_total_row(df), width='stretch', hide_index=True)
     return df
 
 def show_fifo_df(rows, key):
     df = filter_rows(rows, key)
     if not df.empty:
-        st.dataframe(style_fifo_balance(df), use_container_width=True, hide_index=True)
+        st.dataframe(style_fifo_balance(df), width='stretch', hide_index=True)
     return df
 
 def get_notification_settings():
@@ -2667,7 +2788,7 @@ def transaction_selector(rows, key, label_field):
     df = pd.DataFrame(format_date_columns(data))[cols]
     edited = st.data_editor(
         df,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         key=key,
         column_config={"Select": st.column_config.CheckboxColumn("Select", default=False)},
@@ -3992,7 +4113,7 @@ def force_exact_login_page():
         unsafe_allow_html=True
     )
 
-    left, center, right = st.columns([1.0, 0.42, 1.0])
+    left, center, right = st.columns([0.9, 0.72, 0.9])
     with center:
         username = st.text_input("User Name", key="force_login_username")
         password = st.text_input("Password", type="password", key="force_login_password")

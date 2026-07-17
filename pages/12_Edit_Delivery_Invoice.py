@@ -195,7 +195,7 @@ else:
             "currency": r.get("currency"),
             "sale_amount": r.get("sale_amount"),
         })
-    st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(display_rows), width='stretch', hide_index=True)
 
     row_map = {
         f"{r['id']} | Pallet {r.get('pallet_no')} | Box {r.get('box_no') or '-'} | {r.get('product_code')} | Qty {r.get('delivered_qty')}": r
@@ -376,9 +376,9 @@ else:
     st.warning("Please click the correct SAVE button below after editing or adding pallet rows. Updated PDF will be ready after save.")
     save_col1, save_col2 = st.columns(2)
     with save_col1:
-        save_updates = st.button("SAVE - Update Selected Existing Rows", type="primary", key="save_update_existing_delivery_row_grid", use_container_width=True)
+        save_updates = st.button("SAVE - Update Selected Existing Rows", type="primary", key="save_update_existing_delivery_row_grid", width='stretch')
     with save_col2:
-        save_new_rows = st.button("SAVE - Add Selected New Pallet Rows", type="primary", key="save_add_new_delivery_row_grid", use_container_width=True)
+        save_new_rows = st.button("SAVE - Add Selected New Pallet Rows", type="primary", key="save_add_new_delivery_row_grid", width='stretch')
 
     if save_updates:
         if not update_payload:
@@ -491,7 +491,7 @@ if st.session_state.get("user", {}).get("role") == "super_admin":
         "DELETE SELECTED DELIVERY INVOICE",
         type="secondary",
         key=f"delete_delivery_invoice_{selected_delivery_invoice_no}",
-        use_container_width=True
+        width='stretch'
     ):
         if not delete_confirm:
             st.error("Please tick confirmation before deleting.")

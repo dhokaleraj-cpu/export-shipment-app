@@ -143,7 +143,7 @@ else:
     temp_df = pd.DataFrame(st.session_state.shipment_temp_rows)
     if not temp_df.empty:
         display_df = add_total_row(temp_df[['fifo_row_id', 'pallet_no', 'box_no', 'po_number', 'po_date', 'product_code', 'product_name', 'quantity', 'unit_price', 'currency', 'amount']])
-        st.dataframe(style_total_row(display_df), use_container_width=True, hide_index=True)
+        st.dataframe(style_total_row(display_df), width='stretch', hide_index=True)
         total_qty = temp_df['quantity'].sum()
         total_amount = temp_df['amount'].sum()
         st.markdown(f'<div class="total-box">Total Quantity: {total_qty} &nbsp;&nbsp; | &nbsp;&nbsp; Total Amount: {total_amount:,.2f}</div>', unsafe_allow_html=True)

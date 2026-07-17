@@ -39,6 +39,6 @@ else:
 
     st.divider()
     st.subheader("Recent Payment Records")
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
 
 render_slogan_footer()
