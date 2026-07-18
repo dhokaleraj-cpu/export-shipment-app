@@ -1624,7 +1624,6 @@ APP_PAGE_DEFINITIONS = [
     {"label": "Payment Received List", "target": "pages/20_Payment_Received_List.py", "key": "payment_list", "default_roles": ["admin", "super_admin"]},
     {"label": "Coverage Plan", "target": "pages/6_Coverage_Plan.py", "key": "coverage", "default_roles": ["user", "admin", "super_admin"]},
     {"label": "Admin", "target": "pages/7_Admin.py", "key": "admin", "default_roles": ["admin", "super_admin"]},
-    {"label": "Reports", "target": "pages/8_Reports.py", "key": "reports", "default_roles": ["user", "admin", "super_admin"]},
     {"label": "Overdue", "target": "pages/9_Overdue_Notification.py", "key": "overdue", "default_roles": ["admin", "super_admin"]},
 ]
 
@@ -3251,7 +3250,7 @@ def user_can_edit_page(page_key):
         pass
     # default fallback
     if role == "admin":
-        return page_key in ["masters", "shipment", "delivery", "payment", "coverage", "reports", "overdue"]
+        return page_key in ["masters", "shipment", "delivery", "payment", "coverage", "overdue"]
     if role == "user":
         return page_key in ["delivery"]
     return False
@@ -4284,8 +4283,8 @@ def require_page_view(page_key):
             allowed = bool(rows[0].get("can_view", rows[0].get("can_access", False)))
         else:
             defaults = {
-                "admin": {"dashboard", "masters", "shipment", "delivery", "payment", "coverage", "admin", "reports", "overdue"},
-                "user": {"dashboard", "delivery", "coverage", "reports"},
+                "admin": {"dashboard", "masters", "shipment", "delivery", "payment", "coverage", "admin", "overdue"},
+                "user": {"dashboard", "delivery", "coverage"},
             }
             allowed = page_key in defaults.get(role, set())
         if not allowed:
