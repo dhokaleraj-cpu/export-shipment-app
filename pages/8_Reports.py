@@ -1,12 +1,12 @@
 from common import *
 
-REPORTS_VERSION = "SN 26.01"
+REPORTS_VERSION = "SN 26.02"
 
 page_setup()
 require_page_view("reports")
 show_edit_permission_status("reports")
 
-show_header("Reports", "SN 26.01 - Export Shipment Monitoring System")
+show_header("Reports", "SN 26.02 - Export Shipment Monitoring System")
 access_notice()
 
 # ---------------------------------------------------------------------------
@@ -223,13 +223,60 @@ def _report_footer_html(df):
 def _excel_bytes(df, title):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        startrow = 4
-        df.to_excel(writer, index=False, sheet_name="Report", startrow=startrow)
+        startrow = 5
+        df_export = _add_total_footer(df.copy())
+        df_export.to_excel(writer, index=False, sheet_name="Report", startrow=startrow)
         ws = writer.sheets["Report"]
-        ws["A1"] = title
-        ws["A2"] = f"Report Period: {_period_text()}"
-        ws["A3"] = ""
-        # Basic column sizing
+
+        # Report header on Excel sheet.
+        ws["A1"] = ""
+        ws["B1"] = title
+        ws["B2"] = f"Report Period: {_period_text()}"
+        ws["B1"].font = ws["B1"].font.copy(bold=True, size=16)
+        ws["B2"].font = ws["B2"].font.copy(bold=True, size=11)
+
+        try:
+            from openpyxl.drawing.image import Image as XLImage
+            if LOGO_PATH.exists():
+                img = XLImage(str(LOGO_PATH))
+                img.height = 55
+                img.width = 230
+                ws.add_image(img, "A1")
+        except Exception:
+            pass
+
+        # Style table header and footer.
+        try:
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+            header_row = startrow + 1
+            total_row = header_row + len(df_export)
+            blue_fill = PatternFill("solid", fgColor="003B73")
+            total_fill = PatternFill("solid", fgColor="EAF3FC")
+            white_font = Font(color="FFFFFF", bold=True)
+            bold_blue = Font(color="003B73", bold=True)
+            thin = Side(style="thin", color="CBD5E1")
+            for cell in ws[header_row]:
+                cell.fill = blue_fill
+                cell.font = white_font
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                cell.border = Border(top=thin, left=thin, right=thin, bottom=thin)
+            for cell in ws[total_row]:
+                cell.fill = total_fill
+                cell.font = bold_blue
+                cell.border = Border(top=thin, left=thin, right=thin, bottom=thin)
+        except Exception:
+            pass
+
+        # Repeat report header and column header on printed pages.
+        try:
+            ws.print_title_rows = f"1:{startrow+1}"
+            ws.sheet_properties.pageSetUpPr.fitToPage = True
+            ws.page_setup.fitToWidth = 1
+            ws.page_setup.fitToHeight = 0
+            ws.oddFooter.center.text = "Page &[Page] of &[Pages]"
+        except Exception:
+            pass
+
         for column_cells in ws.columns:
             try:
                 length = max(len(str(cell.value or "")) for cell in column_cells)
@@ -238,40 +285,66 @@ def _excel_bytes(df, title):
                 pass
     return output.getvalue()
 
-
 def _pdf_bytes(df, title):
     output = io.BytesIO()
-    doc = SimpleDocTemplate(output, pagesize=landscape(A4), leftMargin=18, rightMargin=18, topMargin=18, bottomMargin=18)
+    doc = SimpleDocTemplate(
+        output,
+        pagesize=landscape(A4),
+        leftMargin=18,
+        rightMargin=18,
+        topMargin=86,
+        bottomMargin=34,
+    )
     styles = getSampleStyleSheet()
+
+    def _draw_page_header_footer(canvas, doc_obj):
+        canvas.saveState()
+        page_width, page_height = landscape(A4)
+
+        # Header box matching report/table width.
+        x = 18
+        y = page_height - 72
+        width = page_width - 36
+        height = 54
+        canvas.setStrokeColor(colors.HexColor("#CBD5E1"))
+        canvas.setFillColor(colors.white)
+        canvas.roundRect(x, y, width, height, 6, stroke=1, fill=1)
+
+        # Logo at left.
+        try:
+            if LOGO_PATH.exists():
+                canvas.drawImage(str(LOGO_PATH), x + 10, y + 8, width=145, height=38, preserveAspectRatio=True, mask='auto')
+        except Exception:
+            canvas.setFillColor(colors.HexColor("#003B73"))
+            canvas.setFont("Helvetica-Bold", 12)
+            canvas.drawString(x + 12, y + 22, "FSI")
+
+        # Title middle.
+        canvas.setFillColor(colors.HexColor("#003B73"))
+        canvas.setFont("Helvetica-Bold", 16)
+        canvas.drawCentredString(page_width / 2, y + 29, str(title)[:95])
+
+        # Period right.
+        canvas.setFillColor(colors.HexColor("#334155"))
+        canvas.setFont("Helvetica-Bold", 8.5)
+        canvas.drawRightString(page_width - 28, y + 33, "Report Period")
+        canvas.drawRightString(page_width - 28, y + 20, _period_text())
+
+        # Footer with page number.
+        canvas.setStrokeColor(colors.HexColor("#CBD5E1"))
+        canvas.line(18, 24, page_width - 18, 24)
+        canvas.setFillColor(colors.HexColor("#003B73"))
+        canvas.setFont("Helvetica-Bold", 8)
+        canvas.drawString(18, 12, "Export Shipment Monitoring System")
+        canvas.drawCentredString(page_width / 2, 12, f"{title}")
+        canvas.drawRightString(page_width - 18, 12, f"Page {doc_obj.page}")
+
+        canvas.restoreState()
+
     story = []
 
-    logo = None
-    try:
-        if LOGO_PATH.exists():
-            logo = Image(str(LOGO_PATH), width=150, height=42)
-    except Exception:
-        logo = Paragraph("FSI", styles["Normal"])
-
-    header_data = [[
-        logo or Paragraph("FSI", styles["Normal"]),
-        Paragraph(f"<b>{title}</b>", styles["Title"]),
-        Paragraph(f"<b>Report Period</b><br/>{_period_text()}", styles["Normal"]),
-    ]]
-    header = Table(header_data, colWidths=[210, 390, 170])
-    header.setStyle(TableStyle([
-        ("BOX", (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1")),
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("ALIGN", (1,0), (1,0), "CENTER"),
-        ("ALIGN", (2,0), (2,0), "RIGHT"),
-        ("BACKGROUND", (0,0), (-1,-1), colors.white),
-    ]))
-    story.append(header)
-    story.append(Spacer(1, 10))
-
     pdf_df = _add_total_footer(df.copy())
-    # Keep PDF width manageable
     data = [list(pdf_df.columns)] + pdf_df.astype(str).values.tolist()
-    col_count = max(len(pdf_df.columns), 1)
     table = Table(data, repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#003B73")),
@@ -285,9 +358,8 @@ def _pdf_bytes(df, title):
         ("FONTNAME", (0,-1), (-1,-1), "Helvetica-Bold"),
     ]))
     story.append(table)
-    doc.build(story)
+    doc.build(story, onFirstPage=_draw_page_header_footer, onLaterPages=_draw_page_header_footer)
     return output.getvalue()
-
 
 def _display_report(rows, title):
     df = _format_df(rows)
@@ -326,7 +398,7 @@ def get_report_rows(report_name):
             SELECT
                 s.shipment_no,
                 s.shipment_date,
-                s.bl_number,
+                s.po_number AS bl_number,
                 w.warehouse_name,
                 c.customer_name,
                 s.invoice_no AS original_invoice_no,
@@ -339,7 +411,7 @@ def get_report_rows(report_name):
             WHERE 1=1
             {fsql}
             /*ACCESS_FILTER*/
-            GROUP BY s.shipment_no, s.shipment_date, s.bl_number, w.warehouse_name, c.customer_name, s.invoice_no
+            GROUP BY s.shipment_no, s.shipment_date, s.po_number AS bl_number, w.warehouse_name, c.customer_name, s.invoice_no
             ORDER BY s.shipment_date DESC, s.shipment_no
         """, params)
 
@@ -591,7 +663,7 @@ r1, r2, r3 = st.columns([2, 1, 1])
 with r1:
     selected_report = searchable_selectbox("Select Report", REPORTS, key="sn26_report_select")
 with r2:
-    from_date = st.date_input("From Date", value=date(date.today().year, 1, 1), key="sn26_from_date")
+    from_date = st.date_input("From Date", value=date(2025, 1, 1), key="sn26_from_date")
 with r3:
     to_date = st.date_input("To Date", value=date.today(), key="sn26_to_date")
 
