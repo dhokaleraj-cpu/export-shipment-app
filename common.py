@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "Archive5-NoReports-v2026.07.18.02"
+APP_VERSION = "SN 26.00"
 
 
 # ---------------------------------------------------------------------------
@@ -1639,6 +1639,7 @@ APP_PAGE_DEFINITIONS = [
     {"label": "Payment Received List", "target": "pages/20_Payment_Received_List.py", "key": "payment_list", "default_roles": ["admin", "super_admin"]},
     {"label": "Coverage Plan", "target": "pages/6_Coverage_Plan.py", "key": "coverage", "default_roles": ["user", "admin", "super_admin"]},
     {"label": "Admin", "target": "pages/7_Admin.py", "key": "admin", "default_roles": ["admin", "super_admin"]},
+    {"label": "Reports", "target": "pages/8_Reports.py", "key": "reports", "default_roles": ["user", "admin", "super_admin"]},
     {"label": "Overdue", "target": "pages/9_Overdue_Notification.py", "key": "overdue", "default_roles": ["admin", "super_admin"]},
 ]
 

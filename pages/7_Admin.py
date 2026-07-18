@@ -47,9 +47,9 @@ def _role_default_view(page, role):
         return True
     key = page.get("key")
     if role == "admin":
-        return key in ["dashboard", "masters", "shipment", "delivery", "payment", "coverage", "admin", "overdue"]
+        return key in ["dashboard", "masters", "shipment", "delivery", "payment", "coverage", "admin", "reports", "overdue"]
     if role == "user":
-        return key in ["dashboard", "delivery", "coverage"]
+        return key in ["dashboard", "delivery", "coverage", "reports"]
     return False
 
 
