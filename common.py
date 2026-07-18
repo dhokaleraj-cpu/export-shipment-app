@@ -21,6 +21,8 @@ import pandas as pd
 
 import streamlit as st
 
+APP_VERSION = "Archive5-NoReports-v2026.07.18.02"
+
 
 # ---------------------------------------------------------------------------
 # Persistent save message helper
@@ -274,6 +276,18 @@ div[data-testid="stTextArea"] textarea:focus {
     color: #0F172A !important;
     font-weight: 900 !important;
 }
+
+
+    /* Global password eye icon fix */
+    div[data-testid="stTextInput"] span[data-testid="stIconMaterial"] {
+        font-size: 0 !important;
+        color: transparent !important;
+    }
+    div[data-testid="stTextInput"] span[data-testid="stIconMaterial"]::before {
+        content: "👁" !important;
+        font-size: 18px !important;
+        color: #003B73 !important;
+    }
 
 </style>
 """, unsafe_allow_html=True)
@@ -1892,7 +1906,7 @@ def top_layout():
             <div class="exact-title">EXPORT SHIPMENT<br>MONITORING SYSTEM</div>
             <div class="exact-user-box">
                 User: {user.get('username', '-')}<br>
-                Role: {user.get('role', '-')}<br>
+                Role: {user.get('role', '-')}<br>App Version: {APP_VERSION}<br>
                 <span id="liveClock">{datetime.now().strftime('%d-%m-%Y %H:%M')}</span>
             </div>
         </div>
@@ -2909,19 +2923,11 @@ def page_setup(title=None, cleanup=False):
     inject_exact_ui_css()
     require_login()
 
-    # Run database migrations/index checks only once after login.
-    # This prevents the login page and every rerun from becoming slow on Streamlit Cloud.
-    if not st.session_state.get("_db_initialized_once"):
-        try:
-            init_db()
-        except Exception as _db_init_error:
-            # Do not block the app because optional migrations/indexes failed.
-            # Real DB read/write errors will still show in the relevant module.
-            try:
-                st.session_state["_db_init_warning"] = str(_db_init_error)
-            except Exception:
-                pass
-        st.session_state["_db_initialized_once"] = True
+    # Startup speed fix:
+    # Do not run init_db() automatically during login or page load.
+    # The cloud database already exists; repeated migrations/index checks make the app slow.
+    # If migrations are ever required, run them separately from a maintenance script.
+    st.session_state["_db_initialized_once"] = True
 
     require_page_access_for_current_page()
     top_layout()
@@ -4131,7 +4137,7 @@ def force_exact_login_page():
     left, center, right = st.columns([0.9, 0.72, 0.9])
     with center:
         username = st.text_input("User Name", key="force_login_username")
-        password = st.text_input("Password", type="password", key="force_login_password")
+        password = st.text_input("Password", type="password", key="force_login_password", placeholder="Enter password")
         if st.button("Login", type="primary", key="force_login_button"):
             user = verify_user(username, password)
             if user:
@@ -4226,6 +4232,33 @@ def inject_login_only_css():
         border: 0 !important;
         font-size: 16px !important;
         font-weight: 900 !important;
+    }
+
+
+    /* Password eye icon fix */
+    div[data-testid="stTextInput"] button,
+    div[data-testid="stTextInput"] [role="button"] {
+        color: transparent !important;
+        font-size: 0 !important;
+    }
+
+    div[data-testid="stTextInput"] button::before,
+    div[data-testid="stTextInput"] [role="button"]::before {
+        content: "👁" !important;
+        color: #003B73 !important;
+        font-size: 18px !important;
+        line-height: 1 !important;
+    }
+
+    span[data-testid="stIconMaterial"] {
+        font-size: 0 !important;
+        color: transparent !important;
+    }
+
+    span[data-testid="stIconMaterial"]::before {
+        content: "👁" !important;
+        font-size: 18px !important;
+        color: #003B73 !important;
     }
 
     @media (max-width: 760px) {

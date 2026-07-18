@@ -121,30 +121,57 @@ def dash_get_product_shipment_time_info(product_id, fallback_days=0):
     return "", int(fallback_days or 0)
 
 def dash_get_week_qty_maps(product_id, shipment_time_days):
+    """Dashboard weekly qty maps using PostgreSQL-safe CTEs.
+
+    Fixes Dashboard Coverage Plan widget:
+    column s.shipment_date must appear in GROUP BY...
+    """
     delivered_week_rows = fetch_all("""
-        SELECT date_trunc('week', d.delivery_date::date)::date AS week_start,
-               COALESCE(SUM(d.delivered_qty),0) AS delivered_qty
-        FROM customer_deliveries d
-        JOIN shipment_boxes b ON d.box_id = b.id
-        WHERE b.product_id=?
-          AND d.delivery_date IS NOT NULL
-        GROUP BY date_trunc('week', d.delivery_date::date)::date
+        WITH delivered AS (
+            SELECT
+                date_trunc('week', d.delivery_date::date)::date AS week_start,
+                d.delivered_qty
+            FROM customer_deliveries d
+            JOIN shipment_boxes b ON d.box_id = b.id
+            WHERE b.product_id=?
+              AND d.delivery_date IS NOT NULL
+        )
+        SELECT week_start, COALESCE(SUM(delivered_qty),0) AS delivered_qty
+        FROM delivered
+        GROUP BY week_start
+        ORDER BY week_start
     """, (product_id,))
+
     delivered_by_week = {}
     for rr in delivered_week_rows:
         wk = parse_db_date(rr.get("week_start"))
         if wk:
             delivered_by_week[wk.isoformat()] = dash_safe_float(rr.get("delivered_qty"))
 
+    effective_days = int(shipment_time_days or 0)
+
     shipment_week_rows = fetch_all("""
-        SELECT date_trunc('week', (s.shipment_date::date + (?::int * INTERVAL '1 day')))::date AS week_start,
-               COALESCE(SUM(b.original_qty),0) AS shipment_delivery_qty
-        FROM shipment_boxes b
-        JOIN shipments s ON b.shipment_id = s.id
-        WHERE b.product_id=?
-          AND s.shipment_date IS NOT NULL
-        GROUP BY date_trunc('week', (s.shipment_date::date + (?::int * INTERVAL '1 day')))::date
-    """, (int(shipment_time_days), product_id, int(shipment_time_days)))
+        WITH shipment_calc AS (
+            SELECT
+                date_trunc(
+                    'week',
+                    (
+                        s.shipment_date::date
+                        + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
+                    )
+                )::date AS week_start,
+                b.original_qty
+            FROM shipment_boxes b
+            JOIN shipments s ON b.shipment_id = s.id
+            WHERE b.product_id=?
+              AND s.shipment_date IS NOT NULL
+        )
+        SELECT week_start, COALESCE(SUM(original_qty),0) AS shipment_delivery_qty
+        FROM shipment_calc
+        GROUP BY week_start
+        ORDER BY week_start
+    """, (effective_days, product_id))
+
     shipment_by_week = {}
     for rr in shipment_week_rows:
         wk = parse_db_date(rr.get("week_start"))
