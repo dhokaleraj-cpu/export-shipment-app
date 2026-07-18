@@ -11,3 +11,5 @@ else:
 
 
 render_slogan_footer()
+
+# ARCHIVE5_LOGIN_SPEED_COVERAGE_FIX = "2026-07-18"

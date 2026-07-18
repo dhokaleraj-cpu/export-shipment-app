@@ -184,56 +184,57 @@ def get_product_shipment_time_info(product_id, fallback_days=0):
 def get_week_qty_maps(product_id, shipment_time_days):
     """Weekly quantity maps for Coverage Plan.
 
-    Shipment Delivery to Warehouse week = shipment_date + shipment days.
-    Shipment days are product-specific from Shipment Entry when available.
+    PostgreSQL-safe version:
+    - Calculates week_start in a CTE/subquery first.
+    - Groups by the calculated column only.
+    - Avoids repeated parameterized expressions in SELECT/GROUP BY, which caused
+      psycopg.errors.GroupingError on Streamlit Cloud.
     """
     delivered_week_rows = fetch_all("""
-        SELECT date_trunc('week', d.delivery_date::date)::date AS week_start,
-               COALESCE(SUM(d.delivered_qty),0) AS delivered_qty
-        FROM customer_deliveries d
-        JOIN shipment_boxes b ON d.box_id = b.id
-        WHERE b.product_id=?
-          AND d.delivery_date IS NOT NULL
-        GROUP BY date_trunc('week', d.delivery_date::date)::date
+        WITH delivered AS (
+            SELECT
+                date_trunc('week', d.delivery_date::date)::date AS week_start,
+                d.delivered_qty
+            FROM customer_deliveries d
+            JOIN shipment_boxes b ON d.box_id = b.id
+            WHERE b.product_id=?
+              AND d.delivery_date IS NOT NULL
+        )
+        SELECT week_start, COALESCE(SUM(delivered_qty),0) AS delivered_qty
+        FROM delivered
+        GROUP BY week_start
+        ORDER BY week_start
     """, (product_id,))
+
     delivered_by_week = {}
     for rr in delivered_week_rows:
         wk = parse_db_date(rr.get("week_start"))
         if wk:
             delivered_by_week[wk.isoformat()] = safe_float(rr.get("delivered_qty"))
 
-    try:
-        shipment_week_rows = fetch_all("""
-            SELECT date_trunc(
-                       'week',
-                       (
-                           s.shipment_date::date
-                           + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
-                       )
-                   )::date AS week_start,
-                   COALESCE(SUM(b.original_qty),0) AS shipment_delivery_qty
+    effective_days = int(shipment_time_days or 0)
+
+    shipment_week_rows = fetch_all("""
+        WITH shipment_calc AS (
+            SELECT
+                date_trunc(
+                    'week',
+                    (
+                        s.shipment_date::date
+                        + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
+                    )
+                )::date AS week_start,
+                b.original_qty
             FROM shipment_boxes b
             JOIN shipments s ON b.shipment_id = s.id
             WHERE b.product_id=?
               AND s.shipment_date IS NOT NULL
-            GROUP BY date_trunc(
-                       'week',
-                       (
-                           s.shipment_date::date
-                           + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
-                       )
-                   )::date
-        """, (int(shipment_time_days or 0), product_id, int(shipment_time_days or 0)))
-    except Exception:
-        shipment_week_rows = fetch_all("""
-            SELECT date_trunc('week', (s.shipment_date::date + (?::int * INTERVAL '1 day')))::date AS week_start,
-                   COALESCE(SUM(b.original_qty),0) AS shipment_delivery_qty
-            FROM shipment_boxes b
-            JOIN shipments s ON b.shipment_id = s.id
-            WHERE b.product_id=?
-              AND s.shipment_date IS NOT NULL
-            GROUP BY date_trunc('week', (s.shipment_date::date + (?::int * INTERVAL '1 day')))::date
-        """, (int(shipment_time_days or 0), product_id, int(shipment_time_days or 0)))
+        )
+        SELECT week_start, COALESCE(SUM(original_qty),0) AS shipment_delivery_qty
+        FROM shipment_calc
+        GROUP BY week_start
+        ORDER BY week_start
+    """, (effective_days, product_id))
 
     shipment_by_week = {}
     for rr in shipment_week_rows:
@@ -241,41 +242,29 @@ def get_week_qty_maps(product_id, shipment_time_days):
         if wk:
             shipment_by_week[wk.isoformat()] = safe_float(rr.get("shipment_delivery_qty"))
 
-    # Original Invoice Numbers falling into the same calculated warehouse-delivery week.
-    try:
-        invoice_week_rows = fetch_all("""
-            SELECT date_trunc(
-                       'week',
-                       (
-                           s.shipment_date::date
-                           + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
-                       )
-                   )::date AS week_start,
-                   STRING_AGG(DISTINCT s.invoice_no, ', ' ORDER BY s.invoice_no) AS original_invoice_numbers
+    invoice_week_rows = fetch_all("""
+        WITH invoice_calc AS (
+            SELECT DISTINCT
+                date_trunc(
+                    'week',
+                    (
+                        s.shipment_date::date
+                        + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
+                    )
+                )::date AS week_start,
+                s.invoice_no
             FROM shipment_boxes b
             JOIN shipments s ON b.shipment_id = s.id
             WHERE b.product_id=?
               AND s.shipment_date IS NOT NULL
               AND COALESCE(s.invoice_no,'') <> ''
-            GROUP BY date_trunc(
-                       'week',
-                       (
-                           s.shipment_date::date
-                           + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
-                       )
-                   )::date
-        """, (int(shipment_time_days or 0), product_id, int(shipment_time_days or 0)))
-    except Exception:
-        invoice_week_rows = fetch_all("""
-            SELECT date_trunc('week', (s.shipment_date::date + (?::int * INTERVAL '1 day')))::date AS week_start,
-                   STRING_AGG(DISTINCT s.invoice_no, ', ' ORDER BY s.invoice_no) AS original_invoice_numbers
-            FROM shipment_boxes b
-            JOIN shipments s ON b.shipment_id = s.id
-            WHERE b.product_id=?
-              AND s.shipment_date IS NOT NULL
-              AND COALESCE(s.invoice_no,'') <> ''
-            GROUP BY date_trunc('week', (s.shipment_date::date + (?::int * INTERVAL '1 day')))::date
-        """, (int(shipment_time_days or 0), product_id, int(shipment_time_days or 0)))
+        )
+        SELECT week_start,
+               STRING_AGG(invoice_no, ', ' ORDER BY invoice_no) AS original_invoice_numbers
+        FROM invoice_calc
+        GROUP BY week_start
+        ORDER BY week_start
+    """, (effective_days, product_id))
 
     original_invoice_by_week = {}
     for rr in invoice_week_rows:
@@ -284,7 +273,6 @@ def get_week_qty_maps(product_id, shipment_time_days):
             original_invoice_by_week[wk.isoformat()] = rr.get("original_invoice_numbers") or ""
 
     return shipment_by_week, delivered_by_week, original_invoice_by_week
-
 
 def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months_inventory, visible_start_week=None, max_rows=None):
     """Coverage Plan calculation.

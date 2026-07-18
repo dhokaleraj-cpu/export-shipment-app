@@ -80,7 +80,8 @@ CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "JPY", "CNY"]
 
 st.set_page_config(page_title="Export Shipment Management", layout="wide", initial_sidebar_state="collapsed")
 
-init_db()
+# init_db is intentionally not run during module import/login screen.
+# It is run once per logged-in session inside page_setup() to keep login fast.
 
 
 st.markdown("""
@@ -2907,6 +2908,21 @@ def footer_with_slogan():
 def page_setup(title=None, cleanup=False):
     inject_exact_ui_css()
     require_login()
+
+    # Run database migrations/index checks only once after login.
+    # This prevents the login page and every rerun from becoming slow on Streamlit Cloud.
+    if not st.session_state.get("_db_initialized_once"):
+        try:
+            init_db()
+        except Exception as _db_init_error:
+            # Do not block the app because optional migrations/indexes failed.
+            # Real DB read/write errors will still show in the relevant module.
+            try:
+                st.session_state["_db_init_warning"] = str(_db_init_error)
+            except Exception:
+                pass
+        st.session_state["_db_initialized_once"] = True
+
     require_page_access_for_current_page()
     top_layout()
     render_success_message()
