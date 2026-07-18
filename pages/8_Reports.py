@@ -1,12 +1,12 @@
 from common import *
 
-REPORTS_VERSION = "SN 26.00"
+REPORTS_VERSION = "SN 26.01"
 
 page_setup()
 require_page_view("reports")
 show_edit_permission_status("reports")
 
-show_header("Reports", "SN 26.00 - Export Shipment Monitoring System")
+show_header("Reports", "SN 26.01 - Export Shipment Monitoring System")
 access_notice()
 
 # ---------------------------------------------------------------------------
@@ -170,18 +170,17 @@ def _report_header_html(title):
     try:
         if LOGO_PATH.exists():
             logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
-            logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:42px;object-fit:contain;">'
+            logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:54px;max-width:280px;object-fit:contain;">'
     except Exception:
         logo_html = ""
 
     return f"""
-    <div style="border:1px solid #CBD5E1;border-radius:12px;padding:10px 14px;margin:10px 0 12px 0;background:white;display:grid;grid-template-columns:1fr 2fr 1fr;align-items:center;gap:12px;">
-        <div>{logo_html}</div>
-        <div style="text-align:center;font-size:22px;font-weight:900;color:#003B73;">{title}</div>
-        <div style="text-align:right;font-size:13px;font-weight:800;color:#334155;">Report Period<br>{_period_text()}<br><span style="font-size:11px;">Version {REPORTS_VERSION}</span></div>
+    <div style="width:100%;box-sizing:border-box;border:1px solid #CBD5E1;border-radius:12px;padding:12px 16px;margin:10px 0 12px 0;background:white;display:grid;grid-template-columns:1.2fr 2.2fr 1.2fr;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(15,23,42,.06);">
+        <div style="text-align:left;">{logo_html}</div>
+        <div style="text-align:center;font-size:24px;font-weight:900;color:#003B73;line-height:1.15;">{title}</div>
+        <div style="text-align:right;font-size:14px;font-weight:900;color:#334155;line-height:1.35;">Report Period<br>{_period_text()}</div>
     </div>
     """
-
 
 def _report_footer_html(df):
     if df.empty:
@@ -202,13 +201,24 @@ def _report_footer_html(df):
                 pallet_count = ""
 
     return f"""
-    <div style="border:1px solid #CBD5E1;border-radius:10px;background:#F8FAFC;padding:10px 14px;margin:12px 0;font-weight:900;color:#003B73;">
-        Total Qty: {_safe_number(qty_total)} &nbsp;&nbsp; | &nbsp;&nbsp;
-        Total Amount: {_safe_number(amount_total)} &nbsp;&nbsp; | &nbsp;&nbsp;
-        Pallet Count: {pallet_count}
+    <div style="width:100%;box-sizing:border-box;border:1px solid #003B73;border-radius:12px;background:#EAF3FC;padding:0;margin:12px 0 14px 0;overflow:hidden;box-shadow:0 2px 8px rgba(15,23,42,.08);">
+        <div style="background:#003B73;color:white;font-size:16px;font-weight:900;padding:8px 12px;text-transform:uppercase;letter-spacing:.3px;">Report Footer Totals</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0;text-align:center;">
+            <div style="padding:12px;border-right:1px solid #BFD7F0;">
+                <div style="font-size:13px;font-weight:900;color:#003B73;text-transform:uppercase;">Total Qty</div>
+                <div style="font-size:20px;font-weight:900;color:#111827;">{_safe_number(qty_total)}</div>
+            </div>
+            <div style="padding:12px;border-right:1px solid #BFD7F0;">
+                <div style="font-size:13px;font-weight:900;color:#003B73;text-transform:uppercase;">Total Amount</div>
+                <div style="font-size:20px;font-weight:900;color:#111827;">{_safe_number(amount_total)}</div>
+            </div>
+            <div style="padding:12px;">
+                <div style="font-size:13px;font-weight:900;color:#003B73;text-transform:uppercase;">Pallet Count</div>
+                <div style="font-size:20px;font-weight:900;color:#111827;">{pallet_count}</div>
+            </div>
+        </div>
     </div>
     """
-
 
 def _excel_bytes(df, title):
     output = io.BytesIO()
@@ -216,9 +226,9 @@ def _excel_bytes(df, title):
         startrow = 4
         df.to_excel(writer, index=False, sheet_name="Report", startrow=startrow)
         ws = writer.sheets["Report"]
-        ws["A1"] = "Four Star Industries Pvt. Ltd."
-        ws["A2"] = title
-        ws["A3"] = f"Report Period: {_period_text()}    Version: {REPORTS_VERSION}"
+        ws["A1"] = title
+        ws["A2"] = f"Report Period: {_period_text()}"
+        ws["A3"] = ""
         # Basic column sizing
         for column_cells in ws.columns:
             try:
@@ -238,16 +248,16 @@ def _pdf_bytes(df, title):
     logo = None
     try:
         if LOGO_PATH.exists():
-            logo = Image(str(LOGO_PATH), width=105, height=34)
+            logo = Image(str(LOGO_PATH), width=150, height=42)
     except Exception:
         logo = Paragraph("FSI", styles["Normal"])
 
     header_data = [[
         logo or Paragraph("FSI", styles["Normal"]),
         Paragraph(f"<b>{title}</b>", styles["Title"]),
-        Paragraph(f"<b>Report Period</b><br/>{_period_text()}<br/>Version {REPORTS_VERSION}", styles["Normal"]),
+        Paragraph(f"<b>Report Period</b><br/>{_period_text()}", styles["Normal"]),
     ]]
-    header = Table(header_data, colWidths=[150, 420, 200])
+    header = Table(header_data, colWidths=[210, 390, 170])
     header.setStyle(TableStyle([
         ("BOX", (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1")),
         ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
@@ -270,7 +280,8 @@ def _pdf_bytes(df, title):
         ("FONTSIZE", (0,0), (-1,-1), 6),
         ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
         ("ALIGN", (0,0), (-1,-1), "CENTER"),
-        ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#F1F5F9")),
+        ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#EAF3FC")),
+        ("TEXTCOLOR", (0,-1), (-1,-1), colors.HexColor("#003B73")),
         ("FONTNAME", (0,-1), (-1,-1), "Helvetica-Bold"),
     ]))
     story.append(table)
@@ -324,7 +335,7 @@ def get_report_rows(report_name):
             JOIN shipment_boxes b ON b.shipment_id = s.id
             JOIN products p ON p.id = b.product_id
             LEFT JOIN warehouses w ON w.id = s.warehouse_id
-            LEFT JOIN customers c ON c.id = COALESCE(s.customer_id, w.customer_id)
+            LEFT JOIN customers c ON c.id = s.customer_id
             WHERE 1=1
             {fsql}
             /*ACCESS_FILTER*/
@@ -347,7 +358,7 @@ def get_report_rows(report_name):
             JOIN shipment_boxes b ON b.shipment_id = s.id
             JOIN products p ON p.id = b.product_id
             LEFT JOIN warehouses w ON w.id = s.warehouse_id
-            LEFT JOIN customers c ON c.id = COALESCE(s.customer_id, w.customer_id)
+            LEFT JOIN customers c ON c.id = s.customer_id
             WHERE 1=1
             {fsql}
             /*ACCESS_FILTER*/
@@ -371,7 +382,7 @@ def get_report_rows(report_name):
             JOIN shipment_boxes b ON b.shipment_id = s.id
             JOIN products p ON p.id = b.product_id
             LEFT JOIN warehouses w ON w.id = s.warehouse_id
-            LEFT JOIN customers c ON c.id = COALESCE(s.customer_id, w.customer_id)
+            LEFT JOIN customers c ON c.id = s.customer_id
             WHERE 1=1
             {fsql}
             /*ACCESS_FILTER*/
@@ -532,7 +543,7 @@ def get_report_rows(report_name):
             JOIN shipment_boxes b ON b.shipment_id = s.id
             JOIN products p ON p.id = b.product_id
             LEFT JOIN warehouses w ON w.id = s.warehouse_id
-            LEFT JOIN customers c ON c.id = COALESCE(s.customer_id, w.customer_id)
+            LEFT JOIN customers c ON c.id = s.customer_id
             WHERE 1=1
             {fsql}
             /*ACCESS_FILTER*/
