@@ -1,12 +1,12 @@
 from common import *
 
-REPORTS_VERSION = "SN 26.02"
+REPORTS_VERSION = "SN 26.03"
 
 page_setup()
 require_page_view("reports")
 show_edit_permission_status("reports")
 
-show_header("Reports", "SN 26.02 - Export Shipment Monitoring System")
+show_header("Reports", "SN 26.03 - Export Shipment Monitoring System")
 access_notice()
 
 # ---------------------------------------------------------------------------
@@ -271,6 +271,7 @@ def _excel_bytes(df, title):
         try:
             ws.print_title_rows = f"1:{startrow+1}"
             ws.sheet_properties.pageSetUpPr.fitToPage = True
+            ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
             ws.page_setup.fitToWidth = 1
             ws.page_setup.fitToHeight = 0
             ws.oddFooter.center.text = "Page &[Page] of &[Pages]"
@@ -345,7 +346,12 @@ def _pdf_bytes(df, title):
 
     pdf_df = _add_total_footer(df.copy())
     data = [list(pdf_df.columns)] + pdf_df.astype(str).values.tolist()
-    table = Table(data, repeatRows=1)
+
+    # Force table to use full available page width, matching the report header.
+    available_width = landscape(A4)[0] - doc.leftMargin - doc.rightMargin
+    col_count = max(len(pdf_df.columns), 1)
+    col_widths = [available_width / col_count] * col_count
+    table = Table(data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#003B73")),
         ("TEXTCOLOR", (0,0), (-1,0), colors.white),
@@ -353,6 +359,9 @@ def _pdf_bytes(df, title):
         ("FONTSIZE", (0,0), (-1,-1), 6),
         ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
         ("ALIGN", (0,0), (-1,-1), "CENTER"),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("LEFTPADDING", (0,0), (-1,-1), 2),
+        ("RIGHTPADDING", (0,0), (-1,-1), 2),
         ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#EAF3FC")),
         ("TEXTCOLOR", (0,-1), (-1,-1), colors.HexColor("#003B73")),
         ("FONTNAME", (0,-1), (-1,-1), "Helvetica-Bold"),
@@ -370,6 +379,7 @@ def _display_report(rows, title):
         return
 
     st.markdown(_report_footer_html(df), unsafe_allow_html=True)
+    st.markdown("<style>/* SN2603 full width report table */ div[data-testid='stDataFrame']{width:100% !important;} div[data-testid='stDataFrame'] > div{width:100% !important;}</style>", unsafe_allow_html=True)
     st.dataframe(_add_total_footer(df), width="stretch", hide_index=True)
 
     c1, c2 = st.columns(2)
@@ -411,7 +421,7 @@ def get_report_rows(report_name):
             WHERE 1=1
             {fsql}
             /*ACCESS_FILTER*/
-            GROUP BY s.shipment_no, s.shipment_date, s.po_number AS bl_number, w.warehouse_name, c.customer_name, s.invoice_no
+            GROUP BY s.shipment_no, s.shipment_date, s.po_number, w.warehouse_name, c.customer_name, s.invoice_no
             ORDER BY s.shipment_date DESC, s.shipment_no
         """, params)
 
