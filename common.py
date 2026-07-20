@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 26.03"
+APP_VERSION = "SN 26.04"
 
 
 # ---------------------------------------------------------------------------
@@ -4771,3 +4771,26 @@ def render_payment_subnav(active_key="payment"):
 
 # Export all helpers, including legacy underscore helpers used by pages.
 __all__ = [name for name in globals() if not name.startswith('__')]
+
+
+def format_rate_price_amount_3decimals(df):
+    """App-wide display helper: rate, price and amount fields as 3 decimals."""
+    try:
+        if df is None or df.empty:
+            return df
+        out = df.copy()
+        decimal_keywords = [
+            "rate", "price", "amount", "sale", "value", "paid", "pending", "balance",
+            "invoice_amount", "paid_amount", "pending_amount", "payment_received_amount",
+            "unit_price", "average_price"
+        ]
+        for col in out.columns:
+            col_l = str(col).lower()
+            if any(k in col_l for k in decimal_keywords):
+                try:
+                    out[col] = pd.to_numeric(out[col], errors="coerce").map(lambda x: "" if pd.isna(x) else f"{float(x):.3f}")
+                except Exception:
+                    pass
+        return out
+    except Exception:
+        return df

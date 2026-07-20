@@ -1,12 +1,12 @@
 from common import *
 
-REPORTS_VERSION = "SN 26.03"
+REPORTS_VERSION = "SN 26.04"
 
 page_setup()
 require_page_view("reports")
 show_edit_permission_status("reports")
 
-show_header("Reports", "SN 26.03 - Export Shipment Monitoring System")
+show_header("Reports", "SN 26.04 - Export Shipment Monitoring System")
 access_notice()
 
 # ---------------------------------------------------------------------------
@@ -17,7 +17,6 @@ REPORTS = [
     "Shipment List",
     "Shipment List with Part Number",
     "Shipment List with Pallet Numbers",
-    "Delivery Invoice List with Original Invoice Number",
     "Delivery Invoice List against Original Invoice Number",
     "Payment Report with Original Invoice Number",
     "Payment Due Invoice List",
@@ -121,7 +120,28 @@ def _run_query(sql, params=None, product_column="b.product_id", warehouse_column
 def _format_df(rows):
     if not rows:
         return pd.DataFrame()
-    return pd.DataFrame(format_date_columns(rows))
+    df = pd.DataFrame(format_date_columns(rows))
+    return _format_rate_price_amount_3decimals(df)
+
+
+def _format_rate_price_amount_3decimals(df):
+    """Format rate, price and amount fields to 3 decimals in report grid/export."""
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    decimal_keywords = [
+        "rate", "price", "amount", "sale", "value", "paid", "pending", "balance",
+        "invoice_amount", "paid_amount", "pending_amount", "payment_received_amount",
+        "unit_price", "average_price"
+    ]
+    for col in out.columns:
+        col_l = str(col).lower()
+        if any(k in col_l for k in decimal_keywords):
+            try:
+                out[col] = pd.to_numeric(out[col], errors="coerce").map(lambda x: "" if pd.isna(x) else f"{float(x):.3f}")
+            except Exception:
+                pass
+    return out
 
 
 def _numeric_sum(series):
@@ -156,7 +176,7 @@ def _add_total_footer(df):
 
 def _safe_number(v):
     try:
-        return f"{float(v):,.2f}"
+        return f"{float(v):,.3f}"
     except Exception:
         return str(v or "")
 
@@ -224,7 +244,7 @@ def _excel_bytes(df, title):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         startrow = 5
-        df_export = _add_total_footer(df.copy())
+        df_export = _format_rate_price_amount_3decimals(_add_total_footer(df.copy()))
         df_export.to_excel(writer, index=False, sheet_name="Report", startrow=startrow)
         ws = writer.sheets["Report"]
 
@@ -344,7 +364,7 @@ def _pdf_bytes(df, title):
 
     story = []
 
-    pdf_df = _add_total_footer(df.copy())
+    pdf_df = _format_rate_price_amount_3decimals(_add_total_footer(df.copy()))
     data = [list(pdf_df.columns)] + pdf_df.astype(str).values.tolist()
 
     # Force table to use full available page width, matching the report header.
@@ -380,7 +400,7 @@ def _display_report(rows, title):
 
     st.markdown(_report_footer_html(df), unsafe_allow_html=True)
     st.markdown("<style>/* SN2603 full width report table */ div[data-testid='stDataFrame']{width:100% !important;} div[data-testid='stDataFrame'] > div{width:100% !important;}</style>", unsafe_allow_html=True)
-    st.dataframe(_add_total_footer(df), width="stretch", hide_index=True)
+    st.dataframe(_format_rate_price_amount_3decimals(_add_total_footer(df)), width="stretch", hide_index=True)
 
     c1, c2 = st.columns(2)
     with c1:
@@ -471,7 +491,7 @@ def get_report_rows(report_name):
             ORDER BY s.shipment_date DESC, s.shipment_no, b.pallet_no, b.box_no
         """, params)
 
-    if report_name == "Delivery Invoice List with Original Invoice Number":
+    if report_name == "__REMOVED_Delivery Invoice List with Original Invoice Number":
         fsql, params = _base_filters("d.delivery_date")
         return _run_query(f"""
             SELECT
@@ -504,6 +524,7 @@ def get_report_rows(report_name):
             SELECT
                 s.invoice_no AS original_invoice_no,
                 d.delivery_invoice_no,
+                d.asn_number,
                 d.delivery_date,
                 c.customer_name,
                 p.product_code,
@@ -519,7 +540,7 @@ def get_report_rows(report_name):
             WHERE 1=1
             {fsql}
             /*ACCESS_FILTER*/
-            GROUP BY s.invoice_no, d.delivery_invoice_no, d.delivery_date, c.customer_name, p.product_code, p.product_name
+            GROUP BY s.invoice_no, d.delivery_invoice_no, d.asn_number, d.delivery_date, c.customer_name, p.product_code, p.product_name
             ORDER BY s.invoice_no, d.delivery_date DESC, d.delivery_invoice_no
         """, params)
 
@@ -529,6 +550,7 @@ def get_report_rows(report_name):
             SELECT
                 s.invoice_no AS original_invoice_no,
                 d.delivery_invoice_no,
+                d.asn_number,
                 c.customer_name,
                 p.product_code,
                 p.product_name,
@@ -546,7 +568,7 @@ def get_report_rows(report_name):
             WHERE 1=1
             {fsql}
             /*ACCESS_FILTER*/
-            GROUP BY s.invoice_no, d.delivery_invoice_no, c.customer_name, p.product_code, p.product_name, d.payment_due_date
+            GROUP BY s.invoice_no, d.delivery_invoice_no, d.asn_number, c.customer_name, p.product_code, p.product_name, d.payment_due_date
             ORDER BY d.payment_due_date, s.invoice_no, d.delivery_invoice_no
         """, params)
 
@@ -556,6 +578,7 @@ def get_report_rows(report_name):
             SELECT
                 s.invoice_no AS original_invoice_no,
                 d.delivery_invoice_no,
+                d.asn_number,
                 c.customer_name,
                 d.delivery_date,
                 d.payment_due_date,
@@ -577,7 +600,7 @@ def get_report_rows(report_name):
             WHERE 1=1
             {fsql}
             /*ACCESS_FILTER*/
-            GROUP BY s.invoice_no, d.delivery_invoice_no, c.customer_name, d.delivery_date, d.payment_due_date
+            GROUP BY s.invoice_no, d.delivery_invoice_no, d.asn_number, c.customer_name, d.delivery_date, d.payment_due_date
             HAVING SUM(d.sale_amount) - COALESCE(SUM(pay.payment_amount),0) > 0
             ORDER BY d.payment_due_date, d.delivery_invoice_no
         """, params)
@@ -604,7 +627,7 @@ def get_report_rows(report_name):
             WHERE 1=1
             {fsql}
             /*ACCESS_FILTER*/
-            GROUP BY pay.payment_received_date, pay.payment_reference, s.invoice_no, d.delivery_invoice_no, c.customer_name, p.product_code, p.product_name
+            GROUP BY pay.payment_received_date, pay.payment_reference, s.invoice_no, d.delivery_invoice_no, d.asn_number, c.customer_name, p.product_code, p.product_name
             ORDER BY pay.payment_received_date DESC, pay.payment_reference
         """, params)
 
@@ -639,6 +662,7 @@ def get_report_rows(report_name):
             SELECT
                 c.customer_name,
                 d.delivery_invoice_no,
+                d.asn_number,
                 d.delivery_date,
                 s.invoice_no AS original_invoice_no,
                 p.product_code,
@@ -654,7 +678,7 @@ def get_report_rows(report_name):
             WHERE 1=1
             {fsql}
             /*ACCESS_FILTER*/
-            GROUP BY c.customer_name, d.delivery_invoice_no, d.delivery_date, s.invoice_no, p.product_code, p.product_name
+            GROUP BY c.customer_name, d.delivery_invoice_no, d.asn_number, d.delivery_date, s.invoice_no, p.product_code, p.product_name
             ORDER BY c.customer_name, d.delivery_date DESC, d.delivery_invoice_no
         """, params)
 
