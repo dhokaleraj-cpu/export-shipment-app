@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 26.07"
+APP_VERSION = "SN 26.08"
 
 
 # ---------------------------------------------------------------------------
@@ -2800,6 +2800,92 @@ def product_form():
             ORDER BY h.start_date DESC, h.id DESC
         """, (ph_product["id"],))
         show_filtered_df(ph_rows, "product_price_history", total=False)
+
+        st.divider()
+        st.subheader("Edit Product Effective Price History")
+        st.caption("Editing price history does not change existing shipment, delivery or payment transaction records.")
+
+        if ph_rows:
+            ph_edit_map = {
+                f'{r.get("id")} | {r.get("product_code")} | {format_date_ddmmyyyy(r.get("start_date"))} to {format_date_ddmmyyyy(r.get("end_date")) if r.get("end_date") else "Current"} | {format_decimal_3(r.get("price"), r.get("currency"))} | PO {r.get("po_number") or "-"}': r
+                for r in ph_rows
+            }
+            ph_edit_key = st.selectbox("Select Price History Record to Edit", list(ph_edit_map.keys()), key="edit_price_history_select")
+            ph_edit = ph_edit_map[ph_edit_key]
+            ph_edit_id = ph_edit.get("id")
+
+            eh1, eh2, eh3, eh4 = st.columns(4)
+            with eh1:
+                e_ph_start = st.date_input("Edit Start Date", value=parse_date_for_input(ph_edit.get("start_date")), key=f"edit_ph_start_{ph_edit_id}")
+            with eh2:
+                e_ph_current = st.checkbox("Edit Current Price / No End Date", value=False if ph_edit.get("end_date") else True, key=f"edit_ph_current_{ph_edit_id}")
+                e_ph_end = None if e_ph_current else st.date_input("Edit End Date", value=parse_date_for_input(ph_edit.get("end_date")), key=f"edit_ph_end_{ph_edit_id}")
+            with eh3:
+                e_ph_price = st.number_input("Edit Effective Price", min_value=0.0, value=float(ph_edit.get("price") or 0), step=0.001, format="%.3f", key=f"edit_ph_price_{ph_edit_id}")
+            with eh4:
+                current_edit_currency = ph_edit.get("currency") or ph_product.get("currency") or "USD"
+                e_ph_currency = st.selectbox("Edit Currency", CURRENCIES, index=CURRENCIES.index(current_edit_currency) if current_edit_currency in CURRENCIES else 0, key=f"edit_ph_currency_{ph_edit_id}")
+
+            ep1, ep2, ep3 = st.columns([1.2, 1.0, 1.8])
+            with ep1:
+                e_ph_po_number = st.text_input("Edit PO Number", value=str(ph_edit.get("po_number") or ""), key=f"edit_ph_po_number_{ph_edit_id}")
+            with ep2:
+                e_ph_po_date = st.date_input("Edit PO Date", value=parse_date_for_input(ph_edit.get("po_date")), key=f"edit_ph_po_date_{ph_edit_id}")
+            with ep3:
+                e_ph_po_copy_file = st.file_uploader("Replace / Attach PO Copy PDF", type=["pdf"], key=f"edit_ph_po_copy_pdf_{ph_edit_id}")
+
+            e_ph_remarks = st.text_input("Edit Price Remarks", value=str(ph_edit.get("remarks") or ""), key=f"edit_ph_remarks_{ph_edit_id}")
+
+            existing_copy_path = ph_edit.get("po_copy_path")
+            if existing_copy_path:
+                existing_path_obj = Path(str(existing_copy_path))
+                if existing_path_obj.exists():
+                    try:
+                        with open(existing_path_obj, "rb") as _existing_po:
+                            st.download_button(
+                                "Download Current PO Copy",
+                                data=_existing_po.read(),
+                                file_name=existing_path_obj.name,
+                                mime="application/pdf",
+                                key=f"download_current_po_copy_{ph_edit_id}"
+                            )
+                    except Exception:
+                        st.caption(f"Current PO copy path: {existing_copy_path}")
+                else:
+                    st.caption(f"Current PO copy path saved but file not found: {existing_copy_path}")
+
+            if st.button("Update Selected Price History Record", type="primary", key=f"update_price_history_{ph_edit_id}"):
+                if e_ph_end and e_ph_end < e_ph_start:
+                    st.error("End Date cannot be before Start Date.")
+                else:
+                    updated_po_copy_path = existing_copy_path
+                    try:
+                        if e_ph_po_copy_file:
+                            safe_po = str(e_ph_po_number or "PO").replace("/", "_").replace("\\", "_").replace(" ", "_")
+                            updated_po_copy_path = save_upload(e_ph_po_copy_file, f"product_price_po_edit_{ph_product['id']}_{ph_edit_id}_{safe_po}")
+                    except Exception:
+                        updated_po_copy_path = existing_copy_path
+
+                    execute_query("""
+                        UPDATE product_price_history
+                        SET start_date=?, end_date=?, price=?, currency=?, remarks=?,
+                            po_number=?, po_date=?, po_copy_path=?
+                        WHERE id=?
+                    """, (
+                        str(e_ph_start), str(e_ph_end) if e_ph_end else None, e_ph_price, e_ph_currency, e_ph_remarks,
+                        e_ph_po_number.strip(), str(e_ph_po_date), updated_po_copy_path, ph_edit_id
+                    ))
+
+                    # Only current/open price updates Product Master price/PO reference. Existing transactions are not updated.
+                    if e_ph_current:
+                        execute_query(
+                            "UPDATE products SET unit_price=?, currency=?, po_number=?, po_date=? WHERE id=?",
+                            (e_ph_price, e_ph_currency, e_ph_po_number.strip(), str(e_ph_po_date), ph_product["id"])
+                        )
+
+                    st.success("Price history record updated successfully. Existing shipment/delivery/payment transactions are unchanged.")
+                    st.rerun()
+
 
         po_copy_rows = [r for r in (ph_rows or []) if r.get("po_copy_path")]
         if po_copy_rows:
