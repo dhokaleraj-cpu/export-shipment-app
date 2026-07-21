@@ -1,12 +1,12 @@
 from common import *
 
-REPORTS_VERSION = "SN 26.09"
+REPORTS_VERSION = "SN 26.10"
 
 page_setup()
 require_page_view("reports")
 show_edit_permission_status("reports")
 
-show_header("Reports", "SN 26.09 - Export Shipment Monitoring System")
+show_header("Reports", "SN 26.10 - Export Shipment Monitoring System")
 access_notice()
 
 # ---------------------------------------------------------------------------
@@ -157,20 +157,33 @@ def _numeric_sum(series):
 
 
 def _add_total_footer(df):
+    """Add TOTAL row with correct report footer logic.
+
+    SN 26.10:
+    - qty/quantity columns are summed, including pallet_qty, delivery_qty, pending_qty.
+    - amount/rate/price/payment/balance columns are summed where applicable.
+    - pallet count is calculated only from pallet identifier columns such as pallet_no.
+    """
     if df.empty:
         return df
+
     total_row = {col: "" for col in df.columns}
     total_row[df.columns[0]] = "TOTAL"
 
-    total_keywords = ["qty", "quantity", "amount", "sale", "value", "paid", "pending", "balance"]
+    qty_keywords = ["qty", "quantity"]
+    amount_keywords = ["amount", "sale", "value", "paid", "pending_amount", "balance_amount", "invoice_amount", "payment_received_amount"]
+
     for col in df.columns:
         col_l = str(col).lower()
-        if any(k in col_l for k in total_keywords):
+        if any(k in col_l for k in qty_keywords):
+            total_row[col] = _numeric_sum(df[col])
+        elif any(k in col_l for k in amount_keywords):
             total_row[col] = _numeric_sum(df[col])
 
-    # Count unique pallet numbers if present.
+    # Pallet count must not replace pallet_qty total.
     for col in df.columns:
-        if "pallet" in str(col).lower():
+        col_l = str(col).lower()
+        if col_l in ("pallet_no", "pallet_number", "pallet", "pallet id", "pallet_id"):
             try:
                 total_row[col] = f"Count: {df[col].dropna().astype(str).replace('', pd.NA).dropna().nunique()}"
             except Exception:
@@ -208,22 +221,74 @@ def _report_header_html(title):
     """
 
 def _report_footer_html(df):
+    """Top KPI footer totals shown above report grid.
+
+    SN 26.10 fixes:
+    - pallet_qty is included in quantity totals, not Pallet Count.
+    - delivery_qty and pending_qty are separately shown for Palletwise Pending Quantity.
+    - pallet count is only from pallet number/id column.
+    """
     if df.empty:
         return ""
-    amount_total = 0
+
     qty_total = 0
+    amount_total = 0
     pallet_count = ""
+
+    qty_columns = []
+    amount_columns = []
+    pallet_id_columns = []
+
     for col in df.columns:
         cl = str(col).lower()
-        if "amount" in cl or "sale" in cl or "value" in cl or "pending" in cl or "paid" in cl:
-            amount_total += _numeric_sum(df[col])
         if "qty" in cl or "quantity" in cl:
-            qty_total += _numeric_sum(df[col])
-        if "pallet" in cl:
-            try:
-                pallet_count = str(df[col].dropna().astype(str).replace("", pd.NA).dropna().nunique())
-            except Exception:
-                pallet_count = ""
+            qty_columns.append(col)
+        if any(k in cl for k in ["amount", "sale", "value", "paid", "pending_amount", "balance_amount", "invoice_amount", "payment_received_amount"]):
+            amount_columns.append(col)
+        if cl in ("pallet_no", "pallet_number", "pallet", "pallet id", "pallet_id"):
+            pallet_id_columns.append(col)
+
+    for col in qty_columns:
+        qty_total += _numeric_sum(df[col])
+    for col in amount_columns:
+        amount_total += _numeric_sum(df[col])
+    if pallet_id_columns:
+        col = pallet_id_columns[0]
+        try:
+            pallet_count = str(df[col].dropna().astype(str).replace("", pd.NA).dropna().nunique())
+        except Exception:
+            pallet_count = ""
+
+    # For Palletwise Pending Quantity report, show specific quantity KPIs.
+    special_qty_cols = []
+    for special_col, special_label in [("pallet_qty", "Pallet Qty"), ("delivery_qty", "Delivery Qty"), ("pending_qty", "Pending Qty")]:
+        actual_col = next((c for c in df.columns if str(c).lower() == special_col), None)
+        if actual_col:
+            special_qty_cols.append((actual_col, special_label))
+
+    if special_qty_cols:
+        cells = ""
+        for actual_col, label in special_qty_cols:
+            cells += f"""
+            <div style="padding:12px;border-right:1px solid #BFD7F0;">
+                <div style="font-size:13px;font-weight:900;color:#003B73;text-transform:uppercase;">Total {label}</div>
+                <div style="font-size:20px;font-weight:900;color:#111827;">{_safe_number(_numeric_sum(df[actual_col]))}</div>
+            </div>
+            """
+        cells += f"""
+            <div style="padding:12px;">
+                <div style="font-size:13px;font-weight:900;color:#003B73;text-transform:uppercase;">Pallet Count</div>
+                <div style="font-size:20px;font-weight:900;color:#111827;">{pallet_count}</div>
+            </div>
+        """
+        return f"""
+        <div style="width:100%;box-sizing:border-box;border:1px solid #003B73;border-radius:12px;background:#EAF3FC;padding:0;margin:12px 0 14px 0;overflow:hidden;box-shadow:0 2px 8px rgba(15,23,42,.08);">
+            <div style="background:#003B73;color:white;font-size:16px;font-weight:900;padding:8px 12px;text-transform:uppercase;letter-spacing:.3px;">Report Footer Totals</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;text-align:center;">
+                {cells}
+            </div>
+        </div>
+        """
 
     return f"""
     <div style="width:100%;box-sizing:border-box;border:1px solid #003B73;border-radius:12px;background:#EAF3FC;padding:0;margin:12px 0 14px 0;overflow:hidden;box-shadow:0 2px 8px rgba(15,23,42,.08);">
@@ -244,6 +309,7 @@ def _report_footer_html(df):
         </div>
     </div>
     """
+
 
 def _excel_bytes(df, title):
     output = io.BytesIO()
