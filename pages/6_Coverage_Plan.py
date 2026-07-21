@@ -560,7 +560,7 @@ else:
 
     with filter_col3:
         local_filter_start("PAST WEEKS", "#1A5E99")
-        past_weeks = int(st.selectbox("Past Weeks", [0, 4, 8, 12, 26, 52], index=0, key="coverage_past_weeks", label_visibility="collapsed"))
+        past_weeks = int(st.selectbox("Past Weeks", [0, 4, 8, 12, 26, 52], index=1, key="coverage_past_weeks", label_visibility="collapsed"))
         local_filter_end()
 
     with filter_col4:
@@ -675,80 +675,9 @@ else:
         )
 
     st.divider()
-    st.markdown('<div class="sap-subtitle">Customer Forecast / Stock at WH Input Grid</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sap-grid-note">Edit Customer Forecast and Stock at WH by Week Start. Values update the Coverage Plan table calculation.</div>', unsafe_allow_html=True)
+    # SN 26.09 removed Customer Forecast / Stock at WH Input Grid section.
+    st.info('Customer Forecast / Stock at WH Input Grid removed in SN 26.09. Existing coverage data is retained.')
 
-    forecast_rows = [r for r in visible_rows]
-    if forecast_rows:
-        grid_values = {}
-        id_by_label = {}
-        for r in forecast_rows:
-            dt = parse_db_date(r.get("plan_date"))
-            label = f"W{r.get('week_no')} | Week Start {dt.strftime('%d-%m-%Y')}" if dt else f"W{r.get('week_no')}"
-            grid_values[label] = {
-                "Stock at WH": safe_float(r.get("stock_at_wh")),
-                "Customer Forecast": safe_float(r.get("customer_forecast")),
-            }
-            id_by_label[label] = r["id"]
-        input_grid = pd.DataFrame(grid_values)
-        try:
-            edited_input_grid = st.data_editor(input_grid, width='stretch', key="coverage_forecast_stock_horizontal_grid", num_rows="fixed")
-        except Exception as editor_error:
-            st.warning(f"Forecast / Stock input grid could not load as editor: {editor_error}")
-            st.dataframe(input_grid, width='stretch')
-            edited_input_grid = input_grid
-
-        manual_grid_password = st.text_input(
-            "Password to manually update Customer Forecast / Stock at WH Input Grid",
-            type="password",
-            key="coverage_manual_grid_password"
-        )
-        if st.button("Save Forecast / Stock at WH Grid", type="primary", key="coverage_save_forecast_stock_grid"):
-            if not check_delete_password(manual_grid_password):
-                st.error("Wrong password. Customer Forecast / Stock at WH grid was not updated.")
-            else:
-                current_week_start_for_save = datetime.strptime(monday_of_date(date.today()), "%Y-%m-%d").date()
-                for label, record_id in id_by_label.items():
-                    new_stock = safe_float(edited_input_grid.loc["Stock at WH", label])
-                    new_forecast = safe_float(edited_input_grid.loc["Customer Forecast", label])
-                    label_row = next((x for x in forecast_rows if x["id"] == record_id), None)
-                    label_date = parse_db_date(label_row.get("plan_date")) if label_row else None
-                    if label_date and label_date < current_week_start_for_save:
-                        new_forecast = 0.0
-                    execute_query(
-                        "UPDATE coverage_plan_lines SET stock_at_wh=?, customer_forecast=? WHERE id=?",
-                        (new_stock, new_forecast, record_id)
-                    )
-
-                updated_raw_rows = fetch_all("""
-                    SELECT id, week_no, plan_date, customer_forecast, stock_at_wh,
-                           shipment_delivery_qty, delivered_to_customer, wh_bank, bank_status,
-                           suggested_shipment_qty, next_shipment_date
-                    FROM coverage_plan_lines
-                    WHERE product_id=?
-                    ORDER BY date(plan_date), week_no, id
-                """, (selected_product_id,))
-                _, _, update_after_grid, _, _ = calculate_coverage_rows(
-                    updated_raw_rows,
-                    selected_product_id,
-                    shipment_time_days,
-                    product_two_months_inventory
-                )
-                save_calculated_coverage(update_after_grid)
-                clear_cache_after_write()
-                st.success("Customer Forecast and Stock at WH updated. Stock at WH auto recalculated and old-week forecast set to zero.")
-                st.rerun()
-
-    with st.expander("Detailed calculated rows", expanded=False):
-        detail_df = pd.DataFrame(format_date_columns(visible_rows))
-        if not detail_df.empty and "id" in detail_df.columns:
-            detail_df = detail_df.drop(columns=["id"])
-        if detail_df.empty:
-            st.info("No detailed data available.")
-        else:
-            st.dataframe(detail_df, width='stretch', hide_index=True)
-
-    st.divider()
     st.markdown('<div class="sap-subtitle">Import Customer Forecast / Stock at WH</div>', unsafe_allow_html=True)
     forecast_template_df = pd.DataFrame({
         "product_code": [selected_product["product_code"]],

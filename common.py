@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 26.08"
+APP_VERSION = "SN 26.09"
 
 
 # ---------------------------------------------------------------------------
@@ -2170,10 +2170,9 @@ def to_image_bytes(df, title):
 def export_buttons(df, report_name):
     if df.empty:
         return
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
     c1.download_button("Export Excel", to_excel_bytes(df), f"{report_name}.xlsx")
     c2.download_button("Export PDF", to_pdf_bytes(df, report_name), f"{report_name}.pdf")
-    c3.download_button("Export Image", to_image_bytes(df, report_name), f"{report_name}.png")
 
 def logo_data_uri():
     try:
@@ -5103,3 +5102,6 @@ def ensure_product_price_history_table():
         execute_query("ALTER TABLE product_price_history ADD COLUMN IF NOT EXISTS po_copy_path TEXT")
     except Exception:
         pass
+
+
+# SN 26.09 image export button removed from export buttons.

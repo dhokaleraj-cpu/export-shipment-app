@@ -1,12 +1,12 @@
 from common import *
 
-REPORTS_VERSION = "SN 26.08"
+REPORTS_VERSION = "SN 26.09"
 
 page_setup()
 require_page_view("reports")
 show_edit_permission_status("reports")
 
-show_header("Reports", "SN 26.08 - Export Shipment Monitoring System")
+show_header("Reports", "SN 26.09 - Export Shipment Monitoring System")
 access_notice()
 
 # ---------------------------------------------------------------------------
