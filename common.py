@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 26.10"
+APP_VERSION = "SN 26.11"
 
 
 # ---------------------------------------------------------------------------

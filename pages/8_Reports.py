@@ -1,12 +1,12 @@
 from common import *
 
-REPORTS_VERSION = "SN 26.10"
+REPORTS_VERSION = "SN 26.11"
 
 page_setup()
 require_page_view("reports")
 show_edit_permission_status("reports")
 
-show_header("Reports", "SN 26.10 - Export Shipment Monitoring System")
+show_header("Reports", "SN 26.11 - Export Shipment Monitoring System")
 access_notice()
 
 # ---------------------------------------------------------------------------
@@ -220,20 +220,23 @@ def _report_header_html(title):
     </div>
     """
 
-def _report_footer_html(df):
-    """Top KPI footer totals shown above report grid.
+def _report_footer_totals(df):
+    """Return footer totals for report KPI cards.
 
-    SN 26.10 fixes:
-    - pallet_qty is included in quantity totals, not Pallet Count.
-    - delivery_qty and pending_qty are separately shown for Palletwise Pending Quantity.
-    - pallet count is only from pallet number/id column.
+    SN 26.11:
+    - No raw HTML footer is returned, preventing HTML code from showing on screen.
+    - Palletwise Pending Quantity shows separate Pallet Qty, Delivery Qty, Pending Qty and Pallet Count.
     """
+    result = {
+        "qty_total": 0,
+        "amount_total": 0,
+        "pallet_count": "",
+        "pallet_qty": None,
+        "delivery_qty": None,
+        "pending_qty": None,
+    }
     if df.empty:
-        return ""
-
-    qty_total = 0
-    amount_total = 0
-    pallet_count = ""
+        return result
 
     qty_columns = []
     amount_columns = []
@@ -248,67 +251,89 @@ def _report_footer_html(df):
         if cl in ("pallet_no", "pallet_number", "pallet", "pallet id", "pallet_id"):
             pallet_id_columns.append(col)
 
-    for col in qty_columns:
-        qty_total += _numeric_sum(df[col])
-    for col in amount_columns:
-        amount_total += _numeric_sum(df[col])
+    result["qty_total"] = sum(_numeric_sum(df[col]) for col in qty_columns)
+    result["amount_total"] = sum(_numeric_sum(df[col]) for col in amount_columns)
+
     if pallet_id_columns:
         col = pallet_id_columns[0]
         try:
-            pallet_count = str(df[col].dropna().astype(str).replace("", pd.NA).dropna().nunique())
+            result["pallet_count"] = str(df[col].dropna().astype(str).replace("", pd.NA).dropna().nunique())
         except Exception:
-            pallet_count = ""
+            result["pallet_count"] = ""
 
-    # For Palletwise Pending Quantity report, show specific quantity KPIs.
-    special_qty_cols = []
-    for special_col, special_label in [("pallet_qty", "Pallet Qty"), ("delivery_qty", "Delivery Qty"), ("pending_qty", "Pending Qty")]:
+    for special_col in ["pallet_qty", "delivery_qty", "pending_qty"]:
         actual_col = next((c for c in df.columns if str(c).lower() == special_col), None)
         if actual_col:
-            special_qty_cols.append((actual_col, special_label))
+            result[special_col] = _numeric_sum(df[actual_col])
 
-    if special_qty_cols:
-        cells = ""
-        for actual_col, label in special_qty_cols:
-            cells += f"""
-            <div style="padding:12px;border-right:1px solid #BFD7F0;">
-                <div style="font-size:13px;font-weight:900;color:#003B73;text-transform:uppercase;">Total {label}</div>
-                <div style="font-size:20px;font-weight:900;color:#111827;">{_safe_number(_numeric_sum(df[actual_col]))}</div>
-            </div>
-            """
-        cells += f"""
-            <div style="padding:12px;">
-                <div style="font-size:13px;font-weight:900;color:#003B73;text-transform:uppercase;">Pallet Count</div>
-                <div style="font-size:20px;font-weight:900;color:#111827;">{pallet_count}</div>
-            </div>
-        """
-        return f"""
-        <div style="width:100%;box-sizing:border-box;border:1px solid #003B73;border-radius:12px;background:#EAF3FC;padding:0;margin:12px 0 14px 0;overflow:hidden;box-shadow:0 2px 8px rgba(15,23,42,.08);">
-            <div style="background:#003B73;color:white;font-size:16px;font-weight:900;padding:8px 12px;text-transform:uppercase;letter-spacing:.3px;">Report Footer Totals</div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;text-align:center;">
-                {cells}
-            </div>
-        </div>
-        """
+    return result
 
-    return f"""
-    <div style="width:100%;box-sizing:border-box;border:1px solid #003B73;border-radius:12px;background:#EAF3FC;padding:0;margin:12px 0 14px 0;overflow:hidden;box-shadow:0 2px 8px rgba(15,23,42,.08);">
-        <div style="background:#003B73;color:white;font-size:16px;font-weight:900;padding:8px 12px;text-transform:uppercase;letter-spacing:.3px;">Report Footer Totals</div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0;text-align:center;">
-            <div style="padding:12px;border-right:1px solid #BFD7F0;">
-                <div style="font-size:13px;font-weight:900;color:#003B73;text-transform:uppercase;">Total Qty</div>
-                <div style="font-size:20px;font-weight:900;color:#111827;">{_safe_number(qty_total)}</div>
-            </div>
-            <div style="padding:12px;border-right:1px solid #BFD7F0;">
-                <div style="font-size:13px;font-weight:900;color:#003B73;text-transform:uppercase;">Total Amount</div>
-                <div style="font-size:20px;font-weight:900;color:#111827;">{_safe_number(amount_total)}</div>
-            </div>
-            <div style="padding:12px;">
-                <div style="font-size:13px;font-weight:900;color:#003B73;text-transform:uppercase;">Pallet Count</div>
-                <div style="font-size:20px;font-weight:900;color:#111827;">{pallet_count}</div>
-            </div>
-        </div>
-    </div>
-    """
+
+def _render_report_footer_kpis(df):
+    """Render report footer totals as Streamlit cards, not HTML text."""
+    if df.empty:
+        return
+
+    totals = _report_footer_totals(df)
+
+    st.markdown(
+        """
+        <style>
+        .sn-report-footer-title {
+            background:#003B73;
+            color:white;
+            padding:8px 12px;
+            border-radius:12px 12px 0 0;
+            font-size:16px;
+            font-weight:900;
+            text-transform:uppercase;
+            letter-spacing:.3px;
+            margin-top:12px;
+        }
+        .sn-report-kpi {
+            border:1px solid #BFD7F0;
+            background:#EAF3FC;
+            padding:12px;
+            text-align:center;
+            min-height:78px;
+        }
+        .sn-report-kpi-label {
+            font-size:13px;
+            font-weight:900;
+            color:#003B73;
+            text-transform:uppercase;
+            margin-bottom:5px;
+        }
+        .sn-report-kpi-value {
+            font-size:20px;
+            font-weight:900;
+            color:#111827;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="sn-report-footer-title">Report Footer Totals</div>', unsafe_allow_html=True)
+
+    if totals.get("pallet_qty") is not None or totals.get("delivery_qty") is not None or totals.get("pending_qty") is not None:
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.markdown(f'<div class="sn-report-kpi"><div class="sn-report-kpi-label">Total Pallet Qty</div><div class="sn-report-kpi-value">{_safe_number(totals.get("pallet_qty") or 0)}</div></div>', unsafe_allow_html=True)
+        with c2:
+            st.markdown(f'<div class="sn-report-kpi"><div class="sn-report-kpi-label">Total Delivery Qty</div><div class="sn-report-kpi-value">{_safe_number(totals.get("delivery_qty") or 0)}</div></div>', unsafe_allow_html=True)
+        with c3:
+            st.markdown(f'<div class="sn-report-kpi"><div class="sn-report-kpi-label">Total Pending Qty</div><div class="sn-report-kpi-value">{_safe_number(totals.get("pending_qty") or 0)}</div></div>', unsafe_allow_html=True)
+        with c4:
+            st.markdown(f'<div class="sn-report-kpi"><div class="sn-report-kpi-label">Pallet Count</div><div class="sn-report-kpi-value">{totals.get("pallet_count") or ""}</div></div>', unsafe_allow_html=True)
+    else:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(f'<div class="sn-report-kpi"><div class="sn-report-kpi-label">Total Qty</div><div class="sn-report-kpi-value">{_safe_number(totals.get("qty_total") or 0)}</div></div>', unsafe_allow_html=True)
+        with c2:
+            st.markdown(f'<div class="sn-report-kpi"><div class="sn-report-kpi-label">Total Amount</div><div class="sn-report-kpi-value">{_safe_number(totals.get("amount_total") or 0)}</div></div>', unsafe_allow_html=True)
+        with c3:
+            st.markdown(f'<div class="sn-report-kpi"><div class="sn-report-kpi-label">Pallet Count</div><div class="sn-report-kpi-value">{totals.get("pallet_count") or ""}</div></div>', unsafe_allow_html=True)
 
 
 def _excel_bytes(df, title):
@@ -469,7 +494,7 @@ def _display_report(rows, title):
         st.info("No records found for selected filters.")
         return
 
-    st.markdown(_report_footer_html(df), unsafe_allow_html=True)
+    _render_report_footer_kpis(df)
     st.markdown("<style>/* SN2603 full width report table */ div[data-testid='stDataFrame']{width:100% !important;} div[data-testid='stDataFrame'] > div{width:100% !important;}</style>", unsafe_allow_html=True)
     st.dataframe(_format_rate_price_amount_3decimals(_add_total_footer(df)), width="stretch", hide_index=True)
 
