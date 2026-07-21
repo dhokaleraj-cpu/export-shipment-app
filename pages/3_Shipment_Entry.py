@@ -92,8 +92,8 @@ else:
         selected_product = st.selectbox('Product Code', product_options, key='shipment_product_select', label_visibility='collapsed')
 
     selected_product_data = product_info[selected_product]
-    auto_price = float(selected_product_data.get('unit_price') or 0)
-    auto_currency = selected_product_data.get('currency') or 'USD'
+    auto_price, effective_currency = get_effective_product_price(selected_product_data.get('id'), shipment_date)
+    auto_currency = effective_currency or selected_product_data.get('currency') or 'USD'
     product_id_for_key = str(selected_product_data.get('id') or selected_product).replace(' ', '_').replace('|', '_').replace('/', '_')
 
     # PO comes from Product Master by default and can be manually overridden row-wise.
@@ -114,14 +114,14 @@ else:
         quantity = st.number_input('Quantity', min_value=0.0, step=1.0, key='shipment_grid_qty', label_visibility='collapsed')
     with r7:
         st.markdown('<div class="shipment-grid-label">Price</div>', unsafe_allow_html=True)
-        unit_price = st.number_input('Price', min_value=0.0, value=auto_price, step=1.0, key=f'shipment_grid_price_{product_id_for_key}', label_visibility='collapsed')
+        unit_price = st.number_input('Price', min_value=0.0, value=float(auto_price or 0), step=0.001, format='%.3f', key=f'shipment_grid_price_{product_id_for_key}', label_visibility='collapsed')
     with r8:
         st.markdown('<div class="shipment-grid-label">Currency</div>', unsafe_allow_html=True)
         currency = st.selectbox('Currency', CURRENCIES, index=CURRENCIES.index(auto_currency) if auto_currency in CURRENCIES else 0, key=f'shipment_grid_currency_{product_id_for_key}', label_visibility='collapsed')
     with r9:
         st.markdown('<div class="shipment-grid-label">Amount</div>', unsafe_allow_html=True)
         amount = quantity * unit_price
-        st.markdown(f'<div class="amount-input-look">{amount:,.2f} {currency}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="amount-input-look">{amount:,.3f} {currency}</div>', unsafe_allow_html=True)
     st.markdown('<div style="height:10px;"></div>', unsafe_allow_html=True)
     if st.button('Add Row to Table', type='primary', key='shipment_grid_add_row'):
         if not pallet_no.strip():
@@ -146,7 +146,7 @@ else:
         st.dataframe(style_total_row(display_df), width='stretch', hide_index=True)
         total_qty = temp_df['quantity'].sum()
         total_amount = temp_df['amount'].sum()
-        st.markdown(f'<div class="total-box">Total Quantity: {total_qty} &nbsp;&nbsp; | &nbsp;&nbsp; Total Amount: {total_amount:,.2f}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="total-box">Total Quantity: {total_qty} &nbsp;&nbsp; | &nbsp;&nbsp; Total Amount: {total_amount:,.3f}</div>', unsafe_allow_html=True)
         if st.button('Clear Unsaved Rows', key='clear_unsaved_shipment_rows'):
             st.session_state.shipment_temp_rows = []
             st.rerun()

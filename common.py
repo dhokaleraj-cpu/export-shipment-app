@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 26.05"
+APP_VERSION = "SN 26.06"
 
 
 # ---------------------------------------------------------------------------
@@ -2253,9 +2253,9 @@ def delivery_note_html(data):
             <td class="center">{idx}</td>
             <td>{html.escape(desc)}</td>
             <td class="center">{html.escape(str(item.get("original_invoice_no", original_invoice_no)))}</td>
-            <td class="right">{qty:,.2f}</td>
+            <td class="right">{qty:,.3f}</td>
             <td class="right">{unit_price:,.4f}</td>
-            <td class="right">{amount:,.2f}</td>
+            <td class="right">{amount:,.3f}</td>
         </tr>
         """
 
@@ -2352,9 +2352,9 @@ def delivery_note_html(data):
         {item_rows}
         <tr>
             <td colspan="3" class="right total">SUBTOTAL</td>
-            <td class="right total">{total_qty:,.2f}</td>
+            <td class="right total">{total_qty:,.3f}</td>
             <td></td>
-            <td class="right total">{total_amount:,.2f}</td>
+            <td class="right total">{total_amount:,.3f}</td>
         </tr>
         <tr>
             <td colspan="5" class="right bold">TAX</td>
@@ -2366,7 +2366,7 @@ def delivery_note_html(data):
         </tr>
         <tr>
             <td colspan="5" class="right total">TOTAL ({html.escape(str(currency))})</td>
-            <td class="right total">{total_amount:,.2f}</td>
+            <td class="right total">{total_amount:,.3f}</td>
         </tr>
     </table>
 
@@ -2652,14 +2652,14 @@ def product_form():
         unit = st.text_input("Unit", value="Nos", key="product_unit")
         po_number = st.text_input("PO Number", key="product_po_number")
     with c2:
-        unit_price = st.number_input("Price", min_value=0.0, step=1.0, key="product_unit_price")
+        unit_price = st.number_input("Price", min_value=0.0, step=0.001, format="%.3f", key="product_unit_price")
         currency = st.selectbox("Currency", CURRENCIES, key="product_currency")
         weight = st.number_input("Weight", min_value=0.0, step=1.0, key="product_weight")
         lcr_weekly = st.number_input("LCR Weekly", min_value=0.0, step=1.0, key="product_lcr_weekly")
         mcr_weekly = st.number_input("MCR Weekly", min_value=0.0, step=1.0, key="product_mcr_weekly")
         po_date = st.date_input("PO Date", value=date.today(), key="product_po_date")
         two_months_inventory = lcr_weekly * 8
-        st.markdown(f'<div class="total-box">Two Months Inventory = LCR Weekly × 8 = {two_months_inventory:,.2f}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="total-box">Two Months Inventory = LCR Weekly × 8 = {two_months_inventory:,.3f}</div>', unsafe_allow_html=True)
 
     if st.button("Save Product Master", type="primary", key="save_product_master"):
         try:
@@ -2701,7 +2701,7 @@ def product_form():
                 e_unit = st.text_input("Edit Unit", selected.get("unit") or "Nos", key=f"edit_product_unit_{sid}")
                 e_po_number = st.text_input("Edit PO Number", selected.get("po_number") or "", key=f"edit_product_po_number_{sid}")
             with e2:
-                e_unit_price = st.number_input("Edit Price", min_value=0.0, value=float(selected.get("unit_price") or 0), step=1.0, key=f"edit_product_unit_price_{sid}")
+                e_unit_price = st.number_input("Edit Price", min_value=0.0, value=float(selected.get("unit_price") or 0), step=0.001, format="%.3f", key=f"edit_product_unit_price_{sid}")
                 current_currency = selected.get("currency") or "INR"
                 e_currency = st.selectbox("Edit Currency", CURRENCIES, index=CURRENCIES.index(current_currency) if current_currency in CURRENCIES else 0, key=f"edit_product_currency_{sid}")
                 e_weight = st.number_input("Edit Weight", min_value=0.0, value=float(selected.get("weight") or 0), step=1.0, key=f"edit_product_weight_{sid}")
@@ -2709,7 +2709,7 @@ def product_form():
                 e_mcr_weekly = st.number_input("Edit MCR Weekly", min_value=0.0, value=float(selected.get("mcr_weekly") or 0), step=1.0, key=f"edit_product_mcr_weekly_{sid}")
                 e_po_date = st.date_input("Edit PO Date", value=parse_date_for_input(selected.get("po_date")), key=f"edit_product_po_date_{sid}")
                 e_two_months_inventory = e_lcr_weekly * 8
-                st.markdown(f'<div class="total-box">Two Months Inventory = LCR Weekly × 8 = {e_two_months_inventory:,.2f}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="total-box">Two Months Inventory = LCR Weekly × 8 = {e_two_months_inventory:,.3f}</div>', unsafe_allow_html=True)
 
             if st.button("Update Product Master", type="primary", key=f"update_product_master_{sid}"):
                 try:
@@ -2735,6 +2735,53 @@ def product_form():
                 if delete_record_with_password("products", sid, delete_password, f"Product {selected.get('product_code')}"):
                     st.rerun()
 
+    st.divider()
+    st.subheader("Product Effective Price History")
+    ensure_product_price_history_table()
+    product_rows_for_price = fetch_all("SELECT id, product_code, product_name, unit_price, currency FROM products ORDER BY product_code")
+    if product_rows_for_price:
+        price_product_map = {
+            f'{r["product_code"]} | {r.get("product_name") or ""}': r
+            for r in product_rows_for_price
+        }
+        ph_selected_label = st.selectbox("Select Product for Price Period", list(price_product_map.keys()), key="price_history_product_select")
+        ph_product = price_product_map[ph_selected_label]
+        ph_c1, ph_c2, ph_c3, ph_c4 = st.columns(4)
+        with ph_c1:
+            ph_start = st.date_input("Start Date", value=date.today(), key="price_history_start_date")
+        with ph_c2:
+            ph_current = st.checkbox("Current Price / No End Date", value=True, key="price_history_current")
+            ph_end = None if ph_current else st.date_input("End Date", value=date.today(), key="price_history_end_date")
+        with ph_c3:
+            ph_price = st.number_input("Effective Price", min_value=0.0, step=0.001, format="%.3f", value=float(ph_product.get("unit_price") or 0), key="price_history_price")
+        with ph_c4:
+            ph_currency = st.selectbox("Effective Currency", CURRENCIES, index=CURRENCIES.index(ph_product.get("currency") or "USD") if (ph_product.get("currency") or "USD") in CURRENCIES else 0, key="price_history_currency")
+        ph_remarks = st.text_input("Price Remarks", key="price_history_remarks", placeholder="Example: 2026 current price")
+        if st.button("Save Effective Price Period", type="primary", key="save_product_price_history"):
+            if ph_end and ph_end < ph_start:
+                st.error("End Date cannot be before Start Date.")
+            else:
+                execute_query("""
+                    INSERT INTO product_price_history
+                    (product_id, currency, price, start_date, end_date, remarks)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (ph_product["id"], ph_currency, ph_price, str(ph_start), str(ph_end) if ph_end else None, ph_remarks))
+                # Also update product master price if this is current/no-end price.
+                if ph_current:
+                    execute_query("UPDATE products SET unit_price=?, currency=? WHERE id=?", (ph_price, ph_currency, ph_product["id"]))
+                st.success("Effective price period saved successfully.")
+                st.rerun()
+
+        ph_rows = fetch_all("""
+            SELECT h.id, p.product_code, p.product_name, h.start_date, h.end_date, h.price, h.currency, h.remarks
+            FROM product_price_history h
+            JOIN products p ON p.id = h.product_id
+            WHERE h.product_id=?
+            ORDER BY h.start_date DESC, h.id DESC
+        """, (ph_product["id"],))
+        show_filtered_df(ph_rows, "product_price_history", total=False)
+
+
 def master_form(title, table, fields, allowed_roles=("admin", "super_admin")):
     require_roles(allowed_roles)
     st.subheader(title)
@@ -2743,7 +2790,7 @@ def master_form(title, table, fields, allowed_roles=("admin", "super_admin")):
     for i, field in enumerate(fields):
         with cols[i % 2]:
             if field in ("days", "unit_price", "weight", "lcr_weekly", "mcr_weekly", "two_months_inventory", "shipment_time_days"):
-                values[field] = st.number_input(field.replace("_", " ").title(), min_value=0.0 if field in ("unit_price", "weight", "lcr_weekly", "mcr_weekly", "two_months_inventory") else 0, step=1.0 if field in ("unit_price", "weight", "lcr_weekly", "mcr_weekly", "two_months_inventory") else 1, key=f"{table}_{field}")
+                values[field] = st.number_input(field.replace("_", " ").title(), min_value=0.0 if field in ("unit_price", "weight", "lcr_weekly", "mcr_weekly", "two_months_inventory") else 0, step=0.001 if field in ("unit_price",) else (1.0 if field in ("weight", "lcr_weekly", "mcr_weekly", "two_months_inventory") else 1), key=f"{table}_{field}")
             elif field == "currency":
                 values[field] = st.selectbox("Currency", CURRENCIES, key=f"{table}_{field}")
             else:
@@ -2770,7 +2817,7 @@ def master_form(title, table, fields, allowed_roles=("admin", "super_admin")):
                     if field in ("days", "shipment_time_days"):
                         edit_values[field] = st.number_input(field.replace("_", " ").title(), min_value=0, value=int(selected.get(field) or 0), step=1, key=f"edit_{table}_{field}")
                     elif field in ("unit_price", "weight", "lcr_weekly", "mcr_weekly", "two_months_inventory"):
-                        edit_values[field] = st.number_input(field.replace("_", " ").title(), min_value=0.0, value=float(selected.get(field) or 0), step=1.0, key=f"edit_{table}_{field}")
+                        edit_values[field] = st.number_input(field.replace("_", " ").title(), min_value=0.0, value=float(selected.get(field) or 0), step=0.001 if field == "unit_price" else 1.0, key=f"edit_{table}_{field}")
                     elif field == "currency":
                         current = selected.get(field) or "INR"
                         edit_values[field] = st.selectbox("Currency", CURRENCIES, index=CURRENCIES.index(current) if current in CURRENCIES else 0, key=f"edit_{table}_{field}")
@@ -4774,14 +4821,28 @@ __all__ = [name for name in globals() if not name.startswith('__')]
 
 
 
+
+# Re-export helpers after SN26.05 appended functions.
+__all__ = [name for name in globals() if not name.startswith('__')]
+
 # ---------------------------------------------------------------------------
-# SN 26.05 - 3 Decimal formatting support across Shipment, Delivery, Payment
+# SN 26.06 - 3 Decimal + Effective Price support
 # ---------------------------------------------------------------------------
-SN2605_DECIMAL_KEYWORDS = [
+
+SN2606_DECIMAL_KEYWORDS = [
     "rate", "price", "amount", "sale", "value", "paid", "pending", "balance",
     "invoice_amount", "paid_amount", "pending_amount", "payment_received_amount",
-    "unit_price", "average_price", "total_sale", "total_amount", "warehouse_stock_amount"
+    "unit_price", "average_price", "total_sale", "total_amount", "warehouse_stock_amount",
+    "usd", "eur", "inr", "currency"
 ]
+
+def format_decimal_3(value, currency=""):
+    """Format app currency/rate/price/amount values to 3 decimals."""
+    try:
+        txt = f"{float(value or 0):,.3f}"
+        return f"{txt} {currency}".strip()
+    except Exception:
+        return str(value or "")
 
 def format_rate_price_amount_3decimals(df):
     """App-wide display helper: rate, price and amount fields as 3 decimals."""
@@ -4791,41 +4852,125 @@ def format_rate_price_amount_3decimals(df):
         out = df.copy()
         for col in out.columns:
             col_l = str(col).lower()
-            if any(k in col_l for k in SN2605_DECIMAL_KEYWORDS):
+            if any(k in col_l for k in SN2606_DECIMAL_KEYWORDS):
                 try:
-                    out[col] = pd.to_numeric(out[col], errors="coerce").map(lambda x: "" if pd.isna(x) else f"{float(x):.3f}")
+                    out[col] = pd.to_numeric(out[col], errors="coerce").map(
+                        lambda x: "" if pd.isna(x) else f"{float(x):.3f}"
+                    )
                 except Exception:
                     pass
         return out
     except Exception:
         return df
 
-def _sn2605_patch_dataframe_3decimals():
-    """Patch st.dataframe/st.table once so Shipment/Delivery/Payment grids show 3 decimals."""
+def _sn2606_should_format_number(label="", key=""):
+    text = f"{label or ''} {key or ''}".lower()
+    return any(k in text for k in SN2606_DECIMAL_KEYWORDS)
+
+def _sn2606_patch_streamlit_decimals():
+    """Patch Streamlit numeric widgets/data grids to use 3 decimals across the app."""
     try:
-        if getattr(st, "_sn2605_decimal_patch_done", False):
+        if getattr(st, "_sn2606_decimal_patch_done", False):
             return
-        st._sn2605_original_dataframe = st.dataframe
-        st._sn2605_original_table = st.table
+
+        st._sn2606_original_dataframe = st.dataframe
+        st._sn2606_original_table = st.table
+        st._sn2606_original_data_editor = st.data_editor
+        st._sn2606_original_number_input = st.number_input
+
         def _patched_dataframe(data=None, *args, **kwargs):
             try:
                 data = format_rate_price_amount_3decimals(data)
             except Exception:
                 pass
-            return st._sn2605_original_dataframe(data, *args, **kwargs)
+            return st._sn2606_original_dataframe(data, *args, **kwargs)
+
         def _patched_table(data=None, *args, **kwargs):
             try:
                 data = format_rate_price_amount_3decimals(data)
             except Exception:
                 pass
-            return st._sn2605_original_table(data, *args, **kwargs)
+            return st._sn2606_original_table(data, *args, **kwargs)
+
+        def _patched_data_editor(data=None, *args, **kwargs):
+            try:
+                data = format_rate_price_amount_3decimals(data)
+            except Exception:
+                pass
+            return st._sn2606_original_data_editor(data, *args, **kwargs)
+
+        def _patched_number_input(label, *args, **kwargs):
+            try:
+                key = kwargs.get("key", "")
+                if _sn2606_should_format_number(label, key):
+                    kwargs.setdefault("format", "%.3f")
+                    if "step" in kwargs:
+                        try:
+                            if float(kwargs.get("step") or 0) >= 1:
+                                kwargs["step"] = 0.001
+                        except Exception:
+                            pass
+                    else:
+                        kwargs["step"] = 0.001
+            except Exception:
+                pass
+            return st._sn2606_original_number_input(label, *args, **kwargs)
+
         st.dataframe = _patched_dataframe
         st.table = _patched_table
-        st._sn2605_decimal_patch_done = True
+        st.data_editor = _patched_data_editor
+        st.number_input = _patched_number_input
+        st._sn2606_decimal_patch_done = True
     except Exception:
         pass
 
-_sn2605_patch_dataframe_3decimals()
+_sn2606_patch_streamlit_decimals()
 
-# Re-export helpers after SN26.05 appended functions.
-__all__ = [name for name in globals() if not name.startswith('__')]
+def get_effective_product_price(product_id, effective_date=None):
+    """Return product price/currency effective on a date.
+
+    Price history table supports:
+    start_date, end_date, price, currency.
+    If no history row matches, returns Product Master unit_price/currency.
+    """
+    try:
+        effective_date = effective_date or date.today()
+        rows = fetch_all("""
+            SELECT price, currency
+            FROM product_price_history
+            WHERE product_id=?
+              AND start_date <= ?::date
+              AND (end_date IS NULL OR end_date >= ?::date)
+            ORDER BY start_date DESC, id DESC
+            LIMIT 1
+        """, (product_id, str(effective_date), str(effective_date)))
+        if rows:
+            return float(rows[0].get("price") or 0), (rows[0].get("currency") or "")
+    except Exception:
+        pass
+    try:
+        rows = fetch_all("SELECT unit_price, currency FROM products WHERE id=?", (product_id,))
+        if rows:
+            return float(rows[0].get("unit_price") or 0), (rows[0].get("currency") or "")
+    except Exception:
+        pass
+    return 0.0, ""
+
+def ensure_product_price_history_table():
+    """Non-destructive table creation for product effective price history."""
+    try:
+        execute_query("""
+            CREATE TABLE IF NOT EXISTS product_price_history (
+                id SERIAL PRIMARY KEY,
+                product_id INTEGER NOT NULL,
+                currency TEXT,
+                price NUMERIC(18,6) NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE,
+                remarks TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        execute_query("CREATE INDEX IF NOT EXISTS idx_product_price_history_product_dates ON product_price_history(product_id, start_date, end_date)")
+    except Exception:
+        pass

@@ -157,7 +157,7 @@ if not filtered_deliveries:
     st.info('If you expect pending invoices here, confirm that the user has View + Add rights for Payment and product/warehouse access for the related part/warehouse.')
 else:
     delivery_map = {
-        f"Original Inv {d.get('original_invoice_no') or '-'} | Delivery Inv {d.get('delivery_invoice_no') or '-'} | {d.get('customer_name') or '-'} | Shipment {d.get('shipment_no') or '-'} | Pending {float(d.get('pending_amount') or 0):,.2f} {d.get('currency') or ''}": d
+        f"Original Inv {d.get('original_invoice_no') or '-'} | Delivery Inv {d.get('delivery_invoice_no') or '-'} | {d.get('customer_name') or '-'} | Shipment {d.get('shipment_no') or '-'} | Pending {float(d.get('pending_amount') or 0):,.3f} {d.get('currency') or ''}": d
         for d in filtered_deliveries
     }
     selected_delivery_key = searchable_selectbox(
@@ -180,11 +180,11 @@ else:
                     <td><b>Due Date</b></td><td>{selected_delivery.get('payment_due_date') or '-'}</td>
                 </tr>
                 <tr>
-                    <td><b>Invoice Amount</b></td><td>{float(selected_delivery.get('total_invoice_amount') or 0):,.2f} {selected_delivery.get('currency') or ''}</td>
-                    <td><b style="color:#047857;">Received Amount</b></td><td style="color:#047857;font-weight:900;">{float(selected_delivery.get('paid_amount') or 0):,.2f}</td>
+                    <td><b>Invoice Amount</b></td><td>{float(selected_delivery.get('total_invoice_amount') or 0):,.3f} {selected_delivery.get('currency') or ''}</td>
+                    <td><b style="color:#047857;">Received Amount</b></td><td style="color:#047857;font-weight:900;">{float(selected_delivery.get('paid_amount') or 0):,.3f}</td>
                 </tr>
                 <tr>
-                    <td><b style="color:#b91c1c;">Pending Amount</b></td><td style="color:#b91c1c;font-weight:900;">{float(selected_delivery.get('pending_amount') or 0):,.2f}</td>
+                    <td><b style="color:#b91c1c;">Pending Amount</b></td><td style="color:#b91c1c;font-weight:900;">{float(selected_delivery.get('pending_amount') or 0):,.3f}</td>
                     <td><b>Shipment No</b></td><td>{selected_delivery.get('shipment_no') or '-'}</td>
                 </tr>
             </table>

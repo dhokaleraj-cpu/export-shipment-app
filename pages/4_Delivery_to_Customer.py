@@ -152,17 +152,17 @@ else:
                 qty = st.number_input('Qty', min_value=0.0, max_value=float(row['balance_qty']), value=float(st.session_state.get(qty_key, 0.0) or 0.0), step=1.0, key=qty_key, label_visibility='collapsed')
             with dc5:
                 price_key = f"delivery_price_{row['id']}"
-                price = st.number_input('Price', min_value=0.0, value=float(st.session_state.get(price_key, row['unit_price'] or 0) or 0), step=1.0, key=price_key, label_visibility='collapsed')
+                price = st.number_input('Price', min_value=0.0, value=float(st.session_state.get(price_key, row['unit_price'] or 0) or 0), step=0.001, format='%.3f', key=price_key, label_visibility='collapsed')
             with dc6:
                 amount = qty * price
-                st.write(f"{amount:,.2f} {row['currency']}")
+                st.write(f"{amount:,.3f} {row['currency']}")
             row['po_number'] = edited_po_number.strip()
             row['po_date'] = str(edited_po_date)
             if qty > 0:
                 total_qty += qty
                 total_amount += amount
                 delivery_inputs.append((row, qty_key, price_key))
-        st.markdown(f'<div class="total-box">Total Delivery Qty: {total_qty} &nbsp;&nbsp; | &nbsp;&nbsp; Total Amount: {total_amount:,.2f}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="total-box">Total Delivery Qty: {total_qty} &nbsp;&nbsp; | &nbsp;&nbsp; Total Amount: {total_amount:,.3f}</div>', unsafe_allow_html=True)
         st.caption('Pending pallet list moved to separate page for faster Delivery Entry loading.')
         if st.button('Save Delivery & Print', type='primary', key='save_delivery_fifo'):
             if not delivery_invoice_no.strip():
