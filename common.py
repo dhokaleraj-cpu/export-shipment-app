@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 26.04"
+APP_VERSION = "SN 26.05"
 
 
 # ---------------------------------------------------------------------------
@@ -4773,20 +4773,25 @@ def render_payment_subnav(active_key="payment"):
 __all__ = [name for name in globals() if not name.startswith('__')]
 
 
+
+# ---------------------------------------------------------------------------
+# SN 26.05 - 3 Decimal formatting support across Shipment, Delivery, Payment
+# ---------------------------------------------------------------------------
+SN2605_DECIMAL_KEYWORDS = [
+    "rate", "price", "amount", "sale", "value", "paid", "pending", "balance",
+    "invoice_amount", "paid_amount", "pending_amount", "payment_received_amount",
+    "unit_price", "average_price", "total_sale", "total_amount", "warehouse_stock_amount"
+]
+
 def format_rate_price_amount_3decimals(df):
     """App-wide display helper: rate, price and amount fields as 3 decimals."""
     try:
-        if df is None or df.empty:
+        if df is None or not hasattr(df, "copy") or df.empty:
             return df
         out = df.copy()
-        decimal_keywords = [
-            "rate", "price", "amount", "sale", "value", "paid", "pending", "balance",
-            "invoice_amount", "paid_amount", "pending_amount", "payment_received_amount",
-            "unit_price", "average_price"
-        ]
         for col in out.columns:
             col_l = str(col).lower()
-            if any(k in col_l for k in decimal_keywords):
+            if any(k in col_l for k in SN2605_DECIMAL_KEYWORDS):
                 try:
                     out[col] = pd.to_numeric(out[col], errors="coerce").map(lambda x: "" if pd.isna(x) else f"{float(x):.3f}")
                 except Exception:
@@ -4794,3 +4799,33 @@ def format_rate_price_amount_3decimals(df):
         return out
     except Exception:
         return df
+
+def _sn2605_patch_dataframe_3decimals():
+    """Patch st.dataframe/st.table once so Shipment/Delivery/Payment grids show 3 decimals."""
+    try:
+        if getattr(st, "_sn2605_decimal_patch_done", False):
+            return
+        st._sn2605_original_dataframe = st.dataframe
+        st._sn2605_original_table = st.table
+        def _patched_dataframe(data=None, *args, **kwargs):
+            try:
+                data = format_rate_price_amount_3decimals(data)
+            except Exception:
+                pass
+            return st._sn2605_original_dataframe(data, *args, **kwargs)
+        def _patched_table(data=None, *args, **kwargs):
+            try:
+                data = format_rate_price_amount_3decimals(data)
+            except Exception:
+                pass
+            return st._sn2605_original_table(data, *args, **kwargs)
+        st.dataframe = _patched_dataframe
+        st.table = _patched_table
+        st._sn2605_decimal_patch_done = True
+    except Exception:
+        pass
+
+_sn2605_patch_dataframe_3decimals()
+
+# Re-export helpers after SN26.05 appended functions.
+__all__ = [name for name in globals() if not name.startswith('__')]

@@ -1,12 +1,12 @@
 from common import *
 
-REPORTS_VERSION = "SN 26.04"
+REPORTS_VERSION = "SN 26.05"
 
 page_setup()
 require_page_view("reports")
 show_edit_permission_status("reports")
 
-show_header("Reports", "SN 26.04 - Export Shipment Monitoring System")
+show_header("Reports", "SN 26.05 - Export Shipment Monitoring System")
 access_notice()
 
 # ---------------------------------------------------------------------------
@@ -23,6 +23,7 @@ REPORTS = [
     "Payment Received Report",
     "Customer Wise Shipment Report",
     "Customer Wise Delivery Report",
+    "Palletwise Pending Quantity",
 ]
 
 
@@ -84,6 +85,10 @@ def _base_filters(date_expr=None, include_delivery_invoice=True):
 
     if include_delivery_invoice:
         clause, values = _like_clause("d.delivery_invoice_no", delivery_invoice_filter)
+        clauses.append(clause)
+        params.extend(values)
+
+        clause, values = _like_clause("d.asn_number", asn_filter)
         clauses.append(clause)
         params.extend(values)
 
@@ -682,6 +687,47 @@ def get_report_rows(report_name):
             ORDER BY c.customer_name, d.delivery_date DESC, d.delivery_invoice_no
         """, params)
 
+    if report_name == "Palletwise Pending Quantity":
+        clauses, params = [], []
+        for clause, values in [
+            _like_clause("s.invoice_no", original_invoice_filter),
+            _like_clause("p.product_code || ' ' || p.product_name", part_filter),
+            _like_clause("c.customer_name || ' ' || COALESCE(w.warehouse_name,'')", customer_filter),
+            _date_clause("s.shipment_date", from_date, to_date),
+        ]:
+            clauses.append(clause)
+            params.extend(values)
+        fsql = "".join(clauses)
+        return _run_query(f"""
+            SELECT
+                s.invoice_no AS original_invoice_no,
+                s.shipment_no,
+                s.shipment_date,
+                c.customer_name,
+                w.warehouse_name,
+                p.product_code,
+                p.product_name,
+                b.pallet_no,
+                b.box_no,
+                b.original_qty AS pallet_qty,
+                COALESCE(del.delivery_qty,0) AS delivery_qty,
+                b.original_qty - COALESCE(del.delivery_qty,0) AS pending_qty
+            FROM shipment_boxes b
+            JOIN shipments s ON s.id = b.shipment_id
+            JOIN products p ON p.id = b.product_id
+            LEFT JOIN warehouses w ON w.id = s.warehouse_id
+            LEFT JOIN customers c ON c.id = s.customer_id
+            LEFT JOIN (
+                SELECT box_id, SUM(delivered_qty) AS delivery_qty
+                FROM customer_deliveries
+                GROUP BY box_id
+            ) del ON del.box_id = b.id
+            WHERE 1=1
+            {fsql}
+            /*ACCESS_FILTER*/
+            ORDER BY s.shipment_date DESC, s.invoice_no, b.pallet_no, b.box_no, p.product_code
+        """, params)
+
     return []
 
 
@@ -711,7 +757,9 @@ with f3:
 with f4:
     delivery_invoice_filter = st.text_input("Delivery Invoice Number", key="sn26_delivery_invoice_filter")
 with f5:
-    row_limit = st.selectbox("Max Rows", [100, 250, 500, 1000, 2000, 5000], index=2, key="sn26_row_limit")
+    asn_filter = st.text_input("ASN Number", key="sn26_asn_filter")
+
+row_limit = st.selectbox("Max Rows", [100, 250, 500, 1000, 2000, 5000], index=2, key="sn26_row_limit")
 
 generate = st.button("GENERATE REPORT", type="primary", width="stretch", key="sn26_generate_report")
 st.markdown("</div>", unsafe_allow_html=True)
