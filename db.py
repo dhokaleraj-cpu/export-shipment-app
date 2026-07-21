@@ -215,6 +215,9 @@ def init_db():
         )
         """,
         "CREATE INDEX IF NOT EXISTS idx_product_price_history_product_dates ON product_price_history(product_id, start_date, end_date)",
+        "ALTER TABLE product_price_history ADD COLUMN IF NOT EXISTS po_number TEXT",
+        "ALTER TABLE product_price_history ADD COLUMN IF NOT EXISTS po_date DATE",
+        "ALTER TABLE product_price_history ADD COLUMN IF NOT EXISTS po_copy_path TEXT",
         "CREATE TABLE IF NOT EXISTS user_product_access (id SERIAL PRIMARY KEY, username TEXT NOT NULL, product_id INTEGER NOT NULL, can_access BOOLEAN DEFAULT TRUE, UNIQUE(username, product_id))",
         "CREATE TABLE IF NOT EXISTS user_warehouse_access (id SERIAL PRIMARY KEY, username TEXT NOT NULL, warehouse_id INTEGER NOT NULL, can_access BOOLEAN DEFAULT TRUE, UNIQUE(username, warehouse_id))",
         "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS warehouse_id INTEGER",

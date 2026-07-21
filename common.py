@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 26.06"
+APP_VERSION = "SN 26.07"
 
 
 # ---------------------------------------------------------------------------
@@ -2756,30 +2756,70 @@ def product_form():
             ph_price = st.number_input("Effective Price", min_value=0.0, step=0.001, format="%.3f", value=float(ph_product.get("unit_price") or 0), key="price_history_price")
         with ph_c4:
             ph_currency = st.selectbox("Effective Currency", CURRENCIES, index=CURRENCIES.index(ph_product.get("currency") or "USD") if (ph_product.get("currency") or "USD") in CURRENCIES else 0, key="price_history_currency")
+
+        ph_p1, ph_p2, ph_p3 = st.columns([1.2, 1.0, 1.8])
+        with ph_p1:
+            ph_po_number = st.text_input("PO Number", value=str(ph_product.get("po_number") or ""), key="price_history_po_number")
+        with ph_p2:
+            ph_po_date = st.date_input("PO Date", value=parse_date_for_input(ph_product.get("po_date")), key="price_history_po_date")
+        with ph_p3:
+            ph_po_copy_file = st.file_uploader("Attach PO Copy PDF", type=["pdf"], key="price_history_po_copy_pdf")
         ph_remarks = st.text_input("Price Remarks", key="price_history_remarks", placeholder="Example: 2026 current price")
         if st.button("Save Effective Price Period", type="primary", key="save_product_price_history"):
             if ph_end and ph_end < ph_start:
                 st.error("End Date cannot be before Start Date.")
             else:
+                price_history_po_copy_path = None
+                try:
+                    if ph_po_copy_file:
+                        safe_po = str(ph_po_number or "PO").replace("/", "_").replace("\\", "_").replace(" ", "_")
+                        price_history_po_copy_path = save_upload(ph_po_copy_file, f"product_price_po_{ph_product['id']}_{safe_po}")
+                except Exception:
+                    price_history_po_copy_path = None
+
                 execute_query("""
                     INSERT INTO product_price_history
-                    (product_id, currency, price, start_date, end_date, remarks)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (ph_product["id"], ph_currency, ph_price, str(ph_start), str(ph_end) if ph_end else None, ph_remarks))
-                # Also update product master price if this is current/no-end price.
+                    (product_id, currency, price, start_date, end_date, remarks, po_number, po_date, po_copy_path)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    ph_product["id"], ph_currency, ph_price, str(ph_start), str(ph_end) if ph_end else None,
+                    ph_remarks, ph_po_number.strip(), str(ph_po_date), price_history_po_copy_path
+                ))
+                # Also update product master price and PO reference if this is current/no-end price.
                 if ph_current:
-                    execute_query("UPDATE products SET unit_price=?, currency=? WHERE id=?", (ph_price, ph_currency, ph_product["id"]))
+                    execute_query("UPDATE products SET unit_price=?, currency=?, po_number=?, po_date=? WHERE id=?", (ph_price, ph_currency, ph_po_number.strip(), str(ph_po_date), ph_product["id"]))
                 st.success("Effective price period saved successfully.")
                 st.rerun()
 
         ph_rows = fetch_all("""
-            SELECT h.id, p.product_code, p.product_name, h.start_date, h.end_date, h.price, h.currency, h.remarks
+            SELECT h.id, p.product_code, p.product_name, h.start_date, h.end_date, h.price, h.currency,
+                   h.po_number, h.po_date, h.po_copy_path, h.remarks
             FROM product_price_history h
             JOIN products p ON p.id = h.product_id
             WHERE h.product_id=?
             ORDER BY h.start_date DESC, h.id DESC
         """, (ph_product["id"],))
         show_filtered_df(ph_rows, "product_price_history", total=False)
+
+        po_copy_rows = [r for r in (ph_rows or []) if r.get("po_copy_path")]
+        if po_copy_rows:
+            st.markdown("#### Download PO Copies")
+            for rr in po_copy_rows:
+                po_path = Path(str(rr.get("po_copy_path") or ""))
+                if po_path.exists():
+                    try:
+                        with open(po_path, "rb") as _po_file:
+                            st.download_button(
+                                label=f"Download PO Copy - {rr.get('po_number') or rr.get('id')}",
+                                data=_po_file.read(),
+                                file_name=po_path.name,
+                                mime="application/pdf",
+                                key=f"download_price_history_po_{rr.get('id')}"
+                            )
+                    except Exception:
+                        st.caption(f"PO copy saved but could not be read: {po_path}")
+                else:
+                    st.caption(f"PO copy file not found for history ID {rr.get('id')}: {po_path}")
 
 
 def master_form(title, table, fields, allowed_roles=("admin", "super_admin")):
@@ -4972,5 +5012,8 @@ def ensure_product_price_history_table():
             )
         """)
         execute_query("CREATE INDEX IF NOT EXISTS idx_product_price_history_product_dates ON product_price_history(product_id, start_date, end_date)")
+        execute_query("ALTER TABLE product_price_history ADD COLUMN IF NOT EXISTS po_number TEXT")
+        execute_query("ALTER TABLE product_price_history ADD COLUMN IF NOT EXISTS po_date DATE")
+        execute_query("ALTER TABLE product_price_history ADD COLUMN IF NOT EXISTS po_copy_path TEXT")
     except Exception:
         pass
