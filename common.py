@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 26.11"
+APP_VERSION = "SN 26.13"
 
 
 # ---------------------------------------------------------------------------
@@ -5105,3 +5105,6 @@ def ensure_product_price_history_table():
 
 
 # SN 26.09 image export button removed from export buttons.
+
+
+# SN 26.13 effective price decimal verification: shipment_common, delivery_common, shipment/delivery print layouts use 3 decimals.

@@ -126,12 +126,12 @@ def delivery_invoice_pdf_bytes(invoice, line_items):
             item.get("box_no") or "",
             item.get("po_number") or "",
             format_date_ddmmyyyy(item.get("po_date") or ""),
-            f"{qty:,.2f}",
-            f"{price:,.2f}",
+            f"{qty:,.3f}",
+            f"{price:,.3f}",
             item.get("currency") or invoice.get("currency") or "",
-            f"{amount:,.2f}",
+            f"{amount:,.3f}",
         ])
-    data.append(["", _p("TOTAL", bold), "", "", "", "", f"{total_qty:,.2f}", "", invoice.get("currency") or (line_items[0].get('currency') if line_items else ''), f"{total_amt:,.2f}"])
+    data.append(["", _p("TOTAL", bold), "", "", "", "", f"{total_qty:,.3f}", "", invoice.get("currency") or (line_items[0].get('currency') if line_items else ''), f"{total_amt:,.3f}"])
 
     item_table = Table(data, colWidths=[24, 126, 58, 45, 55, 55, 48, 48, 32, 60], repeatRows=1)
     item_table.setStyle(TableStyle([
@@ -154,10 +154,10 @@ def delivery_invoice_pdf_bytes(invoice, line_items):
         packaging += ("\n" if packaging else "") + str(invoice.get("packaging_remark"))
     footer_table = Table([
         [_p("<b>PACKAGING DETAILS</b>", bold), _p("<b>AMOUNT SUMMARY</b>", bold), "", ""],
-        [_p(packaging, normal), "SUBTOTAL", invoice.get("currency") or "", f"{total_amt:,.2f}"],
+        [_p(packaging, normal), "SUBTOTAL", invoice.get("currency") or "", f"{total_amt:,.3f}"],
         ["", "TAX", "", "-"],
         ["", "OTHER", "", "-"],
-        ["", "TOTAL", invoice.get("currency") or "", f"{total_amt:,.2f}"],
+        ["", "TOTAL", invoice.get("currency") or "", f"{total_amt:,.3f}"],
         [_p("BANK DETAILS:<br/>BANK ACCOUNT NO : 004330150000003<br/>BANK IFSC CODE : BKID0000043<br/>BANK SWIFT CODE : BKIDINBBPPD", normal), "", "", ""],
     ], colWidths=[page_width-180, 80, 35, 65])
     footer_table.setStyle(TableStyle([

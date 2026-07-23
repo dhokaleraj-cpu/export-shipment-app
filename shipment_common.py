@@ -100,10 +100,10 @@ def shipment_pdf_bytes(shipment, rows):
             r.get("product_code") or "",
             r.get("po_number") or "",
             f"{qty:,.0f}",
-            f"{float(r.get('unit_price') or 0):,.2f}",
-            f"{amt:,.2f}",
+            f"{float(r.get('unit_price') or 0):,.3f}",
+            f"{amt:,.3f}",
         ])
-    data.append(["", "", "", "", "TOTAL", f"{total_qty:,.0f}", "", f"{total_amount:,.2f}"])
+    data.append(["", "", "", "", "TOTAL", f"{total_qty:,.3f}", "", f"{total_amount:,.3f}"])
     table = Table(data, colWidths=[38, 68, 55, 70, 60, 55, 55, 70])
     table.setStyle(TableStyle([
         ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
@@ -223,11 +223,11 @@ def shipment_invoice_pdf_bytes(shipment, rows):
             str(r.get("po_date") or ""),
             str(r.get("pallet_no") or ""),
             f"{qty:,.0f}",
-            f"{rate:,.2f}",
+            f"{rate:,.3f}",
             str(r.get("currency") or ""),
-            f"{amt:,.2f}",
+            f"{amt:,.3f}",
         ])
-    data.append(["", "TOTAL", "", "", "", "", f"{total_qty:,.0f}", "", currency, f"{total_amount:,.2f}"])
+    data.append(["", "TOTAL", "", "", "", "", f"{total_qty:,.3f}", "", currency, f"{total_amount:,.3f}"])
 
     body_table = Table(data, colWidths=[22, 105, 72, 52, 52, 48, 45, 45, 35, 70], repeatRows=1)
     body_table.setStyle(TableStyle([
@@ -249,10 +249,10 @@ def shipment_invoice_pdf_bytes(shipment, rows):
     footer_data = [
         [Paragraph("<b>PACKAGING DETAILS:</b>", normal), Paragraph("<b>AMOUNT SUMMARY</b>", normal)],
         [Paragraph("As per shipment packing list", normal), Table([
-            ["SUBTOTAL", currency, f"{total_amount:,.2f}"],
+            ["SUBTOTAL", currency, f"{total_amount:,.3f}"],
             ["TAX", "", "-"],
             ["OTHER", "", "-"],
-            ["TOTAL", currency, f"{total_amount:,.2f}"],
+            ["TOTAL", currency, f"{total_amount:,.3f}"],
         ], colWidths=[72, 36, 78])]
     ]
     footer_table = Table(footer_data, colWidths=[page_width*0.68, page_width*0.32], rowHeights=[24, 82])
