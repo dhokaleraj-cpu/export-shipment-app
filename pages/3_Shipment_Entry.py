@@ -1,5 +1,18 @@
 from common import *
 
+def _local_effective_product_price(product_id, effective_date=None):
+    try:
+        return get_effective_product_price(product_id, effective_date)
+    except Exception:
+        try:
+            rows = fetch_all("SELECT unit_price, currency FROM products WHERE id=?", (product_id,))
+            if rows:
+                return float(rows[0].get("unit_price") or 0), (rows[0].get("currency") or "")
+        except Exception:
+            pass
+    return 0.0, ""
+
+
 page_setup()
 
 require_page_edit('shipment')
@@ -92,7 +105,7 @@ else:
         selected_product = st.selectbox('Product Code', product_options, key='shipment_product_select', label_visibility='collapsed')
 
     selected_product_data = product_info[selected_product]
-    auto_price, effective_currency = get_effective_product_price(selected_product_data.get('id'), shipment_date)
+    auto_price, effective_currency = _local_effective_product_price(selected_product_data.get('id'), shipment_date)
     auto_currency = effective_currency or selected_product_data.get('currency') or 'USD'
     product_id_for_key = str(selected_product_data.get('id') or selected_product).replace(' ', '_').replace('|', '_').replace('/', '_')
 

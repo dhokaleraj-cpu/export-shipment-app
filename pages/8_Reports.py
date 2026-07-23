@@ -1,12 +1,14 @@
 from common import *
+import html
+from reportlab.lib.styles import ParagraphStyle
 
-REPORTS_VERSION = "SN 26.13"
+REPORTS_VERSION = "SN 26.14"
 
 page_setup()
 require_page_view("reports")
 show_edit_permission_status("reports")
 
-show_header("Reports", "SN 26.13 - Export Shipment Monitoring System")
+show_header("Reports", "SN 26.14 - Export Shipment Monitoring System")
 access_notice()
 
 # ---------------------------------------------------------------------------
@@ -461,7 +463,19 @@ def _pdf_bytes(df, title):
     story = []
 
     pdf_df = _format_rate_price_amount_3decimals(_add_total_footer(df.copy()))
-    data = [list(pdf_df.columns)] + pdf_df.astype(str).values.tolist()
+    wrap_style = ParagraphStyle("sn_report_wrap", parent=styles["Normal"], fontName="Helvetica", fontSize=5.6, leading=6.2, wordWrap="CJK")
+    head_style = ParagraphStyle("sn_report_head_wrap", parent=wrap_style, fontName="Helvetica-Bold", textColor=colors.white, alignment=1)
+
+    def _wrap_pdf_cell(value, style):
+        try:
+            safe = html.escape(str(value or "")).replace("\n", "<br/>")
+            return Paragraph(safe, style)
+        except Exception:
+            return str(value or "")
+
+    data = [[_wrap_pdf_cell(c, head_style) for c in list(pdf_df.columns)]]
+    for row in pdf_df.astype(str).values.tolist():
+        data.append([_wrap_pdf_cell(cell, wrap_style) for cell in row])
 
     # Force table to use full available page width, matching the report header.
     available_width = landscape(A4)[0] - doc.leftMargin - doc.rightMargin

@@ -2,8 +2,15 @@ from common import *
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import io
+
+def _shipment_pdf_p(value, style):
+    try:
+        return Paragraph(str(value or "").replace("\n", "<br/>"), style)
+    except Exception:
+        return str(value or "")
+
 
 def shipment_access_sql():
     product_ids = current_user_allowed_product_ids()
@@ -66,6 +73,8 @@ def shipment_pdf_bytes(shipment, rows):
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=22, leftMargin=22, topMargin=20, bottomMargin=20)
     styles = getSampleStyleSheet()
+    wrap_style = ParagraphStyle("shipment_wrap", parent=styles["Normal"], fontName="Helvetica", fontSize=6.5, leading=7.2, wordWrap="CJK")
+    head_wrap = ParagraphStyle("shipment_head_wrap", parent=wrap_style, fontName="Helvetica-Bold", textColor=colors.white, alignment=1)
     story = []
     story.append(Paragraph("SHIPMENT / PALLET DETAILS", styles["Title"]))
     story.append(Spacer(1, 8))
@@ -85,7 +94,7 @@ def shipment_pdf_bytes(shipment, rows):
     ]))
     story.append(t)
     story.append(Spacer(1, 10))
-    data = [["FIFO", "Pallet", "Box", "Product", "PO", "Qty", "Price", "Amount"]]
+    data = [[_shipment_pdf_p(x, head_wrap) for x in ["FIFO", "Pallet", "Box", "Product", "PO", "Qty", "Price", "Amount"]]]
     total_qty = 0
     total_amount = 0
     for r in rows:
@@ -94,16 +103,16 @@ def shipment_pdf_bytes(shipment, rows):
         total_qty += qty
         total_amount += amt
         data.append([
-            r.get("fifo_row_id") or r.get("id"),
-            r.get("pallet_no") or "",
-            r.get("box_no") or "",
-            r.get("product_code") or "",
-            r.get("po_number") or "",
-            f"{qty:,.0f}",
-            f"{float(r.get('unit_price') or 0):,.3f}",
-            f"{amt:,.3f}",
+            _shipment_pdf_p(r.get("fifo_row_id") or r.get("id"), wrap_style),
+            _shipment_pdf_p(r.get("pallet_no") or "", wrap_style),
+            _shipment_pdf_p(r.get("box_no") or "", wrap_style),
+            _shipment_pdf_p(r.get("product_code") or "", wrap_style),
+            _shipment_pdf_p(r.get("po_number") or "", wrap_style),
+            _shipment_pdf_p(f"{qty:,.3f}", wrap_style),
+            _shipment_pdf_p(f"{float(r.get('unit_price') or 0):,.3f}", wrap_style),
+            _shipment_pdf_p(f"{amt:,.3f}", wrap_style),
         ])
-    data.append(["", "", "", "", "TOTAL", f"{total_qty:,.3f}", "", f"{total_amount:,.3f}"])
+    data.append([_shipment_pdf_p("", wrap_style), _shipment_pdf_p("", wrap_style), _shipment_pdf_p("", wrap_style), _shipment_pdf_p("", wrap_style), _shipment_pdf_p("TOTAL", wrap_style), _shipment_pdf_p(f"{total_qty:,.3f}", wrap_style), _shipment_pdf_p("", wrap_style), _shipment_pdf_p(f"{total_amount:,.3f}", wrap_style)])
     table = Table(data, colWidths=[38, 68, 55, 70, 60, 55, 55, 70])
     table.setStyle(TableStyle([
         ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
@@ -133,6 +142,8 @@ def shipment_invoice_pdf_bytes(shipment, rows):
         bottomMargin=14
     )
     styles = getSampleStyleSheet()
+    wrap_style = ParagraphStyle("shipment_invoice_wrap", parent=styles["Normal"], fontName="Helvetica", fontSize=6.4, leading=7.0, wordWrap="CJK")
+    head_wrap = ParagraphStyle("shipment_invoice_head_wrap", parent=wrap_style, fontName="Helvetica-Bold", textColor=colors.white, alignment=1)
     normal = styles["Normal"]
     title_style = styles["Title"]
     normal.fontName = "Helvetica"
@@ -204,7 +215,7 @@ def shipment_invoice_pdf_bytes(shipment, rows):
     story.append(meta_table)
     story.append(Spacer(1, 6))
 
-    data = [["Sr", "Product", "FSI Orig Inv #", "PO No", "PO Date", "Pallet", "Qty", "Rate", "Cur", "Amount"]]
+    data = [[_shipment_pdf_p(x, head_wrap) for x in ["Sr", "Product", "FSI Orig Inv #", "PO No", "PO Date", "Pallet", "Qty", "Rate", "Cur", "Amount"]]]
     total_qty = 0
     total_amount = 0
     currency = shipment.get("currency") or ""
@@ -216,18 +227,18 @@ def shipment_invoice_pdf_bytes(shipment, rows):
         total_amount += amt
         currency = r.get("currency") or currency
         data.append([
-            str(i),
-            str(r.get("product_code") or ""),
-            str(r.get("invoice_no") or shipment.get("invoice_no") or ""),
-            str(r.get("po_number") or ""),
-            str(r.get("po_date") or ""),
-            str(r.get("pallet_no") or ""),
-            f"{qty:,.0f}",
-            f"{rate:,.3f}",
-            str(r.get("currency") or ""),
-            f"{amt:,.3f}",
+            _shipment_pdf_p(str(i), wrap_style),
+            _shipment_pdf_p(str(r.get("product_code") or ""), wrap_style),
+            _shipment_pdf_p(str(r.get("invoice_no") or shipment.get("invoice_no") or ""), wrap_style),
+            _shipment_pdf_p(str(r.get("po_number") or ""), wrap_style),
+            _shipment_pdf_p(str(r.get("po_date") or ""), wrap_style),
+            _shipment_pdf_p(str(r.get("pallet_no") or ""), wrap_style),
+            _shipment_pdf_p(f"{qty:,.3f}", wrap_style),
+            _shipment_pdf_p(f"{rate:,.3f}", wrap_style),
+            _shipment_pdf_p(str(r.get("currency") or ""), wrap_style),
+            _shipment_pdf_p(f"{amt:,.3f}", wrap_style),
         ])
-    data.append(["", "TOTAL", "", "", "", "", f"{total_qty:,.3f}", "", currency, f"{total_amount:,.3f}"])
+    data.append([_shipment_pdf_p("", wrap_style), _shipment_pdf_p("TOTAL", wrap_style), _shipment_pdf_p("", wrap_style), _shipment_pdf_p("", wrap_style), _shipment_pdf_p("", wrap_style), _shipment_pdf_p("", wrap_style), _shipment_pdf_p(f"{total_qty:,.3f}", wrap_style), _shipment_pdf_p("", wrap_style), _shipment_pdf_p(currency, wrap_style), _shipment_pdf_p(f"{total_amount:,.3f}", wrap_style)])
 
     body_table = Table(data, colWidths=[22, 105, 72, 52, 52, 48, 45, 45, 35, 70], repeatRows=1)
     body_table.setStyle(TableStyle([

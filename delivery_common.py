@@ -120,18 +120,18 @@ def delivery_invoice_pdf_bytes(invoice, line_items):
         total_qty += qty
         total_amt += amount
         data.append([
-            idx,
+            _p(idx, normal),
             _p(f"{item.get('product_code','')}<br/>{item.get('product_name','')}", normal),
-            item.get("pallet_no") or "",
-            item.get("box_no") or "",
-            item.get("po_number") or "",
-            format_date_ddmmyyyy(item.get("po_date") or ""),
-            f"{qty:,.3f}",
-            f"{price:,.3f}",
-            item.get("currency") or invoice.get("currency") or "",
-            f"{amount:,.3f}",
+            _p(item.get("pallet_no") or "", normal),
+            _p(item.get("box_no") or "", normal),
+            _p(item.get("po_number") or "", normal),
+            _p(format_date_ddmmyyyy(item.get("po_date") or ""), normal),
+            _p(f"{qty:,.3f}", normal),
+            _p(f"{price:,.3f}", normal),
+            _p(item.get("currency") or invoice.get("currency") or "", normal),
+            _p(f"{amount:,.3f}", normal),
         ])
-    data.append(["", _p("TOTAL", bold), "", "", "", "", f"{total_qty:,.3f}", "", invoice.get("currency") or (line_items[0].get('currency') if line_items else ''), f"{total_amt:,.3f}"])
+    data.append([_p("", bold), _p("TOTAL", bold), _p("", bold), _p("", bold), _p("", bold), _p("", bold), _p(f"{total_qty:,.3f}", bold), _p("", bold), _p(invoice.get("currency") or (line_items[0].get('currency') if line_items else ''), bold), _p(f"{total_amt:,.3f}", bold)])
 
     item_table = Table(data, colWidths=[24, 126, 58, 45, 55, 55, 48, 48, 32, 60], repeatRows=1)
     item_table.setStyle(TableStyle([

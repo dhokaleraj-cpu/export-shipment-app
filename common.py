@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 26.13"
+APP_VERSION = "SN 26.14"
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +66,7 @@ from reportlab.lib import colors
 
 from reportlab.lib.pagesizes import A4, landscape
 
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
@@ -2124,6 +2124,15 @@ def edit_button_column(rows, prefix):
     # The visual table shows Edit as last column; actual edit controls appear below for selected row.
     return [dict(r, Edit="Use edit selector below") for r in rows]
 
+
+def _pdf_wrap_cell(value, style):
+    """Wrap PDF table text safely."""
+    try:
+        safe = html.escape(str(value or "")).replace("\n", "<br/>")
+        return Paragraph(safe, style)
+    except Exception:
+        return str(value or "")
+
 def to_excel_bytes(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -2132,19 +2141,29 @@ def to_excel_bytes(df):
 
 def to_pdf_bytes(df, title):
     output = io.BytesIO()
-    doc = SimpleDocTemplate(output, pagesize=landscape(A4))
+    doc = SimpleDocTemplate(output, pagesize=landscape(A4), leftMargin=18, rightMargin=18, topMargin=24, bottomMargin=24)
     styles = getSampleStyleSheet()
-    data = [list(df.columns)] + df.astype(str).values.tolist()
-    table = Table(data, repeatRows=1)
+    wrap_style = ParagraphStyle("wrap", parent=styles["Normal"], fontName="Helvetica", fontSize=6.2, leading=7.0, wordWrap="CJK")
+    head_style = ParagraphStyle("headwrap", parent=wrap_style, fontName="Helvetica-Bold", textColor=colors.white, alignment=1)
+    title_style = styles["Title"]
+    data = [[_pdf_wrap_cell(c, head_style) for c in list(df.columns)]]
+    for row in df.astype(str).values.tolist():
+        data.append([_pdf_wrap_cell(cell, wrap_style) for cell in row])
+    available_width = landscape(A4)[0] - doc.leftMargin - doc.rightMargin
+    col_count = max(len(df.columns), 1)
+    table = Table(data, colWidths=[available_width / col_count] * col_count, repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0b5cab")),
         ("TEXTCOLOR", (0,0), (-1,0), colors.white),
         ("GRID", (0,0), (-1,-1), 0.4, colors.grey),
         ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-        ("FONTSIZE", (0,0), (-1,-1), 7),
+        ("FONTSIZE", (0,0), (-1,-1), 6.2),
         ("ALIGN", (0,0), (-1,-1), "CENTER"),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("LEFTPADDING", (0,0), (-1,-1), 2),
+        ("RIGHTPADDING", (0,0), (-1,-1), 2),
     ]))
-    doc.build([Paragraph(title, styles["Title"]), Spacer(1,10), table])
+    doc.build([Paragraph(title, title_style), Spacer(1,10), table])
     return output.getvalue()
 
 def to_image_bytes(df, title):
@@ -5108,3 +5127,7 @@ def ensure_product_price_history_table():
 
 
 # SN 26.13 effective price decimal verification: shipment_common, delivery_common, shipment/delivery print layouts use 3 decimals.
+
+
+# SN 26.14 final export refresh - include effective price helpers in from common import *.
+__all__ = [name for name in globals() if not name.startswith("__")]

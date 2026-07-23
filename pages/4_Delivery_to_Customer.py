@@ -1,5 +1,18 @@
 from delivery_common import *
 
+def _local_effective_product_price(product_id, effective_date=None):
+    try:
+        return get_effective_product_price(product_id, effective_date)
+    except Exception:
+        try:
+            rows = fetch_all("SELECT unit_price, currency FROM products WHERE id=?", (product_id,))
+            if rows:
+                return float(rows[0].get("unit_price") or 0), (rows[0].get("currency") or "")
+        except Exception:
+            pass
+    return 0.0, ""
+
+
 page_setup()
 require_page_view('delivery')
 show_edit_permission_status('delivery')
@@ -152,7 +165,7 @@ else:
                 qty = st.number_input('Qty', min_value=0.0, max_value=float(row['balance_qty']), value=float(st.session_state.get(qty_key, 0.0) or 0.0), step=1.0, key=qty_key, label_visibility='collapsed')
             with dc5:
                 price_key = f"delivery_price_{row['id']}"
-                effective_delivery_price, effective_delivery_currency = get_effective_product_price(row.get('product_id'), delivery_date)
+                effective_delivery_price, effective_delivery_currency = _local_effective_product_price(row.get('product_id'), delivery_date)
                 default_delivery_price = effective_delivery_price if effective_delivery_price else float(row.get('unit_price') or 0)
                 if effective_delivery_currency:
                     row['currency'] = effective_delivery_currency
@@ -179,7 +192,7 @@ else:
                 save_error = False
                 for row, qty_key, price_key in delivery_inputs:
                     qty = float(st.session_state.get(qty_key, 0) or 0)
-                    effective_save_price, effective_save_currency = get_effective_product_price(row.get('product_id'), delivery_date)
+                    effective_save_price, effective_save_currency = _local_effective_product_price(row.get('product_id'), delivery_date)
                     default_save_price = effective_save_price if effective_save_price else float(row.get('unit_price') or 0)
                     price = float(st.session_state.get(price_key, default_save_price) or 0)
                     if effective_save_currency:
