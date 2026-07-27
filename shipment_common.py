@@ -1,6 +1,6 @@
 from common import *
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import io
@@ -31,6 +31,7 @@ def fetch_shipment_headers(limit=200):
         SELECT
             s.id, s.shipment_no, s.invoice_no, s.po_number, s.po_date, s.shipment_date,
             s.shipping_bill_no, s.shipping_bill_date, s.shipment_doc_date,
+            COALESCE(s.shipment_status,'In Transit') AS shipment_status, s.warehouse_delivery_date,
             s.forwarder_name, s.incoterm, s.currency, s.invoice_amount,
             sup.supplier_name, w.warehouse_name, c.customer_name
         FROM shipments s
@@ -159,8 +160,15 @@ def shipment_invoice_pdf_bytes(shipment, rows):
     grey = colors.HexColor("#d9d9d9")
     light_total = colors.HexColor("#f3f4f6")
 
+    logo_cell = _shipment_pdf_p("FSI", normal)
+    try:
+        if LOGO_PATH.exists():
+            logo_cell = RLImage(str(LOGO_PATH), width=110, height=34)
+    except Exception:
+        logo_cell = _shipment_pdf_p("FSI", normal)
+
     title_table = Table(
-        [[Paragraph("<b>FSI LOGO</b>", normal), Paragraph("<b>SHIPMENT / COMMERCIAL INVOICE</b>", title_style)]],
+        [[logo_cell, Paragraph("<b>SHIPMENT / COMMERCIAL INVOICE</b>", title_style)]],
         colWidths=[112, page_width - 112],
         rowHeights=[44]
     )
@@ -178,7 +186,9 @@ def shipment_invoice_pdf_bytes(shipment, rows):
         f"<b>Shipment No:</b> {shipment.get('shipment_no') or ''}<br/>"
         f"<b>Original Invoice:</b> {shipment.get('invoice_no') or ''}<br/>"
         f"<b>Shipment Date:</b> {shipment.get('shipment_date') or ''}<br/>"
-        f"<b>Warehouse:</b> {shipment.get('warehouse_name') or ''}"
+        f"<b>Warehouse:</b> {shipment.get('warehouse_name') or ''}<br/>"
+        f"<b>Status:</b> {shipment.get('shipment_status') or 'In Transit'}<br/>"
+        f"<b>Delivered to WH Date:</b> {shipment.get('warehouse_delivery_date') or ''}"
     )
     info_table = Table(
         [[Paragraph(seller_text, normal), Paragraph(shipment_text, normal)],

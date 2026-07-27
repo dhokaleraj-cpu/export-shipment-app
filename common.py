@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 26.14"
+APP_VERSION = "SN 26.15"
 
 
 # ---------------------------------------------------------------------------
@@ -5130,4 +5130,45 @@ def ensure_product_price_history_table():
 
 
 # SN 26.14 final export refresh - include effective price helpers in from common import *.
+
+# ---------------------------------------------------------------------------
+# SN 26.15 - Shipment Delivered to WH / In Transit status support
+# ---------------------------------------------------------------------------
+
+def ensure_shipment_status_columns():
+    """Non-destructive shipment status columns for warehouse receipt tracking."""
+    try:
+        execute_query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS shipment_status TEXT DEFAULT 'In Transit'")
+        execute_query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS warehouse_delivery_date DATE")
+        execute_query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS shipment_status_updated_at TIMESTAMP")
+        execute_query("CREATE INDEX IF NOT EXISTS idx_shipments_status_wh_date ON shipments(shipment_status, warehouse_delivery_date)")
+    except Exception:
+        pass
+
+def render_tuesday_shipment_status_popup():
+    """Every Tuesday reminder to update in-transit shipment status."""
+    try:
+        if date.today().weekday() != 1:
+            return
+        ensure_shipment_status_columns()
+        rows = fetch_all("""
+            SELECT s.id, s.shipment_no, s.invoice_no, s.shipment_date,
+                   COALESCE(s.shipment_status,'In Transit') AS shipment_status,
+                   s.warehouse_delivery_date,
+                   w.warehouse_name,
+                   c.customer_name
+            FROM shipments s
+            LEFT JOIN warehouses w ON w.id = s.warehouse_id
+            LEFT JOIN customers c ON c.id = s.customer_id
+            WHERE COALESCE(s.shipment_status,'In Transit') <> 'Delivered'
+            ORDER BY s.shipment_date DESC NULLS LAST, s.id DESC
+            LIMIT 50
+        """)
+        if rows:
+            st.warning("Tuesday Reminder: Please update shipment status for In Transit shipments.")
+            with st.expander("Tuesday Shipment Status Update Pending", expanded=True):
+                st.dataframe(pd.DataFrame(format_date_columns(rows)), width="stretch", hide_index=True)
+    except Exception:
+        pass
+
 __all__ = [name for name in globals() if not name.startswith("__")]

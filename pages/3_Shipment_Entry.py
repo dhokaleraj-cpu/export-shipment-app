@@ -21,6 +21,8 @@ show_edit_permission_status('shipment')
 show_header('Shipment Entry with Pallet / Product Rows')
 access_notice()
 render_shipment_subnav('shipment')
+ensure_shipment_status_columns()
+render_tuesday_shipment_status_popup()
 suppliers = fetch_all('SELECT * FROM suppliers ORDER BY supplier_name')
 customers = fetch_all('SELECT * FROM customers ORDER BY customer_name')
 ship_to_rows = fetch_all("SELECT * FROM ship_to_masters WHERE COALESCE(is_active, TRUE)=TRUE ORDER BY ship_to_name, ship_to_id")
@@ -81,6 +83,12 @@ else:
         po_date = None  # PO Date is now captured row-wise in Add Pallet/Product Row
         warehouse = st.selectbox('Warehouse', list(warehouse_map.keys()), key='shipment_warehouse')
         selected_shipment_time_days = int(warehouse_info.get(warehouse, {}).get('shipment_time_days') or 0)
+        shipment_status = st.selectbox('Shipment Status', ['In Transit', 'Delivered'], index=0, key='shipment_status_select')
+        warehouse_delivery_date = None
+        if shipment_status == 'Delivered':
+            warehouse_delivery_date = st.date_input('Delivered to WH Date', value=date.today(), key='shipment_delivered_to_wh_date')
+        else:
+            st.caption('In Transit: Delivered to WH Date not applicable. Coverage will use Shipment Date + Shipment Time Days.')
         if ship_to_map:
             shipment_ship_to_key = st.selectbox('Ship To', list(ship_to_map.keys()), key='shipment_ship_to_select')
             selected_shipment_ship_to = ship_to_map[shipment_ship_to_key]
@@ -179,7 +187,7 @@ else:
                 first_po_date = st.session_state.shipment_temp_rows[0].get('po_date') or None
                 first_currency = st.session_state.shipment_temp_rows[0]['currency']
                 path = save_upload(attachment, f'shipment_{shipment_no}')
-                execute_query('\n                            INSERT INTO shipments (shipment_no, invoice_no, po_number, po_date, shipment_date, supplier_id, warehouse_id, customer_id, ship_to_master_id, shipment_time_days, invoice_amount, currency, attachment_path, remarks, shipping_bill_no, shipping_bill_date, shipment_doc_date, forwarder_name, incoterm, forwarder_id, incoterm_id)\n                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n                        ', (shipment_no, invoice_no, first_po_number, first_po_date, str(shipment_date), supplier_map[supplier], warehouse_map[warehouse], customer_map[customer], selected_shipment_ship_to.get('id'), selected_shipment_time_days, total_amount, first_currency, path, remarks, shipping_bill_no, str(shipping_bill_date), str(shipment_doc_date), forwarder_name, incoterm, forwarder_map.get(forwarder_name), incoterm_map.get(incoterm)))
+                execute_query('\n                            INSERT INTO shipments (shipment_no, invoice_no, po_number, po_date, shipment_date, supplier_id, warehouse_id, customer_id, ship_to_master_id, shipment_time_days, shipment_status, warehouse_delivery_date, shipment_status_updated_at, invoice_amount, currency, attachment_path, remarks, shipping_bill_no, shipping_bill_date, shipment_doc_date, forwarder_name, incoterm, forwarder_id, incoterm_id)\n                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n                        ', (shipment_no, invoice_no, first_po_number, first_po_date, str(shipment_date), supplier_map[supplier], warehouse_map[warehouse], customer_map[customer], selected_shipment_ship_to.get('id'), selected_shipment_time_days, shipment_status, str(warehouse_delivery_date) if warehouse_delivery_date else None, total_amount, first_currency, path, remarks, shipping_bill_no, str(shipping_bill_date), str(shipment_doc_date), forwarder_name, incoterm, forwarder_map.get(forwarder_name), incoterm_map.get(incoterm)))
                 shipment_id = fetch_all('SELECT id FROM shipments WHERE shipment_no=?', (shipment_no,))[0]['id']
                 for row in st.session_state.shipment_temp_rows:
                     old_match = fetch_all('\n                                SELECT b.id FROM shipment_boxes b\n                                WHERE b.pallet_no = ? AND b.product_id = ?\n                            ', (row['pallet_no'], row['product_id']))
@@ -193,6 +201,63 @@ else:
                 st.error(f'Shipment save failed. Existing database entries were not changed. Details: {e}')
     st.divider()
     st.caption('Last Shipments and Edit Shipment sections moved to separate subpages for faster Shipment Entry loading.')
+
+    st.divider()
+    st.subheader("Update Shipment Delivered to WH / In Transit Status")
+    st.caption("Delivered shipments use Delivered to WH Date in Coverage Plan. In Transit shipments use Shipment Date + Shipment Time Days.")
+    status_rows = fetch_all("""
+        SELECT s.id, s.shipment_no, s.invoice_no, s.shipment_date,
+               COALESCE(s.shipment_status,'In Transit') AS shipment_status,
+               s.warehouse_delivery_date,
+               w.warehouse_name,
+               c.customer_name
+        FROM shipments s
+        LEFT JOIN warehouses w ON w.id = s.warehouse_id
+        LEFT JOIN customers c ON c.id = s.customer_id
+        ORDER BY s.id DESC
+        LIMIT 150
+    """)
+    if status_rows:
+        status_map = {
+            f"{r.get('id')} | {r.get('shipment_no')} | {r.get('invoice_no')} | {r.get('shipment_status')} | WH Date {format_date_ddmmyyyy(r.get('warehouse_delivery_date')) if r.get('warehouse_delivery_date') else '-'}": r
+            for r in status_rows
+        }
+        selected_status_key = st.selectbox("Select Shipment to Update Status", list(status_map.keys()), key="shipment_status_update_select")
+        selected_status_row = status_map[selected_status_key]
+        su1, su2, su3 = st.columns([1, 1, 1])
+        with su1:
+            updated_status = st.selectbox(
+                "Update Status",
+                ["In Transit", "Delivered"],
+                index=1 if selected_status_row.get("shipment_status") == "Delivered" else 0,
+                key=f"shipment_update_status_{selected_status_row.get('id')}"
+            )
+        with su2:
+            if updated_status == "Delivered":
+                updated_wh_date = st.date_input(
+                    "Delivered to WH Date",
+                    value=parse_date_for_input(selected_status_row.get("warehouse_delivery_date")),
+                    key=f"shipment_update_wh_date_{selected_status_row.get('id')}"
+                )
+            else:
+                updated_wh_date = None
+                st.info("No Delivered to WH Date applicable for In Transit.")
+        with su3:
+            st.write("")
+            st.write("")
+            if st.button("Save Shipment Status", type="primary", key=f"save_shipment_status_{selected_status_row.get('id')}"):
+                execute_query("""
+                    UPDATE shipments
+                    SET shipment_status=?, warehouse_delivery_date=?, shipment_status_updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?
+                """, (updated_status, str(updated_wh_date) if updated_wh_date else None, selected_status_row.get("id")))
+                clear_cache_after_write()
+                st.success("Shipment status updated successfully.")
+                st.rerun()
+        st.dataframe(pd.DataFrame(format_date_columns(status_rows)), width="stretch", hide_index=True)
+    else:
+        st.info("No shipments available to update.")
+
 
 render_slogan_footer()
 st.markdown('<div class="footer">COPYRIGHT BY FOUR STAR INDUSTRIES PVT. LTD.</div>', unsafe_allow_html=True)

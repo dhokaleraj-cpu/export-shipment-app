@@ -121,16 +121,10 @@ def dash_get_product_shipment_time_info(product_id, fallback_days=0):
     return "", int(fallback_days or 0)
 
 def dash_get_week_qty_maps(product_id, shipment_time_days):
-    """Dashboard weekly qty maps using PostgreSQL-safe CTEs.
-
-    Fixes Dashboard Coverage Plan widget:
-    column s.shipment_date must appear in GROUP BY...
-    """
     delivered_week_rows = fetch_all("""
         WITH delivered AS (
-            SELECT
-                date_trunc('week', d.delivery_date::date)::date AS week_start,
-                d.delivered_qty
+            SELECT date_trunc('week', d.delivery_date::date)::date AS week_start,
+                   d.delivered_qty
             FROM customer_deliveries d
             JOIN shipment_boxes b ON d.box_id = b.id
             WHERE b.product_id=?
@@ -141,7 +135,6 @@ def dash_get_week_qty_maps(product_id, shipment_time_days):
         GROUP BY week_start
         ORDER BY week_start
     """, (product_id,))
-
     delivered_by_week = {}
     for rr in delivered_week_rows:
         wk = parse_db_date(rr.get("week_start"))
@@ -150,33 +143,52 @@ def dash_get_week_qty_maps(product_id, shipment_time_days):
 
     effective_days = int(shipment_time_days or 0)
 
-    shipment_week_rows = fetch_all("""
+    wh_rows = fetch_all("""
         WITH shipment_calc AS (
-            SELECT
-                date_trunc(
-                    'week',
-                    (
-                        s.shipment_date::date
-                        + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
-                    )
-                )::date AS week_start,
-                b.original_qty
+            SELECT date_trunc('week', s.warehouse_delivery_date::date)::date AS week_start,
+                   b.original_qty
+            FROM shipment_boxes b
+            JOIN shipments s ON b.shipment_id = s.id
+            WHERE b.product_id=?
+              AND COALESCE(s.shipment_status,'In Transit') = 'Delivered'
+              AND s.warehouse_delivery_date IS NOT NULL
+        )
+        SELECT week_start, COALESCE(SUM(original_qty),0) AS qty
+        FROM shipment_calc
+        GROUP BY week_start
+    """, (product_id,))
+
+    transit_rows = fetch_all("""
+        WITH shipment_calc AS (
+            SELECT date_trunc(
+                       'week',
+                       (
+                           s.shipment_date::date
+                           + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
+                       )
+                   )::date AS week_start,
+                   b.original_qty
             FROM shipment_boxes b
             JOIN shipments s ON b.shipment_id = s.id
             WHERE b.product_id=?
               AND s.shipment_date IS NOT NULL
+              AND (
+                    COALESCE(s.shipment_status,'In Transit') <> 'Delivered'
+                    OR s.warehouse_delivery_date IS NULL
+                  )
         )
-        SELECT week_start, COALESCE(SUM(original_qty),0) AS shipment_delivery_qty
+        SELECT week_start, COALESCE(SUM(original_qty),0) AS qty
         FROM shipment_calc
         GROUP BY week_start
-        ORDER BY week_start
     """, (effective_days, product_id))
 
     shipment_by_week = {}
-    for rr in shipment_week_rows:
-        wk = parse_db_date(rr.get("week_start"))
-        if wk:
-            shipment_by_week[wk.isoformat()] = dash_safe_float(rr.get("shipment_delivery_qty"))
+    for rows in (wh_rows, transit_rows):
+        for rr in rows:
+            wk = parse_db_date(rr.get("week_start"))
+            if wk:
+                key = wk.isoformat()
+                shipment_by_week[key] = dash_safe_float(shipment_by_week.get(key, 0)) + dash_safe_float(rr.get("qty"))
 
     return shipment_by_week, delivered_by_week
 

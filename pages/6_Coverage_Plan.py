@@ -184,17 +184,14 @@ def get_product_shipment_time_info(product_id, fallback_days=0):
 def get_week_qty_maps(product_id, shipment_time_days):
     """Weekly quantity maps for Coverage Plan.
 
-    PostgreSQL-safe version:
-    - Calculates week_start in a CTE/subquery first.
-    - Groups by the calculated column only.
-    - Avoids repeated parameterized expressions in SELECT/GROUP BY, which caused
-      psycopg.errors.GroupingError on Streamlit Cloud.
+    SN 26.15 split:
+    - Shipment Delivered to WH: status Delivered and week is warehouse_delivery_date.
+    - Shipment in Transit: status not Delivered / no warehouse delivery date and week is shipment_date + shipment_time_days.
     """
     delivered_week_rows = fetch_all("""
         WITH delivered AS (
-            SELECT
-                date_trunc('week', d.delivery_date::date)::date AS week_start,
-                d.delivered_qty
+            SELECT date_trunc('week', d.delivery_date::date)::date AS week_start,
+                   d.delivered_qty
             FROM customer_deliveries d
             JOIN shipment_boxes b ON d.box_id = b.id
             WHERE b.product_id=?
@@ -214,45 +211,79 @@ def get_week_qty_maps(product_id, shipment_time_days):
 
     effective_days = int(shipment_time_days or 0)
 
-    shipment_week_rows = fetch_all("""
+    wh_delivered_rows = fetch_all("""
         WITH shipment_calc AS (
-            SELECT
-                date_trunc(
-                    'week',
-                    (
-                        s.shipment_date::date
-                        + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
-                    )
-                )::date AS week_start,
-                b.original_qty
+            SELECT date_trunc('week', s.warehouse_delivery_date::date)::date AS week_start,
+                   b.original_qty
+            FROM shipment_boxes b
+            JOIN shipments s ON b.shipment_id = s.id
+            WHERE b.product_id=?
+              AND COALESCE(s.shipment_status,'In Transit') = 'Delivered'
+              AND s.warehouse_delivery_date IS NOT NULL
+        )
+        SELECT week_start, COALESCE(SUM(original_qty),0) AS shipment_delivered_to_wh_qty
+        FROM shipment_calc
+        GROUP BY week_start
+        ORDER BY week_start
+    """, (product_id,))
+
+    in_transit_rows = fetch_all("""
+        WITH shipment_calc AS (
+            SELECT date_trunc(
+                       'week',
+                       (
+                           s.shipment_date::date
+                           + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
+                       )
+                   )::date AS week_start,
+                   b.original_qty
             FROM shipment_boxes b
             JOIN shipments s ON b.shipment_id = s.id
             WHERE b.product_id=?
               AND s.shipment_date IS NOT NULL
+              AND (
+                    COALESCE(s.shipment_status,'In Transit') <> 'Delivered'
+                    OR s.warehouse_delivery_date IS NULL
+                  )
         )
-        SELECT week_start, COALESCE(SUM(original_qty),0) AS shipment_delivery_qty
+        SELECT week_start, COALESCE(SUM(original_qty),0) AS shipment_in_transit_qty
         FROM shipment_calc
         GROUP BY week_start
         ORDER BY week_start
     """, (effective_days, product_id))
 
-    shipment_by_week = {}
-    for rr in shipment_week_rows:
+    delivered_to_wh_by_week = {}
+    for rr in wh_delivered_rows:
         wk = parse_db_date(rr.get("week_start"))
         if wk:
-            shipment_by_week[wk.isoformat()] = safe_float(rr.get("shipment_delivery_qty"))
+            delivered_to_wh_by_week[wk.isoformat()] = safe_float(rr.get("shipment_delivered_to_wh_qty"))
+
+    in_transit_by_week = {}
+    for rr in in_transit_rows:
+        wk = parse_db_date(rr.get("week_start"))
+        if wk:
+            in_transit_by_week[wk.isoformat()] = safe_float(rr.get("shipment_in_transit_qty"))
+
+    shipment_by_week = {}
+    for wk in set(list(delivered_to_wh_by_week.keys()) + list(in_transit_by_week.keys())):
+        shipment_by_week[wk] = safe_float(delivered_to_wh_by_week.get(wk, 0)) + safe_float(in_transit_by_week.get(wk, 0))
 
     invoice_week_rows = fetch_all("""
         WITH invoice_calc AS (
             SELECT DISTINCT
-                date_trunc(
-                    'week',
-                    (
-                        s.shipment_date::date
-                        + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
-                    )
-                )::date AS week_start,
-                s.invoice_no
+                   CASE
+                       WHEN COALESCE(s.shipment_status,'In Transit') = 'Delivered'
+                            AND s.warehouse_delivery_date IS NOT NULL
+                       THEN date_trunc('week', s.warehouse_delivery_date::date)::date
+                       ELSE date_trunc(
+                                'week',
+                                (
+                                    s.shipment_date::date
+                                    + (COALESCE(NULLIF(s.shipment_time_days,0), ?::int) * INTERVAL '1 day')
+                                )
+                            )::date
+                   END AS week_start,
+                   s.invoice_no
             FROM shipment_boxes b
             JOIN shipments s ON b.shipment_id = s.id
             WHERE b.product_id=?
@@ -272,7 +303,7 @@ def get_week_qty_maps(product_id, shipment_time_days):
         if wk:
             original_invoice_by_week[wk.isoformat()] = rr.get("original_invoice_numbers") or ""
 
-    return shipment_by_week, delivered_by_week, original_invoice_by_week
+    return shipment_by_week, delivered_by_week, original_invoice_by_week, delivered_to_wh_by_week, in_transit_by_week
 
 def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months_inventory, visible_start_week=None, max_rows=None):
     """Coverage Plan calculation.
@@ -283,7 +314,7 @@ def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months
     - Suggested Shipment Qty is shown in the shortage week.
     - KPI Next Shipment Date/Qty ignores past shipment dates and uses only today/future dates.
     """
-    shipment_by_week, delivered_by_week, original_invoice_by_week = get_week_qty_maps(product_id, shipment_time_days)
+    shipment_by_week, delivered_by_week, original_invoice_by_week, delivered_to_wh_by_week, in_transit_by_week = get_week_qty_maps(product_id, shipment_time_days)
 
     calculated = []
     update_params = []
@@ -301,7 +332,9 @@ def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months
             continue
         week_key = week_start.isoformat()
 
-        shipment_delivery_qty = safe_float(shipment_by_week.get(week_key, 0))
+        shipment_delivered_to_wh_qty = safe_float(delivered_to_wh_by_week.get(week_key, 0))
+        shipment_in_transit_qty = safe_float(in_transit_by_week.get(week_key, 0))
+        shipment_delivery_qty = shipment_delivered_to_wh_qty + shipment_in_transit_qty
         original_invoice_numbers = original_invoice_by_week.get(week_key, "")
         raw_customer_forecast = safe_float(r.get("customer_forecast"))
         delivered_to_customer = safe_float(delivered_by_week.get(week_key, 0))
@@ -339,6 +372,8 @@ def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months
             "plan_date": week_key,
             "original_invoice_numbers": original_invoice_numbers,
             "shipment_delivery_qty": round(shipment_delivery_qty, 2),
+            "shipment_delivered_to_wh_qty": round(shipment_delivered_to_wh_qty, 2),
+            "shipment_in_transit_qty": round(shipment_in_transit_qty, 2),
             "stock_at_wh": round(stock_at_wh, 2),
             "customer_forecast": round(customer_forecast, 2),
             "delivered_to_customer": round(delivered_to_customer, 2),
@@ -407,7 +442,7 @@ def style_vertical_coverage_grid(df):
         base = "font-weight:800; text-align:center;"
         if col in ("Week No", "Week Start From"):
             return base + "background-color:#eaf3fc; color:#0a3f7a;"
-        if col == "Shipment Delivery to Warehouse":
+        if col in ("Shipment Delivered to WH", "Shipment in Transit", "Shipment Delivery to Warehouse"):
             return base + "background-color:#dcfce7; color:#166534;"
         if col == "Stock at WH":
             return base + "background-color:#e8f5e9; color:#166534;"
@@ -433,6 +468,7 @@ def style_vertical_coverage_grid(df):
     return df.style.apply(lambda row: [style_cell(row[col], col) for col in df.columns], axis=1)
 
 page_setup()
+ensure_shipment_status_columns()
 
 require_page_view('coverage')
 show_edit_permission_status('coverage')
@@ -634,6 +670,8 @@ else:
             "Week No": source_row.get("week_no"),
             "Week Start From": format_date_ddmmyyyy(source_row.get("plan_date")),
             "Original Invoice Number": source_row.get("original_invoice_numbers") or "",
+            "Shipment Delivered to WH": source_row.get("shipment_delivered_to_wh_qty"),
+            "Shipment in Transit": source_row.get("shipment_in_transit_qty"),
             "Shipment Delivery to Warehouse": source_row.get("shipment_delivery_qty"),
             "Stock at WH": source_row.get("stock_at_wh"),
             "Customer Forecast": source_row.get("customer_forecast"),
@@ -670,7 +708,7 @@ else:
             st.rerun()
     with recalc_col2:
         st.info(
-            "Formula: WH Bank = Shipment Delivery to Warehouse + Stock at WH - Delivered to Customer - Customer Forecast. "
+            "Formula: WH Bank = (Shipment Delivered to WH + Shipment in Transit) + Stock at WH - Delivered to Customer - Customer Forecast. "
             "Bank Status = WH Bank - Two Months Inventory."
         )
 
