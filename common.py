@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 26.15"
+APP_VERSION = "SN 26.16"
 
 
 # ---------------------------------------------------------------------------
@@ -1628,6 +1628,7 @@ APP_PAGE_DEFINITIONS = [
     {"label": "Shipment Entry", "target": "pages/3_Shipment_Entry.py", "key": "shipment", "default_roles": ["admin", "super_admin"]},
     {"label": "Last Shipments", "target": "pages/13_Last_Shipments.py", "key": "shipment_last", "default_roles": ["admin", "super_admin"]},
     {"label": "Edit Shipment", "target": "pages/14_Edit_Shipment.py", "key": "shipment_edit", "default_roles": ["admin", "super_admin"]},
+    {"label": "Shipment Status", "target": "pages/16_Shipment_Status.py", "key": "shipment_status", "default_roles": ["admin", "super_admin"]},
     {"label": "Delivery", "target": "pages/4_Delivery_to_Customer.py", "key": "delivery", "default_roles": ["user", "admin", "super_admin"]},
     {"label": "Reprint Invoice", "target": "pages/10_Reprint_Invoice.py", "key": "delivery_reprint", "default_roles": ["admin", "super_admin"]},
     {"label": "FIFO Available Pallets", "target": "pages/11_FIFO_Available_Pallets.py", "key": "delivery_fifo", "default_roles": ["user", "admin", "super_admin"]},
@@ -1817,7 +1818,7 @@ def current_user_can_add(page_key=None):
 
 def get_allowed_nav_items(user=None):
     user = user or st.session_state.get('user', {})
-    hidden_top_nav_keys = {'delivery_reprint', 'delivery_fifo', 'delivery_edit', 'delivery_list', 'shipment_last', 'shipment_edit', 'payment_due', 'payment_edit', 'payment_list'}
+    hidden_top_nav_keys = {'delivery_reprint', 'delivery_fifo', 'delivery_edit', 'delivery_list', 'shipment_last', 'shipment_edit', 'shipment_status', 'payment_due', 'payment_edit', 'payment_list'}
     return [
         (p['label'], p['target'])
         for p in APP_PAGE_DEFINITIONS
@@ -4951,6 +4952,7 @@ def render_shipment_subnav(active_key="shipment"):
         ("shipment", "Shipment Entry", "pages/3_Shipment_Entry.py"),
         ("shipment_last", "Last Shipments", "pages/13_Last_Shipments.py"),
         ("shipment_edit", "Edit Shipment", "pages/14_Edit_Shipment.py"),
+        ("shipment_status", "Shipment Status", "pages/16_Shipment_Status.py"),
     ])
 
 def render_payment_subnav(active_key="payment"):

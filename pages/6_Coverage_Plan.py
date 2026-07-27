@@ -332,9 +332,9 @@ def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months
             continue
         week_key = week_start.isoformat()
 
-        shipment_delivered_to_wh_qty = safe_float(delivered_to_wh_by_week.get(week_key, 0))
+        shipment_delivery_qty = safe_float(delivered_to_wh_by_week.get(week_key, 0))
         shipment_in_transit_qty = safe_float(in_transit_by_week.get(week_key, 0))
-        shipment_delivery_qty = shipment_delivered_to_wh_qty + shipment_in_transit_qty
+        shipment_total_inbound_qty = shipment_delivery_qty + shipment_in_transit_qty
         original_invoice_numbers = original_invoice_by_week.get(week_key, "")
         raw_customer_forecast = safe_float(r.get("customer_forecast"))
         delivered_to_customer = safe_float(delivered_by_week.get(week_key, 0))
@@ -347,7 +347,7 @@ def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months
         else:
             stock_at_wh = previous_wh_bank
 
-        wh_bank = shipment_delivery_qty + stock_at_wh - delivered_to_customer - customer_forecast
+        wh_bank = shipment_total_inbound_qty + stock_at_wh - delivered_to_customer - customer_forecast
         bank_status = wh_bank - two_months_inventory
 
         if customer_forecast > 0 or delivered_to_customer > 0:
@@ -372,7 +372,6 @@ def calculate_coverage_rows(raw_rows, product_id, shipment_time_days, two_months
             "plan_date": week_key,
             "original_invoice_numbers": original_invoice_numbers,
             "shipment_delivery_qty": round(shipment_delivery_qty, 2),
-            "shipment_delivered_to_wh_qty": round(shipment_delivered_to_wh_qty, 2),
             "shipment_in_transit_qty": round(shipment_in_transit_qty, 2),
             "stock_at_wh": round(stock_at_wh, 2),
             "customer_forecast": round(customer_forecast, 2),
@@ -442,7 +441,7 @@ def style_vertical_coverage_grid(df):
         base = "font-weight:800; text-align:center;"
         if col in ("Week No", "Week Start From"):
             return base + "background-color:#eaf3fc; color:#0a3f7a;"
-        if col in ("Shipment Delivered to WH", "Shipment in Transit", "Shipment Delivery to Warehouse"):
+        if col in ("Shipment Delivery to Warehouse", "Shipment in Transit"):
             return base + "background-color:#dcfce7; color:#166534;"
         if col == "Stock at WH":
             return base + "background-color:#e8f5e9; color:#166534;"
@@ -653,6 +652,7 @@ else:
 
     # User requested this title above NEXT SHIPMENT DATE KPI card.
     local_table_title("Coverage Plan Table")
+    st.caption("SN 26.16 note: Shipment Delivery to Warehouse means Delivered to WH qty. Shipment in Transit is shown separately.")
 
     k1, k2, k3, k4 = st.columns(4)
     with k1:
@@ -670,9 +670,8 @@ else:
             "Week No": source_row.get("week_no"),
             "Week Start From": format_date_ddmmyyyy(source_row.get("plan_date")),
             "Original Invoice Number": source_row.get("original_invoice_numbers") or "",
-            "Shipment Delivered to WH": source_row.get("shipment_delivered_to_wh_qty"),
-            "Shipment in Transit": source_row.get("shipment_in_transit_qty"),
             "Shipment Delivery to Warehouse": source_row.get("shipment_delivery_qty"),
+            "Shipment in Transit": source_row.get("shipment_in_transit_qty"),
             "Stock at WH": source_row.get("stock_at_wh"),
             "Customer Forecast": source_row.get("customer_forecast"),
             "Delivered to Customer": source_row.get("delivered_to_customer"),
@@ -708,7 +707,7 @@ else:
             st.rerun()
     with recalc_col2:
         st.info(
-            "Formula: WH Bank = (Shipment Delivered to WH + Shipment in Transit) + Stock at WH - Delivered to Customer - Customer Forecast. "
+            "Formula: WH Bank = Shipment Delivery to Warehouse + Shipment in Transit + Stock at WH - Delivered to Customer - Customer Forecast. "
             "Bank Status = WH Bank - Two Months Inventory."
         )
 

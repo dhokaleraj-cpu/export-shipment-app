@@ -203,60 +203,11 @@ else:
     st.caption('Last Shipments and Edit Shipment sections moved to separate subpages for faster Shipment Entry loading.')
 
     st.divider()
-    st.subheader("Update Shipment Delivered to WH / In Transit Status")
-    st.caption("Delivered shipments use Delivered to WH Date in Coverage Plan. In Transit shipments use Shipment Date + Shipment Time Days.")
-    status_rows = fetch_all("""
-        SELECT s.id, s.shipment_no, s.invoice_no, s.shipment_date,
-               COALESCE(s.shipment_status,'In Transit') AS shipment_status,
-               s.warehouse_delivery_date,
-               w.warehouse_name,
-               c.customer_name
-        FROM shipments s
-        LEFT JOIN warehouses w ON w.id = s.warehouse_id
-        LEFT JOIN customers c ON c.id = s.customer_id
-        ORDER BY s.id DESC
-        LIMIT 150
-    """)
-    if status_rows:
-        status_map = {
-            f"{r.get('id')} | {r.get('shipment_no')} | {r.get('invoice_no')} | {r.get('shipment_status')} | WH Date {format_date_ddmmyyyy(r.get('warehouse_delivery_date')) if r.get('warehouse_delivery_date') else '-'}": r
-            for r in status_rows
-        }
-        selected_status_key = st.selectbox("Select Shipment to Update Status", list(status_map.keys()), key="shipment_status_update_select")
-        selected_status_row = status_map[selected_status_key]
-        su1, su2, su3 = st.columns([1, 1, 1])
-        with su1:
-            updated_status = st.selectbox(
-                "Update Status",
-                ["In Transit", "Delivered"],
-                index=1 if selected_status_row.get("shipment_status") == "Delivered" else 0,
-                key=f"shipment_update_status_{selected_status_row.get('id')}"
-            )
-        with su2:
-            if updated_status == "Delivered":
-                updated_wh_date = st.date_input(
-                    "Delivered to WH Date",
-                    value=parse_date_for_input(selected_status_row.get("warehouse_delivery_date")),
-                    key=f"shipment_update_wh_date_{selected_status_row.get('id')}"
-                )
-            else:
-                updated_wh_date = None
-                st.info("No Delivered to WH Date applicable for In Transit.")
-        with su3:
-            st.write("")
-            st.write("")
-            if st.button("Save Shipment Status", type="primary", key=f"save_shipment_status_{selected_status_row.get('id')}"):
-                execute_query("""
-                    UPDATE shipments
-                    SET shipment_status=?, warehouse_delivery_date=?, shipment_status_updated_at=CURRENT_TIMESTAMP
-                    WHERE id=?
-                """, (updated_status, str(updated_wh_date) if updated_wh_date else None, selected_status_row.get("id")))
-                clear_cache_after_write()
-                st.success("Shipment status updated successfully.")
-                st.rerun()
-        st.dataframe(pd.DataFrame(format_date_columns(status_rows)), width="stretch", hide_index=True)
-    else:
-        st.info("No shipments available to update.")
+    st.info("Shipment status updates moved to Shipment > Shipment Status subpage.")
+    try:
+        st.page_link("pages/16_Shipment_Status.py", label="Open Shipment Status")
+    except Exception:
+        pass
 
 
 render_slogan_footer()
