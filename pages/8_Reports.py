@@ -2,13 +2,13 @@ from common import *
 import html
 from reportlab.lib.styles import ParagraphStyle
 
-REPORTS_VERSION = "SN 26.16"
+REPORTS_VERSION = "SN 26.17"
 
 page_setup()
 require_page_view("reports")
 show_edit_permission_status("reports")
 
-show_header("Reports", "SN 26.16 - Export Shipment Monitoring System")
+show_header("Reports", "SN 26.17 - Export Shipment Monitoring System")
 access_notice()
 
 # ---------------------------------------------------------------------------

@@ -78,23 +78,42 @@ else:
     customer_map = {x['customer_name']: x['id'] for x in customers}
     term_map = {f"{x['term_name']} - {x['days']} days": x for x in terms}
     ship_to_map = {f"{x['ship_to_name']} | {x.get('ship_to_id') or '-'}": x for x in ship_to_rows}
-    inv_map = {f"{s['invoice_no']} | Shipment {s['shipment_no']} | Balance {float(s.get('balance_qty') or 0):,.0f} | PO {s.get('po_number') or '-'} | Date {s['shipment_date']}": s for s in invoice_shipments}
+    inv_map = {f"{s['invoice_no']} | Shipment {s['shipment_no']} | Balance {float(s.get('balance_qty') or 0):,.3f} | PO {s.get('po_number') or '-'} | Date {s['shipment_date']}": s for s in invoice_shipments}
+    invoice_labels = list(inv_map.keys())
     ctop1, ctop2 = st.columns(2)
     with ctop1:
         st.markdown('<div class="input-section-title">Original Invoice Number with Shipment Number</div>', unsafe_allow_html=True)
-        selected_invoice = st.selectbox('Original Invoice Number with Shipment Number', list(inv_map.keys()), key='delivery_original_invoice_ship', label_visibility='collapsed')
-    selected_ship = inv_map[selected_invoice]
+        selected_invoice_labels = st.multiselect(
+            'Select one or multiple Original Invoice / Shipment Numbers',
+            invoice_labels,
+            default=invoice_labels[:1],
+            key='delivery_original_invoice_ship_multi',
+            label_visibility='collapsed',
+            help='Select multiple original invoices/shipments to deliver pallets under one delivery invoice.'
+        )
+    if not selected_invoice_labels:
+        st.warning('Select at least one Original Invoice / Shipment to continue delivery entry.')
+        st.stop()
+    selected_ships = [inv_map[x] for x in selected_invoice_labels if x in inv_map]
+    selected_ship = selected_ships[0]
+    selected_ship_ids = [s.get('id') for s in selected_ships if s.get('id')]
+    selected_original_invoice_numbers = sorted(set(str(s.get('invoice_no') or '') for s in selected_ships if s.get('invoice_no')))
+    selected_original_invoices_summary = ', '.join(selected_original_invoice_numbers)
+    selected_shipment_numbers_summary = ', '.join(sorted(set(str(s.get('shipment_no') or '') for s in selected_ships if s.get('shipment_no'))))
+    st.caption(f"Selected Original Invoices: {selected_original_invoices_summary or '-'}")
+    st.caption(f"Selected Shipments: {selected_shipment_numbers_summary or '-'}")
     invoice_top_col1, invoice_top_col2 = st.columns(2)
     with invoice_top_col1:
         delivery_date = st.date_input('Delivery Date', value=date.today(), key='delivery_date_v10')
-    auto_delivery_invoice_no = generate_delivery_invoice_no(selected_ship.get('invoice_no'), delivery_date)
-    auto_source_key = f"{selected_ship.get('invoice_no')}|{delivery_date}"
+    invoice_no_for_auto = selected_original_invoice_numbers[0] if selected_original_invoice_numbers else selected_ship.get('invoice_no')
+    auto_delivery_invoice_no = generate_delivery_invoice_no(invoice_no_for_auto, delivery_date)
+    auto_source_key = f"{invoice_no_for_auto}|{delivery_date}|{','.join(map(str, selected_ship_ids))}"
     if st.session_state.get('delivery_invoice_auto_source') != auto_source_key:
         st.session_state['delivery_invoice_v10'] = auto_delivery_invoice_no
         st.session_state['delivery_invoice_auto_source'] = auto_source_key
     with invoice_top_col2:
-        delivery_invoice_no = st.text_input('Delivery Invoice Number', key='delivery_invoice_v10', help='Auto format: Shipment Entry Original Invoice Number + MMDDYY + running sequence, e.g. ED900003-050626-01')
-        st.caption(f"Auto generated from Shipment Entry Original Invoice No: {selected_ship.get('invoice_no') or '-'}")
+        delivery_invoice_no = st.text_input('Delivery Invoice Number', key='delivery_invoice_v10', help='Auto format uses first selected Original Invoice Number + MMDDYY + running sequence.')
+        st.caption(f"Auto generated from first selected Original Invoice No: {invoice_no_for_auto or '-'}")
     extra_col1, extra_col2, extra_col3, extra_col4, extra_col5 = st.columns(5)
     with extra_col1:
         vehicle_number = st.text_input('Vehicle Number', key='delivery_vehicle_number')
@@ -106,17 +125,32 @@ else:
         packaging_details = st.text_input('Packaging Details', key='delivery_packaging_details')
     with extra_col5:
         packaging_remark = st.text_input('Remarks', key='delivery_remarks')
-    st.text_input('Linked Warehouse', value=str(selected_ship.get('warehouse_name') or ''), disabled=True, key='delivery_linked_warehouse_display')
-    available_rows = fetch_fifo_available_rows(selected_ship['id'], selected_product_id)
+    selected_warehouse_names = ', '.join(sorted(set(str(s.get('warehouse_name') or '') for s in selected_ships if s.get('warehouse_name'))))
+    st.text_input('Linked Warehouse(s)', value=selected_warehouse_names, disabled=True, key='delivery_linked_warehouse_display')
+    available_rows = []
+    for _ship in selected_ships:
+        try:
+            available_rows.extend(fetch_fifo_available_rows(_ship['id'], selected_product_id))
+        except Exception:
+            pass
+    _seen_box_ids = set()
+    _unique_available_rows = []
+    for _r in available_rows:
+        _bid = _r.get('id')
+        if _bid in _seen_box_ids:
+            continue
+        _seen_box_ids.add(_bid)
+        _unique_available_rows.append(_r)
+    available_rows = _unique_available_rows
     if not available_rows:
-        st.warning('No pending pallet quantity available for this original invoice/shipment.')
+        st.warning('No pending pallet quantity available for the selected original invoice/shipment list.')
     else:
         sort_mode = st.radio('Sort Pallet/Product Rows', ['FIFO ID', 'Pallet Number'], horizontal=True, key='delivery_fifo_sort_mode')
         if sort_mode == 'Pallet Number':
             available_rows = sorted(available_rows, key=lambda x: str(x.get('pallet_no') or ''))
         else:
             available_rows = sorted(available_rows, key=lambda x: (int(x.get('fifo_row_id') or x.get('id') or 0), str(x.get('pallet_no') or '')))
-        pallet_map = {f"ID {r.get('fifo_row_id') or r.get('id')} | Pallet {r['pallet_no']} | Box {r['box_no'] or '-'} | {r['product_code']} | PO {r.get('po_number') or '-'} | PO Date {format_date_ddmmyyyy(r.get('po_date')) if r.get('po_date') else '-'} | Balance {r['balance_qty']} | Price {r['unit_price']} {r['currency']}": r for r in available_rows}
+        pallet_map = {f"Orig Inv {r.get('invoice_no') or '-'} | Shipment {r.get('shipment_no') or '-'} | ID {r.get('fifo_row_id') or r.get('id')} | Pallet {r['pallet_no']} | Box {r['box_no'] or '-'} | {r['product_code']} | PO {r.get('po_number') or '-'} | PO Date {format_date_ddmmyyyy(r.get('po_date')) if r.get('po_date') else '-'} | Balance {float(r.get('balance_qty') or 0):,.3f} | Price {float(r.get('unit_price') or 0):,.3f} {r['currency']}": r for r in available_rows}
         selected_pallet_labels = st.multiselect('Select Pallet Numbers / Product Rows', list(pallet_map.keys()), key='delivery_multi_pallets')
         selected_pallets = [pallet_map[x] for x in selected_pallet_labels]
         c1, c2 = st.columns(2)
@@ -151,7 +185,7 @@ else:
         for i, row in enumerate(selected_pallets):
             dc1, dc2, dc3, dc4, dc5, dc6 = st.columns([1.6, 1.15, 1.05, 0.8, 0.8, 0.9])
             with dc1:
-                st.write(f"ID {row.get('fifo_row_id') or row.get('id')} | Pallet {row['pallet_no']} | {row['product_code']} | Balance {row['balance_qty']}")
+                st.write(f"Orig Inv {row.get('invoice_no') or '-'} | ID {row.get('fifo_row_id') or row.get('id')} | Pallet {row['pallet_no']} | {row['product_code']} | Balance {float(row.get('balance_qty') or 0):,.3f}")
             with dc2:
                 edited_po_number = st.text_input('PO Number', value=str(row.get('po_number') or ''), key=f"delivery_row_po_number_{row['id']}_{i}", label_visibility='collapsed')
             with dc3:

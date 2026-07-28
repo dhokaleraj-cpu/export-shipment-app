@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 26.16"
+APP_VERSION = "SN 26.17"
 
 
 # ---------------------------------------------------------------------------
@@ -2437,6 +2437,8 @@ def build_delivery_invoice_print_data(delivery_invoice_no):
         return None
 
     first = rows[0]
+    original_invoice_numbers = ", ".join(sorted(set(str(r.get("original_invoice_no") or "") for r in rows if r.get("original_invoice_no"))))
+    shipment_numbers = ", ".join(sorted(set(str(r.get("shipment_no") or "") for r in rows if r.get("shipment_no"))))
     items = []
     total_qty = 0
     total_amount = 0
@@ -2476,8 +2478,8 @@ def build_delivery_invoice_print_data(delivery_invoice_no):
         "asn_number": first.get("asn_number", ""),
         "asn_date": first.get("asn_date", ""),
         "packaging_details": first.get("packaging_details", ""),
-        "shipment_no": first.get("shipment_no", ""),
-        "original_invoice_no": first.get("original_invoice_no", ""),
+        "shipment_no": shipment_numbers or first.get("shipment_no", ""),
+        "original_invoice_no": original_invoice_numbers or first.get("original_invoice_no", ""),
         "delivery_invoice_no": delivery_invoice_no,
         "delivery_date": first.get("delivery_date", ""),
         "payment_term": f'{first.get("payment_terms_days", 0)} Days',

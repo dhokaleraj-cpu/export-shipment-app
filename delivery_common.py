@@ -205,10 +205,10 @@ def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
             c.company_code AS customer_company_code,
             c.phone AS customer_phone,
             c.email AS customer_email,
-            s.invoice_no AS original_invoice_no,
-            s.shipment_no,
+            STRING_AGG(DISTINCT s.invoice_no, ', ' ORDER BY s.invoice_no) AS original_invoice_no,
+            STRING_AGG(DISTINCT s.shipment_no, ', ' ORDER BY s.shipment_no) AS shipment_no,
             MAX(s.warehouse_id) AS warehouse_id,
-            MAX(w.warehouse_name) AS warehouse_name,
+            STRING_AGG(DISTINCT COALESCE(w.warehouse_name,''), ', ' ORDER BY COALESCE(w.warehouse_name,'')) AS warehouse_name,
             stm.ship_to_name,
             stm.ship_to_id,
             stm.addressline1 AS ship_to_addressline1,
@@ -227,7 +227,7 @@ def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
         WHERE d.delivery_invoice_no=?
         {access_sql}
         GROUP BY d.delivery_invoice_no, c.customer_name, c.address, c.company_code, c.phone, c.email,
-                 s.invoice_no, s.shipment_no, stm.ship_to_name, stm.ship_to_id,
+                 stm.ship_to_name, stm.ship_to_id,
                  stm.addressline1, stm.addressline2, stm.addressline3,
                  stm.vendor_gstin, stm.vendor_phone, stm.vendor_email
         ORDER BY MIN(d.id)
