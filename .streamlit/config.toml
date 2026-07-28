@@ -9,3 +9,11 @@ gatherUsageStats = false
 [client]
 showErrorDetails = true
 toolbarMode = "minimal"
+
+[theme]
+base = "light"
+primaryColor = "#0F6CBD"
+backgroundColor = "#F4F7FB"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#111827"
+font = "sans serif"

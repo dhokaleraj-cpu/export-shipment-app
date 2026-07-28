@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 26.17"
+APP_VERSION = "SN 27.05"
 
 
 # ---------------------------------------------------------------------------
@@ -5176,3 +5176,619 @@ def render_tuesday_shipment_status_popup():
         pass
 
 __all__ = [name for name in globals() if not name.startswith("__")]
+
+
+
+
+
+
+def inject_enterprise_ui_css():
+    """SN 27.01 direct CSS injection for global ERP UI redesign."""
+    st.markdown("""
+    <style id="sn27-enterprise-ui-v2">
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+    :root {
+        --sn27-navy: #003B73;
+        --sn27-navy-2: #062B55;
+        --sn27-blue: #0F6CBD;
+        --sn27-blue-2: #1B6DB5;
+        --sn27-blue-soft: #EAF3FC;
+        --sn27-bg: #F4F7FB;
+        --sn27-card: #FFFFFF;
+        --sn27-border: #D8E2EE;
+        --sn27-border-2: #BFD0E4;
+        --sn27-text: #111827;
+        --sn27-muted: #64748B;
+        --sn27-green: #15803D;
+        --sn27-red: #B91C1C;
+        --sn27-amber: #D97706;
+        --sn27-shadow: 0 10px 26px rgba(15,23,42,.08);
+        --sn27-shadow-soft: 0 3px 12px rgba(15,23,42,.06);
+        --sn27-radius: 16px;
+        --sn27-radius-sm: 11px;
+    }
+
+    html, body, .stApp, [data-testid="stAppViewContainer"], .main {
+        background:
+            radial-gradient(circle at 0% 0%, rgba(15,108,189,.10), transparent 35vw),
+            linear-gradient(180deg, #F8FAFD 0%, #F4F7FB 100%) !important;
+        color: var(--sn27-text) !important;
+    }
+
+    html, body, .stApp, div, span, p, label, input, textarea, select, button,
+    [class*="css"], [class*="st-"] {
+        font-family: Inter, Aptos, Segoe UI, Arial, sans-serif !important;
+    }
+
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        height: 0 !important;
+        min-height: 0 !important;
+    }
+
+    section[data-testid="stSidebar"], div[data-testid="stSidebar"], div[data-testid="collapsedControl"] {
+        display: none !important;
+    }
+
+    .block-container {
+        max-width: 100% !important;
+        padding: 0.75rem 1.1rem 1.6rem 1.1rem !important;
+    }
+
+    /* Directly neutralize old exact UI if it remains in earlier CSS */
+    .exact-app-header, .exact-nav-card, .exact-page-title-card {
+        display: none !important;
+    }
+
+    .sn27-shell {
+        width: 100%;
+        min-height: 72px;
+        background: linear-gradient(135deg, var(--sn27-navy-2) 0%, var(--sn27-navy) 58%, #0B5DA4 100%);
+        border: 1px solid rgba(255,255,255,.20);
+        border-radius: 18px;
+        padding: 12px 16px;
+        margin: 6px 0 12px 0;
+        display: grid;
+        grid-template-columns: 360px 1fr 315px;
+        gap: 14px;
+        align-items: center;
+        box-shadow: 0 14px 34px rgba(0,59,115,.23);
+        box-sizing: border-box;
+        color: #fff;
+    }
+
+    .sn27-brand {
+        display: flex;
+        align-items: center;
+        gap: 13px;
+        min-width: 0;
+    }
+
+    .sn27-brand-logo {
+        width: 58px;
+        height: 58px;
+        border-radius: 15px;
+        background: rgba(255,255,255,.96);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,.5);
+    }
+
+    .sn27-brand-logo img {
+        max-width: 52px !important;
+        max-height: 52px !important;
+        width: auto !important;
+        height: auto !important;
+        object-fit: contain !important;
+    }
+
+    .sn27-brand-text-main {
+        font-size: 17px;
+        font-weight: 900;
+        line-height: 1.05;
+        letter-spacing: .25px;
+        color: #FFFFFF;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+
+    .sn27-brand-text-sub {
+        font-size: 10px;
+        font-weight: 700;
+        opacity: .82;
+        margin-top: 3px;
+        letter-spacing: .35px;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+
+    .sn27-app-title {
+        text-align: center;
+        font-size: clamp(23px, 2.3vw, 34px);
+        line-height: .98;
+        font-weight: 900;
+        letter-spacing: .7px;
+        text-transform: uppercase;
+        color: white;
+        text-shadow: 0 1px 0 rgba(0,0,0,.08);
+    }
+
+    .sn27-user-card {
+        justify-self: end;
+        min-width: 280px;
+        background: rgba(255,255,255,.12);
+        border: 1px solid rgba(255,255,255,.18);
+        border-radius: 15px;
+        padding: 10px 12px;
+        color: white;
+        line-height: 1.35;
+        font-size: 12px;
+        font-weight: 750;
+        text-align: right;
+        backdrop-filter: blur(8px);
+    }
+
+    .sn27-user-pill {
+        display: inline-block;
+        padding: 3px 9px;
+        border-radius: 999px;
+        background: rgba(255,255,255,.17);
+        margin: 4px 0 0 4px;
+        font-size: 11px;
+        font-weight: 850;
+    }
+
+    .sn27-nav-card {
+        background: rgba(255,255,255,.94);
+        border: 1px solid var(--sn27-border);
+        border-radius: var(--sn27-radius);
+        box-shadow: var(--sn27-shadow-soft);
+        padding: 9px 11px 12px 11px;
+        margin: 0 0 16px 0;
+    }
+
+    .sn27-nav-title {
+        font-size: 12px;
+        font-weight: 900;
+        color: var(--sn27-navy);
+        letter-spacing: .5px;
+        text-transform: uppercase;
+        margin: 2px 0 8px 4px;
+    }
+
+    .sn27-nav-active {
+        background: linear-gradient(135deg, var(--sn27-navy) 0%, var(--sn27-blue) 100%);
+        color: white;
+        border-radius: 11px;
+        padding: 10px 8px;
+        text-align: center;
+        font-weight: 900;
+        font-size: 13px;
+        box-shadow: 0 8px 18px rgba(15,108,189,.22);
+        min-height: 38px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    div[data-testid="stPageLink"] {
+        border-radius: 11px !important;
+        min-height: 38px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        transition: all .15s ease-in-out !important;
+    }
+
+    div[data-testid="stPageLink"] a,
+    div[data-testid="stPageLink"] a:visited,
+    a[data-testid="stPageLink"] {
+        color: var(--sn27-text) !important;
+        font-weight: 850 !important;
+        text-decoration: none !important;
+    }
+
+    div[data-testid="stPageLink"]:hover {
+        background: var(--sn27-blue-soft) !important;
+        box-shadow: inset 0 0 0 1px rgba(15,108,189,.18);
+    }
+
+    .sn27-page-title {
+        background: rgba(255,255,255,.96);
+        border: 1px solid var(--sn27-border);
+        border-radius: 16px;
+        padding: 18px 21px;
+        margin: 12px 0 16px 0;
+        box-shadow: var(--sn27-shadow-soft);
+    }
+
+    .sn27-page-title h1 {
+        margin: 0;
+        color: var(--sn27-navy);
+        font-size: clamp(24px, 2.1vw, 34px);
+        font-weight: 900;
+        letter-spacing: -.3px;
+    }
+
+    .sn27-page-subtitle {
+        color: var(--sn27-muted);
+        font-weight: 800;
+        margin-top: 6px;
+        text-transform: uppercase;
+        font-size: 12px;
+        letter-spacing: .35px;
+    }
+
+    .sap-grid-card, .card, .sn27-section-card {
+        background: rgba(255,255,255,.98) !important;
+        border: 1px solid var(--sn27-border) !important;
+        border-radius: 16px !important;
+        box-shadow: var(--sn27-shadow-soft) !important;
+        padding: 14px !important;
+        margin: 12px 0 16px 0 !important;
+        overflow: hidden !important;
+    }
+
+    .sap-grid-card-title, .sap-subtitle, .input-section-title,
+    .shipment-grid-label, .delivery-grid-label {
+        color: var(--sn27-navy) !important;
+        font-weight: 900 !important;
+        font-size: 14px !important;
+        letter-spacing: .2px !important;
+        text-transform: uppercase !important;
+    }
+
+    div[data-testid="stTextInput"] label p,
+    div[data-testid="stNumberInput"] label p,
+    div[data-testid="stDateInput"] label p,
+    div[data-testid="stSelectbox"] label p,
+    div[data-testid="stMultiSelect"] label p,
+    div[data-testid="stTextArea"] label p,
+    div[data-testid="stFileUploader"] label p,
+    label p {
+        color: var(--sn27-navy) !important;
+        font-weight: 850 !important;
+        font-size: 12.5px !important;
+    }
+
+    input, textarea, div[data-baseweb="select"] > div, div[data-baseweb="input"] {
+        border-radius: 10px !important;
+    }
+
+    input:focus, textarea:focus, div[data-baseweb="select"]:focus-within, div[data-baseweb="input"]:focus-within {
+        box-shadow: 0 0 0 3px rgba(15,108,189,.16) !important;
+        border-color: var(--sn27-blue) !important;
+    }
+
+    div[data-testid="stButton"] > button,
+    button[kind="primary"] {
+        border-radius: 10px !important;
+        min-height: 40px !important;
+        font-weight: 900 !important;
+        border: 1px solid rgba(0,59,115,.12) !important;
+        transition: transform .12s ease, box-shadow .12s ease !important;
+    }
+
+    div[data-testid="stButton"] > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 18px rgba(15,108,189,.18) !important;
+    }
+
+    div[data-baseweb="tab-list"] {
+        gap: 8px !important;
+        border-bottom: 1px solid var(--sn27-border) !important;
+    }
+
+    button[data-baseweb="tab"] {
+        border-radius: 10px 10px 0 0 !important;
+        font-weight: 850 !important;
+        color: var(--sn27-muted) !important;
+    }
+
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: var(--sn27-navy) !important;
+        background: var(--sn27-blue-soft) !important;
+    }
+
+    div[data-testid="stDataFrame"] {
+        width: 100% !important;
+        border-radius: 14px !important;
+        overflow: hidden !important;
+        border: 1px solid var(--sn27-border) !important;
+        box-shadow: var(--sn27-shadow-soft) !important;
+        background: white !important;
+    }
+
+    div[data-testid="stDataFrame"] * {
+        font-size: 12px !important;
+    }
+
+    .sn27-kpi-card {
+        background: white;
+        border: 1px solid var(--sn27-border);
+        border-radius: 16px;
+        box-shadow: var(--sn27-shadow-soft);
+        overflow: hidden;
+        min-height: 126px;
+    }
+
+    .sn27-kpi-head {
+        padding: 11px 12px;
+        font-size: 12px;
+        text-transform: uppercase;
+        font-weight: 900;
+        color: white;
+        min-height: 44px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        text-align:center;
+    }
+
+    .sn27-kpi-val {
+        padding: 16px 12px;
+        min-height: 72px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        color: var(--sn27-text);
+        font-size: 25px;
+        font-weight: 900;
+        text-align:center;
+    }
+
+    .total-box, .amount-input-look {
+        background: var(--sn27-blue-soft) !important;
+        color: var(--sn27-navy) !important;
+        border: 1px solid #BFD7F0 !important;
+        border-radius: 12px !important;
+        padding: 10px 12px !important;
+        font-weight: 900 !important;
+    }
+
+    .footer, .fsi-slogan-footer {
+        color: var(--sn27-muted) !important;
+        font-weight: 750 !important;
+        text-align: center !important;
+        padding: 18px 0 8px 0 !important;
+    }
+
+    @media (max-width: 980px) {
+        .sn27-shell {
+            grid-template-columns: 1fr;
+            text-align: center;
+        }
+        .sn27-brand { justify-content:center; }
+        .sn27-user-card { justify-self: stretch; text-align:center; min-width: unset; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+def inject_exact_ui_css():
+    """SN 27.01 enterprise visual system. Direct override."""
+    inject_enterprise_ui_css()
+
+
+def _sn27_logo_html():
+    try:
+        if LOGO_PATH.exists():
+            logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
+            return f'<img src="data:image/png;base64,{logo_b64}" />'
+    except Exception:
+        pass
+    return '<div style="font-weight:900;color:#003B73;">FSI</div>'
+
+
+def top_layout():
+    inject_exact_ui_css()
+    user = st.session_state.get("user", {"username": "-", "role": "-"})
+    logo_html = _sn27_logo_html()
+    st.markdown(
+        f"""
+        <div class="sn27-shell">
+            <div class="sn27-brand">
+                <div class="sn27-brand-logo">{logo_html}</div>
+                <div>
+                    <div class="sn27-brand-text-main">Four Star Industries</div>
+                    <div class="sn27-brand-text-sub">Export Shipment Monitoring System</div>
+                </div>
+            </div>
+            <div class="sn27-app-title">Export Shipment<br/>Monitoring System</div>
+            <div class="sn27-user-card">
+                <b>User:</b> {user.get('username', '-')}<br/>
+                <b>Role:</b> {user.get('role', '-')}<br/>
+                <span class="sn27-user-pill">{APP_VERSION}</span>
+                <span class="sn27-user-pill">{datetime.now().strftime('%d-%m-%Y %H:%M')}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    render_top_navigation()
+
+
+def show_header(title, subtitle="EXPORT SHIPMENT MONITORING SYSTEM"):
+    inject_exact_ui_css()
+    st.markdown(
+        f"""
+        <div class="sn27-page-title">
+            <h1>{title}</h1>
+            <div class="sn27-page-subtitle">{subtitle}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    render_success_message()
+
+
+def render_top_navigation():
+    inject_exact_ui_css()
+    user = st.session_state.get("user", {})
+    nav_items = get_allowed_nav_items(user)
+    current_target = detect_current_page_target()
+    st.markdown('<div class="sn27-nav-card"><div class="sn27-nav-title">Modules</div>', unsafe_allow_html=True)
+
+    if not nav_items:
+        st.warning("No module access assigned. Contact Super Admin.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+
+    def _nav_label_target(item):
+        if isinstance(item, dict):
+            return item.get("label") or item.get("name") or str(item.get("target") or ""), item.get("target") or item.get("page") or ""
+        if isinstance(item, (tuple, list)):
+            if len(item) >= 2:
+                first = str(item[0])
+                second = str(item[1])
+                if first.endswith(".py") or first.startswith("pages/") or first == "app.py":
+                    return second, first
+                return first, second
+        return str(item), str(item)
+
+    cols = st.columns(min(len(nav_items), 9))
+    for i, item in enumerate(nav_items):
+        label, target = _nav_label_target(item)
+        with cols[i % len(cols)]:
+            if target == current_target or (not current_target and target == "pages/1_Dashboard.py"):
+                st.markdown(f'<div class="sn27-nav-active">{label}</div>', unsafe_allow_html=True)
+            else:
+                try:
+                    st.page_link(target, label=label)
+                except Exception:
+                    st.button(label, disabled=True, key=f"sn27_nav_disabled_{i}_{label}")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def _render_module_subnav(title, active_key, items):
+    allowed_items = []
+    for key, label, target in items:
+        try:
+            page_def = get_page_definition_by_key(key)
+            if page_def and can_user_access_page(page_def):
+                allowed_items.append((key, label, target))
+        except Exception:
+            allowed_items.append((key, label, target))
+
+    if not allowed_items:
+        return
+
+    st.markdown(f'<div class="sn27-nav-card"><div class="sn27-nav-title">{title}</div>', unsafe_allow_html=True)
+    cols = st.columns(len(allowed_items))
+    for col, (key, label, target) in zip(cols, allowed_items):
+        with col:
+            if key == active_key:
+                st.markdown(f'<div class="sn27-nav-active">{label}</div>', unsafe_allow_html=True)
+            else:
+                st.page_link(target, label=label)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def render_big_card(title, value, header_bg="#0F6CBD", value_bg="#FFFFFF", value_color="#111827"):
+    st.markdown(
+        f"""
+        <div class="sn27-kpi-card">
+            <div class="sn27-kpi-head" style="background:{header_bg};">{title}</div>
+            <div class="sn27-kpi-val" style="background:{value_bg};color:{value_color};">{value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+def render_dashboard_small_card(title, value, header_bg="#0F6CBD", value_bg="#ffffff", value_color="#111827"):
+    render_big_card(title, value, header_bg, value_bg, value_color)
+
+
+def render_filter_card_start(title):
+    st.markdown(
+        f"""
+        <div class="sap-grid-card">
+            <div class="sap-grid-card-title">{title}</div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+def render_filter_card_end():
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# SN 27.01 final direct export refresh
+__all__ = [name for name in globals() if not name.startswith("__")]
+
+
+# ===================== SN 27.05 FINAL UI OVERRIDE =====================
+def inject_exact_ui_css():
+    st.markdown("""
+    <style id="sn27-05-final-ui">
+    :root{--navy:#003B73;--blue:#0F6CBD;--soft:#EAF3FC;--bg:#F4F7FB;--border:#D8E2EE;--text:#111827;}
+    html,body,.stApp,[data-testid="stAppViewContainer"],.main{background:linear-gradient(180deg,#F8FAFD,#F4F7FB)!important;color:var(--text)!important;}
+    html,body,.stApp,div,span,p,label,input,textarea,select,button{font-family:Aptos,Segoe UI,Arial,sans-serif!important;}
+    header[data-testid="stHeader"]{height:0!important;background:transparent!important;}section[data-testid="stSidebar"],div[data-testid="collapsedControl"]{display:none!important;}
+    .block-container{max-width:100%!important;padding:.75rem 1.1rem 1.6rem 1.1rem!important;}
+    .sn27-shell{background:linear-gradient(135deg,#062B55,#003B73 55%,#0B5DA4);color:#fff;border-radius:18px;padding:14px 18px;margin:6px 0 14px 0;display:grid;grid-template-columns:360px 1fr 300px;gap:14px;align-items:center;box-shadow:0 16px 34px rgba(0,59,115,.24);}
+    .sn27-brand{display:flex;align-items:center;gap:13px}.sn27-logo{width:58px;height:58px;border-radius:15px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden}.sn27-logo img{max-width:52px!important;max-height:52px!important}.sn27-brand-main{font-size:17px;font-weight:900;text-transform:uppercase}.sn27-brand-sub{font-size:10px;font-weight:700;opacity:.84;text-transform:uppercase}.sn27-title{text-align:center;font-size:30px;line-height:.98;font-weight:900;text-transform:uppercase}.sn27-user{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.18);border-radius:15px;padding:10px 12px;text-align:right;font-size:12px;font-weight:800}.sn27-pill{display:inline-block;background:rgba(255,255,255,.17);border-radius:999px;padding:3px 9px;margin-top:4px;font-size:11px;}
+    .sn27-nav{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:0 3px 12px rgba(15,23,42,.06);padding:10px 12px;margin-bottom:16px}.sn27-nav-title{font-size:12px;font-weight:900;color:var(--navy);text-transform:uppercase;margin-bottom:8px}.sn27-active{background:linear-gradient(135deg,var(--navy),var(--blue));color:#fff;border-radius:11px;padding:10px 8px;text-align:center;font-weight:900;min-height:38px;display:flex;align-items:center;justify-content:center}div[data-testid="stPageLink"]{border-radius:11px!important;min-height:38px!important;display:flex!important;align-items:center!important;justify-content:center!important}div[data-testid="stPageLink"] a{color:var(--text)!important;font-weight:850!important;text-decoration:none!important}div[data-testid="stPageLink"]:hover{background:var(--soft)!important;}
+    .sn27-page{background:#fff;border:1px solid var(--border);border-radius:16px;padding:18px 21px;margin:12px 0 16px 0;box-shadow:0 3px 12px rgba(15,23,42,.06)}.sn27-page h1{margin:0;color:var(--navy);font-size:32px;font-weight:900}.sn27-sub{color:#64748B;font-weight:800;margin-top:6px;text-transform:uppercase;font-size:12px;}
+    .sap-grid-card,.card{background:#fff!important;border:1px solid var(--border)!important;border-radius:16px!important;box-shadow:0 3px 12px rgba(15,23,42,.06)!important;padding:14px!important;margin:12px 0 16px 0!important}.sap-grid-card-title,.sap-subtitle,.input-section-title,.shipment-grid-label{color:var(--navy)!important;font-weight:900!important;text-transform:uppercase!important}label p{color:var(--navy)!important;font-weight:850!important;font-size:12.5px!important}input,textarea,div[data-baseweb="select"]>div{border-radius:10px!important}div[data-testid="stButton"]>button{border-radius:10px!important;font-weight:900!important}div[data-testid="stDataFrame"]{border:1px solid var(--border)!important;border-radius:14px!important;box-shadow:0 3px 12px rgba(15,23,42,.06)!important;overflow:hidden!important}.sn27-kpi{background:#fff;border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 3px 12px rgba(15,23,42,.06)}.sn27-kpi-head{background:var(--blue);color:#fff;padding:11px;font-weight:900;text-align:center;text-transform:uppercase}.sn27-kpi-val{padding:16px;font-size:25px;font-weight:900;text-align:center}.total-box,.amount-input-look{background:var(--soft)!important;color:var(--navy)!important;border:1px solid #BFD7F0!important;border-radius:12px!important;font-weight:900!important;}
+    </style>
+    """, unsafe_allow_html=True)
+
+def _sn27_logo():
+    try:
+        if LOGO_PATH.exists():
+            b=base64.b64encode(LOGO_PATH.read_bytes()).decode('utf-8')
+            return f'<img src="data:image/png;base64,{b}" />'
+    except Exception: pass
+    return '<b style="color:#003B73">FSI</b>'
+
+def top_layout():
+    inject_exact_ui_css(); u=st.session_state.get('user', {'username':'-','role':'-'})
+    st.markdown(f"""<div class='sn27-shell'><div class='sn27-brand'><div class='sn27-logo'>{_sn27_logo()}</div><div><div class='sn27-brand-main'>Four Star Industries</div><div class='sn27-brand-sub'>Export Shipment Monitoring System</div></div></div><div class='sn27-title'>Export Shipment<br/>Monitoring System</div><div class='sn27-user'><b>User:</b> {u.get('username','-')}<br/><b>Role:</b> {u.get('role','-')}<br/><span class='sn27-pill'>{APP_VERSION}</span><span class='sn27-pill'>{datetime.now().strftime('%d-%m-%Y %H:%M')}</span></div></div>""", unsafe_allow_html=True)
+    render_top_navigation()
+
+def show_header(title, subtitle='EXPORT SHIPMENT MONITORING SYSTEM'):
+    inject_exact_ui_css(); st.markdown(f"""<div class='sn27-page'><h1>{title}</h1><div class='sn27-sub'>{subtitle}</div></div>""", unsafe_allow_html=True); render_success_message()
+
+def render_top_navigation():
+    inject_exact_ui_css(); items=get_allowed_nav_items(st.session_state.get('user',{})); cur=detect_current_page_target(); st.markdown("<div class='sn27-nav'><div class='sn27-nav-title'>Modules</div>", unsafe_allow_html=True)
+    cols=st.columns(min(len(items),9)) if items else []
+    for i,it in enumerate(items):
+        label,target=(it.get('label'),it.get('target')) if isinstance(it,dict) else (it[0],it[1])
+        with cols[i%len(cols)]:
+            if target==cur or (not cur and target=='pages/1_Dashboard.py'): st.markdown(f"<div class='sn27-active'>{label}</div>", unsafe_allow_html=True)
+            else: st.page_link(target,label=label)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def _render_module_subnav(title, active_key, items):
+    allowed=[]
+    for key,label,target in items:
+        try:
+            pd=get_page_definition_by_key(key)
+            if pd and can_user_access_page(pd): allowed.append((key,label,target))
+        except Exception: allowed.append((key,label,target))
+    if not allowed: return
+    st.markdown(f"<div class='sn27-nav'><div class='sn27-nav-title'>{title}</div>", unsafe_allow_html=True); cols=st.columns(len(allowed))
+    for col,(key,label,target) in zip(cols, allowed):
+        with col:
+            if key==active_key: st.markdown(f"<div class='sn27-active'>{label}</div>", unsafe_allow_html=True)
+            else: st.page_link(target,label=label)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def render_big_card(title,value,header_bg='#0F6CBD',value_bg='#fff',value_color='#111827'):
+    st.markdown(f"""<div class='sn27-kpi'><div class='sn27-kpi-head' style='background:{header_bg}'>{title}</div><div class='sn27-kpi-val' style='background:{value_bg};color:{value_color}'>{value}</div></div>""", unsafe_allow_html=True)
+
+def render_dashboard_small_card(title,value,header_bg='#0F6CBD',value_bg='#fff',value_color='#111827'):
+    render_big_card(title,value,header_bg,value_bg,value_color)
+
+def page_setup(title=None, cleanup=False):
+    inject_exact_ui_css(); require_login(); require_page_access_for_current_page(); top_layout(); render_success_message(); st.session_state.filter_key_counter={}
+    if cleanup: cleanup_orphan_transactions()
+    if title: show_header(title)
+
+# SN 27.05 final UI override marker
+__all__=[n for n in globals() if not n.startswith('__')]
