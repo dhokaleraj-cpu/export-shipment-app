@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 27.05"
+APP_VERSION = "SN 27.02"
 
 
 # ---------------------------------------------------------------------------
@@ -5719,76 +5719,3 @@ def render_filter_card_end():
 
 # SN 27.01 final direct export refresh
 __all__ = [name for name in globals() if not name.startswith("__")]
-
-
-# ===================== SN 27.05 FINAL UI OVERRIDE =====================
-def inject_exact_ui_css():
-    st.markdown("""
-    <style id="sn27-05-final-ui">
-    :root{--navy:#003B73;--blue:#0F6CBD;--soft:#EAF3FC;--bg:#F4F7FB;--border:#D8E2EE;--text:#111827;}
-    html,body,.stApp,[data-testid="stAppViewContainer"],.main{background:linear-gradient(180deg,#F8FAFD,#F4F7FB)!important;color:var(--text)!important;}
-    html,body,.stApp,div,span,p,label,input,textarea,select,button{font-family:Aptos,Segoe UI,Arial,sans-serif!important;}
-    header[data-testid="stHeader"]{height:0!important;background:transparent!important;}section[data-testid="stSidebar"],div[data-testid="collapsedControl"]{display:none!important;}
-    .block-container{max-width:100%!important;padding:.75rem 1.1rem 1.6rem 1.1rem!important;}
-    .sn27-shell{background:linear-gradient(135deg,#062B55,#003B73 55%,#0B5DA4);color:#fff;border-radius:18px;padding:14px 18px;margin:6px 0 14px 0;display:grid;grid-template-columns:360px 1fr 300px;gap:14px;align-items:center;box-shadow:0 16px 34px rgba(0,59,115,.24);}
-    .sn27-brand{display:flex;align-items:center;gap:13px}.sn27-logo{width:58px;height:58px;border-radius:15px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden}.sn27-logo img{max-width:52px!important;max-height:52px!important}.sn27-brand-main{font-size:17px;font-weight:900;text-transform:uppercase}.sn27-brand-sub{font-size:10px;font-weight:700;opacity:.84;text-transform:uppercase}.sn27-title{text-align:center;font-size:30px;line-height:.98;font-weight:900;text-transform:uppercase}.sn27-user{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.18);border-radius:15px;padding:10px 12px;text-align:right;font-size:12px;font-weight:800}.sn27-pill{display:inline-block;background:rgba(255,255,255,.17);border-radius:999px;padding:3px 9px;margin-top:4px;font-size:11px;}
-    .sn27-nav{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:0 3px 12px rgba(15,23,42,.06);padding:10px 12px;margin-bottom:16px}.sn27-nav-title{font-size:12px;font-weight:900;color:var(--navy);text-transform:uppercase;margin-bottom:8px}.sn27-active{background:linear-gradient(135deg,var(--navy),var(--blue));color:#fff;border-radius:11px;padding:10px 8px;text-align:center;font-weight:900;min-height:38px;display:flex;align-items:center;justify-content:center}div[data-testid="stPageLink"]{border-radius:11px!important;min-height:38px!important;display:flex!important;align-items:center!important;justify-content:center!important}div[data-testid="stPageLink"] a{color:var(--text)!important;font-weight:850!important;text-decoration:none!important}div[data-testid="stPageLink"]:hover{background:var(--soft)!important;}
-    .sn27-page{background:#fff;border:1px solid var(--border);border-radius:16px;padding:18px 21px;margin:12px 0 16px 0;box-shadow:0 3px 12px rgba(15,23,42,.06)}.sn27-page h1{margin:0;color:var(--navy);font-size:32px;font-weight:900}.sn27-sub{color:#64748B;font-weight:800;margin-top:6px;text-transform:uppercase;font-size:12px;}
-    .sap-grid-card,.card{background:#fff!important;border:1px solid var(--border)!important;border-radius:16px!important;box-shadow:0 3px 12px rgba(15,23,42,.06)!important;padding:14px!important;margin:12px 0 16px 0!important}.sap-grid-card-title,.sap-subtitle,.input-section-title,.shipment-grid-label{color:var(--navy)!important;font-weight:900!important;text-transform:uppercase!important}label p{color:var(--navy)!important;font-weight:850!important;font-size:12.5px!important}input,textarea,div[data-baseweb="select"]>div{border-radius:10px!important}div[data-testid="stButton"]>button{border-radius:10px!important;font-weight:900!important}div[data-testid="stDataFrame"]{border:1px solid var(--border)!important;border-radius:14px!important;box-shadow:0 3px 12px rgba(15,23,42,.06)!important;overflow:hidden!important}.sn27-kpi{background:#fff;border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 3px 12px rgba(15,23,42,.06)}.sn27-kpi-head{background:var(--blue);color:#fff;padding:11px;font-weight:900;text-align:center;text-transform:uppercase}.sn27-kpi-val{padding:16px;font-size:25px;font-weight:900;text-align:center}.total-box,.amount-input-look{background:var(--soft)!important;color:var(--navy)!important;border:1px solid #BFD7F0!important;border-radius:12px!important;font-weight:900!important;}
-    </style>
-    """, unsafe_allow_html=True)
-
-def _sn27_logo():
-    try:
-        if LOGO_PATH.exists():
-            b=base64.b64encode(LOGO_PATH.read_bytes()).decode('utf-8')
-            return f'<img src="data:image/png;base64,{b}" />'
-    except Exception: pass
-    return '<b style="color:#003B73">FSI</b>'
-
-def top_layout():
-    inject_exact_ui_css(); u=st.session_state.get('user', {'username':'-','role':'-'})
-    st.markdown(f"""<div class='sn27-shell'><div class='sn27-brand'><div class='sn27-logo'>{_sn27_logo()}</div><div><div class='sn27-brand-main'>Four Star Industries</div><div class='sn27-brand-sub'>Export Shipment Monitoring System</div></div></div><div class='sn27-title'>Export Shipment<br/>Monitoring System</div><div class='sn27-user'><b>User:</b> {u.get('username','-')}<br/><b>Role:</b> {u.get('role','-')}<br/><span class='sn27-pill'>{APP_VERSION}</span><span class='sn27-pill'>{datetime.now().strftime('%d-%m-%Y %H:%M')}</span></div></div>""", unsafe_allow_html=True)
-    render_top_navigation()
-
-def show_header(title, subtitle='EXPORT SHIPMENT MONITORING SYSTEM'):
-    inject_exact_ui_css(); st.markdown(f"""<div class='sn27-page'><h1>{title}</h1><div class='sn27-sub'>{subtitle}</div></div>""", unsafe_allow_html=True); render_success_message()
-
-def render_top_navigation():
-    inject_exact_ui_css(); items=get_allowed_nav_items(st.session_state.get('user',{})); cur=detect_current_page_target(); st.markdown("<div class='sn27-nav'><div class='sn27-nav-title'>Modules</div>", unsafe_allow_html=True)
-    cols=st.columns(min(len(items),9)) if items else []
-    for i,it in enumerate(items):
-        label,target=(it.get('label'),it.get('target')) if isinstance(it,dict) else (it[0],it[1])
-        with cols[i%len(cols)]:
-            if target==cur or (not cur and target=='pages/1_Dashboard.py'): st.markdown(f"<div class='sn27-active'>{label}</div>", unsafe_allow_html=True)
-            else: st.page_link(target,label=label)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-def _render_module_subnav(title, active_key, items):
-    allowed=[]
-    for key,label,target in items:
-        try:
-            pd=get_page_definition_by_key(key)
-            if pd and can_user_access_page(pd): allowed.append((key,label,target))
-        except Exception: allowed.append((key,label,target))
-    if not allowed: return
-    st.markdown(f"<div class='sn27-nav'><div class='sn27-nav-title'>{title}</div>", unsafe_allow_html=True); cols=st.columns(len(allowed))
-    for col,(key,label,target) in zip(cols, allowed):
-        with col:
-            if key==active_key: st.markdown(f"<div class='sn27-active'>{label}</div>", unsafe_allow_html=True)
-            else: st.page_link(target,label=label)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-def render_big_card(title,value,header_bg='#0F6CBD',value_bg='#fff',value_color='#111827'):
-    st.markdown(f"""<div class='sn27-kpi'><div class='sn27-kpi-head' style='background:{header_bg}'>{title}</div><div class='sn27-kpi-val' style='background:{value_bg};color:{value_color}'>{value}</div></div>""", unsafe_allow_html=True)
-
-def render_dashboard_small_card(title,value,header_bg='#0F6CBD',value_bg='#fff',value_color='#111827'):
-    render_big_card(title,value,header_bg,value_bg,value_color)
-
-def page_setup(title=None, cleanup=False):
-    inject_exact_ui_css(); require_login(); require_page_access_for_current_page(); top_layout(); render_success_message(); st.session_state.filter_key_counter={}
-    if cleanup: cleanup_orphan_transactions()
-    if title: show_header(title)
-
-# SN 27.05 final UI override marker
-__all__=[n for n in globals() if not n.startswith('__')]
