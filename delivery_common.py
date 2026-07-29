@@ -29,7 +29,7 @@ def build_delivery_invoice_dataframe(invoice, line_items):
             "Product Code": item.get("product_code", ""),
             "Product Name": item.get("product_name", ""),
             "Pallet No": item.get("pallet_no", ""),
-            "Box No": item.get("box_no", ""),
+            "Original Invoice No": item.get("original_invoice_no", invoice.get("original_invoice_no", "")),
             "PO Number": item.get("po_number", invoice.get("po_number", "")),
             "PO Date": item.get("po_date", invoice.get("po_date", "")),
             "Qty": qty,
@@ -110,7 +110,7 @@ def delivery_invoice_pdf_bytes(invoice, line_items):
     story.append(header_table)
     story.append(Spacer(1, 6))
 
-    data = [["Sr", "Product", "Pallet", "Box", "PO No", "PO Date", "Qty", "Price", "Cur", "Amount"]]
+    data = [["Sr", "Product", "Pallet", "Original Invoice No", "PO No", "PO Date", "Qty", "Price", "Cur", "Amount"]]
     total_qty = 0.0
     total_amt = 0.0
     for idx, item in enumerate(line_items or [], 1):
@@ -123,7 +123,7 @@ def delivery_invoice_pdf_bytes(invoice, line_items):
             _p(idx, normal),
             _p(f"{item.get('product_code','')}<br/>{item.get('product_name','')}", normal),
             _p(item.get("pallet_no") or "", normal),
-            _p(item.get("box_no") or "", normal),
+            _p(item.get("original_invoice_no") or invoice.get("original_invoice_no") or "", normal),
             _p(item.get("po_number") or "", normal),
             _p(format_date_ddmmyyyy(item.get("po_date") or ""), normal),
             _p(f"{qty:,.3f}", normal),
@@ -133,7 +133,7 @@ def delivery_invoice_pdf_bytes(invoice, line_items):
         ])
     data.append([_p("", bold), _p("TOTAL", bold), _p("", bold), _p("", bold), _p("", bold), _p("", bold), _p(f"{total_qty:,.3f}", bold), _p("", bold), _p(invoice.get("currency") or (line_items[0].get('currency') if line_items else ''), bold), _p(f"{total_amt:,.3f}", bold)])
 
-    item_table = Table(data, colWidths=[24, 126, 58, 45, 55, 55, 48, 48, 32, 60], repeatRows=1)
+    item_table = Table(data, colWidths=[24, 112, 54, 85, 50, 50, 45, 45, 32, 54], repeatRows=1)
     item_table.setStyle(TableStyle([
         ("GRID", (0,0), (-1,-1), 0.35, colors.black),
         ("BACKGROUND", (0,0), (-1,0), navy),
