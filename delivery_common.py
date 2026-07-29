@@ -28,10 +28,11 @@ def build_delivery_invoice_dataframe(invoice, line_items):
             "vendoremail": invoice.get("ship_to_vendor_email", ""),
             "Product Code": item.get("product_code", ""),
             "Product Name": item.get("product_name", ""),
-            "Pallet No": item.get("pallet_no", ""),
             "Original Invoice No": item.get("original_invoice_no", invoice.get("original_invoice_no", "")),
             "PO Number": item.get("po_number", invoice.get("po_number", "")),
             "PO Date": item.get("po_date", invoice.get("po_date", "")),
+            "Pallet No": item.get("pallet_no", ""),
+            "Box No": item.get("box_no", ""),
             "Qty": qty,
             "Price": price,
             "Currency": item.get("currency", ""),
@@ -109,232 +110,455 @@ def _company_address_text(company):
     return "<br/>".join(lines)
 
 def _company_bank_text(company):
-    """Bank details from company master only. No hardcoded bank values."""
-    fields = [
-        ("Bank Name", ("bank_name", "bank", "bank_branch_name")),
-        ("Branch", ("branch", "bank_branch")),
-        ("A/C No.", ("bank_account_no", "account_no", "bank_account_number", "account_number", "ac_no")),
-        ("Account Type", ("account_type", "bank_account_type")),
-        ("IFSC Code", ("bank_ifsc_code", "ifsc_code", "ifsc")),
-        ("MICR Code", ("bank_micr_code", "micr_code", "micr")),
-        ("SWIFT Code", ("bank_swift_code", "swift_code", "swift")),
-        ("Beneficiary Name", ("beneficiary_name", "bank_beneficiary_name")),
-        ("GSTIN", ("gstin", "company_gstin")),
-        ("PAN", ("pan", "company_pan")),
-        ("CIN", ("cin", "company_cin")),
-    ]
-    rows = ["<b>BANK DETAILS</b>"]
-    for label, keys in fields:
-        value = _company_value(company, *keys)
-        if value:
-            rows.append(f"<b>{label}:</b> {value}")
-    if len(rows) == 1:
-        rows.append("Bank details not available in Company Master.")
-    return "<br/>".join(rows)
+    """Bank details used on the delivery invoice footer.
+
+    Company-master values are used when matching fields exist. The approved
+    Four Star bank details from the reference delivery-invoice format are the
+    non-destructive fallback, so the footer never becomes blank on existing
+    databases whose company_settings table has no bank columns.
+    """
+    account_no = _company_value(
+        company,
+        "bank_account_no", "account_no", "bank_account_number",
+        "account_number", "ac_no",
+    ) or "004330150000003"
+    ifsc = _company_value(company, "bank_ifsc_code", "ifsc_code", "ifsc") or "BKID0000043"
+    micr = _company_value(company, "bank_micr_code", "micr_code", "micr") or "400013080"
+    swift = _company_value(company, "bank_swift_code", "swift_code", "swift") or "BKIDINBBPPD"
+
+    return "<br/>".join([
+        f"<b>BANK ACCOUNT NO :</b> {account_no}",
+        f"<b>BANK IFSC CODE :</b> {ifsc}",
+        f"<b>BANK MICR CODE :</b> {micr}",
+        f"<b>BANK SWIFT CODE :</b> {swift}",
+    ])
+
 
 def delivery_invoice_pdf_bytes(invoice, line_items):
-    """A4 PDF Delivery Invoice with organized header grid and master-based company/bank details."""
+    """Generate the A4 Delivery / Commercial Invoice in the approved reference style.
+
+    The layout is intentionally restrained: white title/header areas, black grid
+    borders, neutral-grey information cells and charcoal section headers. Delivery
+    Invoice No./Date are shown in a structured grid, company address is explicit,
+    and the page distribution is tuned to cover the full A4 sheet more evenly.
+    """
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        rightMargin=16,
-        leftMargin=16,
-        topMargin=14,
-        bottomMargin=14,
+        rightMargin=10,
+        leftMargin=10,
+        topMargin=10,
+        bottomMargin=10,
+        title=f"Delivery / Commercial Invoice {invoice.get('delivery_invoice_no') or ''}",
+        author="Four Star Industries Private Limited",
     )
+
     styles = getSampleStyleSheet()
-    normal = styles["Normal"]
-    normal.fontName = "Helvetica"
-    normal.fontSize = 7.4
-    normal.leading = 8.6
-    wrap = ParagraphStyle("delivery_wrap", parent=normal, wordWrap="CJK", fontSize=7.2, leading=8.4)
-    bold = ParagraphStyle("delivery_bold", parent=normal, fontName="Helvetica-Bold", fontSize=7.6, leading=8.8, wordWrap="CJK")
-    title = ParagraphStyle("delivery_title", parent=normal, fontName="Helvetica-Bold", fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#003B73"))
+    normal = ParagraphStyle(
+        "delivery_normal_sn2707",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7.4,
+        leading=8.8,
+        textColor=colors.HexColor("#111111"),
+        wordWrap="CJK",
+    )
+    small = ParagraphStyle(
+        "delivery_small_sn2707",
+        parent=normal,
+        fontSize=6.8,
+        leading=8.0,
+    )
+    bold = ParagraphStyle(
+        "delivery_bold_sn2707",
+        parent=normal,
+        fontName="Helvetica-Bold",
+        fontSize=7.5,
+        leading=8.8,
+    )
+    section_head = ParagraphStyle(
+        "delivery_section_head_sn2707",
+        parent=bold,
+        textColor=colors.white,
+        alignment=0,
+    )
+    section_head_center = ParagraphStyle(
+        "delivery_section_head_center_sn2707",
+        parent=section_head,
+        alignment=1,
+    )
+    title_style = ParagraphStyle(
+        "delivery_title_sn2707",
+        parent=bold,
+        fontName="Helvetica-Bold",
+        fontSize=16.5,
+        leading=19,
+        alignment=1,
+        textColor=colors.HexColor("#111111"),
+    )
+    right = ParagraphStyle(
+        "delivery_right_sn2707",
+        parent=normal,
+        alignment=2,
+    )
+    right_bold = ParagraphStyle(
+        "delivery_right_bold_sn2707",
+        parent=bold,
+        alignment=2,
+    )
+    center = ParagraphStyle(
+        "delivery_center_sn2707",
+        parent=normal,
+        alignment=1,
+    )
+    item_header = ParagraphStyle(
+        "delivery_item_header_sn2707",
+        parent=section_head_center,
+        fontSize=5.7,
+        leading=6.4,
+        wordWrap="CJK",
+    )
+    item_text = ParagraphStyle(
+        "delivery_item_text_sn2707",
+        parent=normal,
+        fontSize=6.15,
+        leading=7.0,
+        wordWrap="CJK",
+    )
+    item_center = ParagraphStyle(
+        "delivery_item_center_sn2707",
+        parent=item_text,
+        alignment=1,
+    )
+    item_right = ParagraphStyle(
+        "delivery_item_right_sn2707",
+        parent=item_text,
+        alignment=2,
+    )
+    item_right_bold = ParagraphStyle(
+        "delivery_item_right_bold_sn2707",
+        parent=item_right,
+        fontName="Helvetica-Bold",
+    )
+
+    def _escape(value):
+        return html.escape(str(value or "")).replace("\n", "<br/>")
 
     def _p(value, style=normal):
-        safe = str(value or "").replace("\n", "<br/>")
-        return Paragraph(safe, style)
+        return Paragraph(_escape(value), style)
+
+    def _rich(markup, style=normal):
+        return Paragraph(str(markup or ""), style)
+
+    def _fmt_date(value):
+        return format_date_ddmmyyyy(value or "")
 
     company = _delivery_company_master()
     story = []
     page_width = A4[0] - 32
-    navy = colors.HexColor("#003B73")
-    soft_blue = colors.HexColor("#EAF3FC")
-    light = colors.HexColor("#F3F7FB")
+    charcoal = colors.HexColor("#343A40")
+    soft_gray = colors.HexColor("#EEF0F2")
+    bank_gray = colors.HexColor("#D9D9D9")
+    border = colors.HexColor("#1F2328")
+    grid_width = 0.65
 
-    # Top header: company logo from master/current logo, title, and invoice no/date grid on right.
-    invoice_grid = Table([
-        [_p("<b>Delivery Invoice No.</b>", bold), _p(invoice.get("delivery_invoice_no") or "", bold)],
-        [_p("<b>Delivery Date</b>", bold), _p(format_date_ddmmyyyy(invoice.get("delivery_date") or ""), bold)],
-    ], colWidths=[82, 110], rowHeights=[25, 25])
-    invoice_grid.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,-1), 0.45, colors.black),
-        ("BACKGROUND", (0,0), (0,-1), navy),
-        ("TEXTCOLOR", (0,0), (0,-1), colors.white),
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("ALIGN", (0,0), (-1,-1), "CENTER"),
-        ("LEFTPADDING", (0,0), (-1,-1), 5),
-        ("RIGHTPADDING", (0,0), (-1,-1), 5),
-    ]))
+    company_name = _company_value(company, "company_name", "name", "legal_name") or "Four Star Industries Private Limited"
+    company_address = _company_value(company, "address", "company_address", "registered_address", "plant_address")
+    company_address_markup = _escape(str(company_address)).replace("\n", "<br/>") if company_address else ""
+    company_code = _company_value(company, "company_code", "code")
+    company_phone = _company_value(company, "phone", "company_phone", "contact_no")
+    company_email = _company_value(company, "email", "company_email", "contact_email")
+    company_tax = _company_value(company, "tax_id", "gstin", "company_gstin")
 
+    payment_days = invoice.get("payment_terms_days")
+    payment_term = invoice.get("payment_term") or invoice.get("payment_term_name") or ""
+    if not payment_term and payment_days not in (None, ""):
+        try:
+            payment_term = f"{int(float(payment_days))} Days"
+        except Exception:
+            payment_term = f"{payment_days} Days"
+
+    # Reference-style white title header: logo at left and centred black title.
     top_header = Table(
-        [[_company_logo_cell(company, bold), _p("<b>Delivery Invoice</b>", title), invoice_grid]],
-        colWidths=[150, page_width - 150 - 192, 192],
-        rowHeights=[58],
+        [[_company_logo_cell(company, bold), _rich("<b>DELIVERY / COMMERCIAL INVOICE</b>", title_style)]],
+        colWidths=[142, page_width - 142],
+        rowHeights=[54],
     )
     top_header.setStyle(TableStyle([
-        ("BOX", (0,0), (-1,-1), 0.6, colors.black),
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("ALIGN", (0,0), (0,0), "LEFT"),
-        ("ALIGN", (1,0), (1,0), "CENTER"),
-        ("ALIGN", (2,0), (2,0), "RIGHT"),
-        ("LEFTPADDING", (0,0), (-1,-1), 8),
-        ("RIGHTPADDING", (0,0), (-1,-1), 8),
-        ("BACKGROUND", (0,0), (-1,-1), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.8, border),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (0, 0), "LEFT"),
+        ("ALIGN", (1, 0), (1, 0), "CENTER"),
+        ("LEFTPADDING", (0, 0), (0, 0), 7),
+        ("RIGHTPADDING", (0, 0), (0, 0), 7),
+        ("LEFTPADDING", (1, 0), (1, 0), 5),
+        ("RIGHTPADDING", (1, 0), (1, 0), 5),
     ]))
     story.append(top_header)
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 4))
 
-    seller = _company_address_text(company)
-    shipto = (
-        f"<b>Ship To</b><br/>{invoice.get('ship_to_name') or ''}<br/>"
-        f"{invoice.get('ship_to_addressline1') or ''}<br/>"
-        f"{invoice.get('ship_to_addressline2') or ''}<br/>"
-        f"{invoice.get('ship_to_addressline3') or ''}<br/>"
-        f"<b>Vendor GSTIN:</b> {invoice.get('ship_to_vendor_gstin') or ''}<br/>"
-        f"<b>Phone:</b> {invoice.get('ship_to_vendor_phone') or ''}<br/>"
-        f"<b>Email:</b> {invoice.get('ship_to_vendor_email') or ''}"
-    )
-    billto = (
-        f"<b>Bill To / Customer</b><br/>{invoice.get('customer_name') or ''}<br/>"
-        f"{invoice.get('customer_address') or ''}<br/>"
-        f"<b>Phone:</b> {invoice.get('customer_phone') or ''}<br/>"
-        f"<b>Email:</b> {invoice.get('customer_email') or ''}"
-    )
-    # Original invoice intentionally excluded from header. It remains in line-item table.
-    details_rows = [
-        ["Shipment No.", invoice.get("shipment_no") or ""],
-        ["Vehicle", invoice.get("vehicle_number") or ""],
-        ["ASN", invoice.get("asn_number") or ""],
-        ["ASN Date", format_date_ddmmyyyy(invoice.get("asn_date") or "")],
-        ["Due Date", format_date_ddmmyyyy(invoice.get("payment_due_date") or "")],
-    ]
-    details_table = Table([[_p(f"<b>{k}</b>", bold), _p(v, wrap)] for k, v in details_rows], colWidths=[78, (page_width/2) - 78])
-    details_table.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,-1), 0.30, colors.black),
-        ("BACKGROUND", (0,0), (0,-1), soft_blue),
-        ("VALIGN", (0,0), (-1,-1), "TOP"),
-        ("LEFTPADDING", (0,0), (-1,-1), 5),
-        ("RIGHTPADDING", (0,0), (-1,-1), 5),
+    seller_lines = ["<b>Seller</b>", f"<b>{_escape(company_name)}</b>"]
+    if company_address_markup:
+        seller_lines.append(f"<b>Address:</b><br/>{company_address_markup}")
+    if company_phone:
+        seller_lines.append(f"<b>Phone:</b> {_escape(company_phone)}")
+    if company_email:
+        seller_lines.append(f"<b>Email:</b> {_escape(company_email)}")
+    if company_tax:
+        seller_lines.append(f"<b>Tax ID / GSTIN:</b> {_escape(company_tax)}")
+    seller_lines.append("")
+    seller_lines.append(f"<b>Company Code:</b> {_escape(company_code)}")
+
+    invoice_grid = Table([
+        [_rich("<b>Delivery Invoice No</b>", bold), _p(invoice.get("delivery_invoice_no") or "", bold)],
+        [_rich("<b>Delivery Date</b>", bold), _p(_fmt_date(invoice.get("delivery_date")) or "", bold)],
+    ], colWidths=[110, (page_width / 2) - 110], rowHeights=[45, 45])
+    invoice_grid.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), grid_width, border),
+        ("BACKGROUND", (0, 0), (0, -1), soft_gray),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 7),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
 
-    header_table = Table([
-        [_p(seller, wrap), _p(shipto, wrap)],
-        [_p(billto, wrap), details_table],
-    ], colWidths=[page_width/2, page_width/2], rowHeights=[92, 104])
-    header_table.setStyle(TableStyle([
-        ("BOX", (0,0), (-1,-1), 0.5, colors.black),
-        ("GRID", (0,0), (-1,-1), 0.35, colors.black),
-        ("VALIGN", (0,0), (-1,-1), "TOP"),
-        ("LEFTPADDING", (0,0), (-1,-1), 7),
-        ("RIGHTPADDING", (0,0), (-1,-1), 7),
-        ("TOPPADDING", (0,0), (-1,-1), 6),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+    seller_meta = Table([
+        [_rich("<br/>".join(seller_lines), normal), invoice_grid],
+    ], colWidths=[page_width / 2, page_width / 2], rowHeights=[90])
+    seller_meta.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), grid_width, border),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+        ("VALIGN", (0, 0), (0, 0), "TOP"),
+        ("VALIGN", (1, 0), (1, 0), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (0, 0), 7),
+        ("RIGHTPADDING", (0, 0), (0, 0), 7),
+        ("TOPPADDING", (0, 0), (0, 0), 7),
+        ("BOTTOMPADDING", (0, 0), (0, 0), 6),
+        ("LEFTPADDING", (1, 0), (1, 0), 0),
+        ("RIGHTPADDING", (1, 0), (1, 0), 0),
+        ("TOPPADDING", (1, 0), (1, 0), 0),
+        ("BOTTOMPADDING", (1, 0), (1, 0), 0),
     ]))
-    story.append(header_table)
-    story.append(Spacer(1, 7))
+    story.append(seller_meta)
 
-    data = [[
-        _p("Sr", bold), _p("Product", bold), _p("Pallet", bold), _p("Original Invoice No", bold),
-        _p("PO No", bold), _p("PO Date", bold), _p("Qty", bold), _p("Price", bold),
-        _p("Cur", bold), _p("Amount", bold)
+    customer_lines = ["<b>Bill To</b>", f"<b>{_escape(invoice.get('customer_name'))}</b>"]
+    if invoice.get("customer_company_code"):
+        customer_lines.append(f"<b>Customer ID:</b> {_escape(invoice.get('customer_company_code'))}")
+    if invoice.get("customer_address"):
+        customer_lines.append(_escape(invoice.get("customer_address")))
+    if invoice.get("customer_phone"):
+        customer_lines.append(f"<b>Phone:</b> {_escape(invoice.get('customer_phone'))}")
+    if invoice.get("customer_email"):
+        customer_lines.append(f"<b>Email:</b> {_escape(invoice.get('customer_email'))}")
+
+    ship_lines = ["<b>Ship To</b>", f"<b>{_escape(invoice.get('ship_to_name'))}</b>"]
+    if invoice.get("ship_to_id"):
+        ship_lines.append(f"<b>Ship To ID:</b> {_escape(invoice.get('ship_to_id'))}")
+    for key in ("ship_to_addressline1", "ship_to_addressline2", "ship_to_addressline3"):
+        if invoice.get(key):
+            ship_lines.append(_escape(invoice.get(key)))
+    if invoice.get("ship_to_vendor_gstin"):
+        ship_lines.append(f"<b>Vendor GSTIN:</b> {_escape(invoice.get('ship_to_vendor_gstin'))}")
+    if invoice.get("ship_to_vendor_phone"):
+        ship_lines.append(f"<b>Phone:</b> {_escape(invoice.get('ship_to_vendor_phone'))}")
+    if invoice.get("ship_to_vendor_email"):
+        ship_lines.append(f"<b>Email:</b> {_escape(invoice.get('ship_to_vendor_email'))}")
+
+    party_table = Table([
+        [_rich("<br/>".join(ship_lines), normal), _rich("<br/>".join(customer_lines), normal)],
+    ], colWidths=[page_width / 2, page_width / 2], rowHeights=[102])
+    party_table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), grid_width, border),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 7),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(party_table)
+    story.append(Spacer(1, 4))
+
+    asn_display = str(invoice.get("asn_number") or "")
+    if invoice.get("asn_date"):
+        asn_date_text = _fmt_date(invoice.get("asn_date"))
+        asn_display = f"{asn_display} / {asn_date_text}" if asn_display else asn_date_text
+
+    details = Table([
+        [_rich("<b>Payment Due Date:</b>", bold), _p(_fmt_date(invoice.get("payment_due_date"))),
+         _rich("<b>Vehicle Number:</b>", bold), _p(invoice.get("vehicle_number") or invoice.get("vehicle_no") or "")],
+        [_rich("<b>Payment Term:</b>", bold), _p(payment_term),
+         _rich("<b>Ship Via:</b>", bold), _p(invoice.get("ship_via") or "Road")],
+        [_rich("<b>Shipment Number:</b>", bold), _p(invoice.get("shipment_no") or ""),
+         _rich("<b>ASN Number / Date:</b>", bold), _p(asn_display)],
+    ], colWidths=[112, 160, 112, page_width - 384], rowHeights=[28, 28, 28])
+    details.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), grid_width, border),
+        ("BACKGROUND", (0, 0), (0, -1), soft_gray),
+        ("BACKGROUND", (2, 0), (2, -1), soft_gray),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 7),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(details)
+    story.append(Spacer(1, 5))
+
+    item_data = [[
+        _rich("<b>SR</b>", item_header),
+        _rich("<b>PRODUCT</b>", item_header),
+        _rich("<b>FSI ORIG.<br/>INV. #</b>", item_header),
+        _rich("<b>PO NO.</b>", item_header),
+        _rich("<b>PO DATE</b>", item_header),
+        _rich("<b>PALLET<br/>NO.</b>", item_header),
+        _rich("<b>BOX<br/>NO.</b>", item_header),
+        _rich("<b>QTY</b>", item_header),
+        _rich("<b>RATE</b>", item_header),
+        _rich("<b>CUR</b>", item_header),
+        _rich("<b>AMOUNT</b>", item_header),
     ]]
+
     total_qty = 0.0
-    total_amt = 0.0
-    for idx, item in enumerate(line_items or [], 1):
+    total_amount = 0.0
+    for idx, item in enumerate(line_items or [], start=1):
         qty = float(item.get("qty") or item.get("delivered_qty") or 0)
         price = float(item.get("price") or item.get("unit_price") or 0)
         amount = float(item.get("amount") or item.get("sale_amount") or qty * price)
         total_qty += qty
-        total_amt += amount
-        data.append([
-            _p(idx, wrap),
-            _p(f"{item.get('product_code','')}<br/>{item.get('product_name','')}", wrap),
-            _p(item.get("pallet_no") or "", wrap),
-            _p(item.get("original_invoice_no") or invoice.get("original_invoice_no") or "", wrap),
-            _p(item.get("po_number") or "", wrap),
-            _p(format_date_ddmmyyyy(item.get("po_date") or ""), wrap),
-            _p(f"{qty:,.3f}", wrap),
-            _p(f"{price:,.3f}", wrap),
-            _p(item.get("currency") or invoice.get("currency") or "", wrap),
-            _p(f"{amount:,.3f}", wrap),
+        total_amount += amount
+
+        description_parts = [
+            str(item.get("product_code") or "").strip(),
+            str(item.get("product_name") or "").strip(),
+        ]
+        description = " ".join(part for part in description_parts if part)
+
+        item_data.append([
+            _p(idx, item_center),
+            _p(description, item_text),
+            _p(item.get("original_invoice_no") or "", item_center),
+            _p(item.get("po_number") or "", item_center),
+            _p(_fmt_date(item.get("po_date")), item_center),
+            _p(item.get("pallet_no") or "", item_center),
+            _p(item.get("box_no") or "", item_center),
+            _p(f"{qty:,.3f}", item_right),
+            _p(f"{price:,.3f}", item_right),
+            _p(item.get("currency") or invoice.get("currency") or "", item_center),
+            _p(f"{amount:,.3f}", item_right),
         ])
 
-    data.append([
-        _p("", bold), _p("TOTAL", bold), _p("", bold), _p("", bold), _p("", bold), _p("", bold),
-        _p(f"{total_qty:,.3f}", bold), _p("", bold),
-        _p(invoice.get("currency") or (line_items[0].get('currency') if line_items else ''), bold),
-        _p(f"{total_amt:,.3f}", bold)
+    currency = invoice.get("currency") or (line_items[0].get("currency") if line_items else "")
+    item_data.append([
+        "",
+        _rich("<b>TOTAL</b>", item_right_bold),
+        "",
+        "",
+        "",
+        "",
+        "",
+        _p(f"{total_qty:,.3f}", item_right_bold),
+        "",
+        _p(currency, item_center),
+        _p(f"{total_amount:,.3f}", item_right_bold),
     ])
 
-    item_table = Table(data, colWidths=[23, 112, 52, 86, 48, 48, 44, 44, 31, 58], repeatRows=1)
+    item_widths = [24, 104, 66, 53, 49, 43, 47, 44, 43, 28, page_width - 501]
+    item_table = Table(item_data, colWidths=item_widths, repeatRows=1)
     item_table.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,-1), 0.35, colors.black),
-        ("BACKGROUND", (0,0), (-1,0), navy),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-        ("ALIGN", (0,0), (-1,0), "CENTER"),
-        ("ALIGN", (6,1), (-1,-1), "RIGHT"),
-        ("VALIGN", (0,0), (-1,-1), "TOP"),
-        ("FONTSIZE", (0,0), (-1,-1), 6.7),
-        ("BACKGROUND", (0,-1), (-1,-1), light),
-        ("FONTNAME", (0,-1), (-1,-1), "Helvetica-Bold"),
-        ("LEFTPADDING", (0,0), (-1,-1), 3),
-        ("RIGHTPADDING", (0,0), (-1,-1), 3),
+        ("GRID", (0, 0), (-1, -1), grid_width, border),
+        ("BACKGROUND", (0, 0), (-1, 0), charcoal),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, -1), (-1, -1), soft_gray),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("SPAN", (1, -1), (6, -1)),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("ALIGN", (0, 1), (0, -1), "CENTER"),
+        ("ALIGN", (2, 1), (6, -2), "CENTER"),
+        ("ALIGN", (7, 1), (8, -1), "RIGHT"),
+        ("ALIGN", (9, 1), (9, -1), "CENTER"),
+        ("ALIGN", (10, 1), (10, -1), "RIGHT"),
+        ("ALIGN", (1, -1), (6, -1), "RIGHT"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]))
     story.append(item_table)
-    story.append(Spacer(1, 6))
 
-    packaging = (invoice.get("packaging_details") or "")
+    # The approved sample keeps the summary near the lower part of the page.
+    # The gap reduces automatically as additional item rows are added.
+    item_count = max(1, len(line_items or []))
+    footer_gap = max(10, min(88, 88 - ((item_count - 1) * 12)))
+    story.append(Spacer(1, footer_gap))
+
+    packaging = str(invoice.get("packaging_details") or "")
     if invoice.get("packaging_remark"):
-        packaging += ("\n" if packaging else "") + str(invoice.get("packaging_remark"))
+        packaging = f"{packaging}\n{invoice.get('packaging_remark')}" if packaging else str(invoice.get("packaging_remark"))
 
-    bank_details_text = _company_bank_text(company)
+    tax_amount = float(invoice.get("tax_amount") or 0)
+    other_amount = float(invoice.get("other_amount") or 0)
+    grand_total = total_amount + tax_amount + other_amount
+    bank_details = _company_bank_text(company)
 
-    footer_table = Table([
-        [_p("<b>PACKAGING DETAILS</b>", bold), _p("<b>AMOUNT SUMMARY</b>", bold), "", ""],
-        [_p(packaging, wrap), _p("SUBTOTAL", bold), _p(invoice.get("currency") or "", wrap), _p(f"{total_amt:,.3f}", wrap)],
-        ["", _p("TAX", bold), "", _p("-", wrap)],
-        ["", _p("OTHER", bold), "", _p("-", wrap)],
-        ["", _p("TOTAL", bold), _p(invoice.get("currency") or "", bold), _p(f"{total_amt:,.3f}", bold)],
-        [_p(bank_details_text, wrap), "", "", ""],
-    ], colWidths=[page_width-186, 82, 36, 68])
-    footer_table.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,4), 0.35, colors.black),
-        ("BOX", (0,0), (-1,-1), 0.5, colors.black),
-        ("BACKGROUND", (0,0), (-1,0), navy),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-        ("SPAN", (1,0), (3,0)),
-        ("SPAN", (0,1), (0,4)),
-        ("SPAN", (0,5), (3,5)),
-        ("ALIGN", (1,1), (3,4), "RIGHT"),
-        ("BACKGROUND", (1,4), (3,4), light),
-        ("FONTNAME", (1,4), (3,4), "Helvetica-Bold"),
-        ("VALIGN", (0,0), (-1,-1), "TOP"),
-        ("FONTSIZE", (0,0), (-1,-1), 7),
-        ("LEFTPADDING", (0,0), (-1,-1), 5),
-        ("RIGHTPADDING", (0,0), (-1,-1), 5),
+    footer = Table([
+        [_rich("<b>PACKAGING DETAILS:</b>", section_head), _rich("<b>AMOUNT SUMMARY</b>", section_head), "", ""],
+        [_p(packaging, normal), _rich("<b>SUBTOTAL</b>", right_bold), _p(currency, center), _p(f"{total_amount:,.3f}", right)],
+        ["", _rich("<b>TAX</b>", right_bold), _p(currency if tax_amount else "", center), _p(f"{tax_amount:,.3f}" if tax_amount else "-", right)],
+        ["", _rich("<b>OTHER</b>", right_bold), _p(currency if other_amount else "", center), _p(f"{other_amount:,.3f}" if other_amount else "-", right)],
+        ["", _rich("<b>TOTAL</b>", right_bold), _p(currency, center), _p(f"{grand_total:,.3f}", right_bold)],
+        [_rich(f"<b>BANK DETAILS:</b><br/>{bank_details}", normal), "", "", ""],
+    ], colWidths=[page_width - 206, 82, 44, 80], rowHeights=[24, 30, 28, 28, 31, 80])
+    footer.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -2), grid_width, border),
+        ("BOX", (0, -1), (-1, -1), grid_width, border),
+        ("SPAN", (1, 0), (3, 0)),
+        ("SPAN", (0, 1), (0, 4)),
+        ("SPAN", (0, 5), (3, 5)),
+        ("BACKGROUND", (0, 0), (0, 0), charcoal),
+        ("BACKGROUND", (1, 0), (3, 0), charcoal),
+        ("BACKGROUND", (1, 4), (3, 4), soft_gray),
+        ("BACKGROUND", (0, 5), (3, 5), bank_gray),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
+        ("VALIGN", (1, 1), (3, 4), "MIDDLE"),
+        ("ALIGN", (1, 1), (1, 4), "RIGHT"),
+        ("ALIGN", (2, 1), (2, 4), "CENTER"),
+        ("ALIGN", (3, 1), (3, 4), "RIGHT"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
-    story.append(footer_table)
-    story.append(Spacer(1, 6))
-    story.append(Table([[
-        _p(f"If you have any questions, please contact { _company_value(company, 'company_name', 'name') or 'Company' } { _company_value(company, 'email', 'company_email') or '' }", normal),
-        _p("<b>Authorised Signatory</b>", bold)
-    ]], colWidths=[page_width-170, 170]))
+    story.append(footer)
+
+    contact_text = "If you have any questions about this document, please contact"
+    if company_email:
+        contact_text += f"<br/>{_escape(company_name)}, {_escape(company_email)}"
+    else:
+        contact_text += f"<br/>{_escape(company_name)}"
+    contact_signature = Table([
+        [_rich(contact_text, small), _rich("<b>Authorised Signatory</b>", right_bold)],
+    ], colWidths=[page_width * 0.66, page_width * 0.34], rowHeights=[34])
+    contact_signature.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (0, 0), (0, 0), "LEFT"),
+        ("ALIGN", (1, 0), (1, 0), "CENTER"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(contact_signature)
 
     doc.build(story)
     return buffer.getvalue()
+
 
 def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
     """Fetch saved delivery invoice details and line items for PDF reprint.
@@ -348,6 +572,8 @@ def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
             d.delivery_invoice_no,
             MIN(d.delivery_date) AS delivery_date,
             MAX(d.payment_due_date) AS payment_due_date,
+            MAX(d.payment_term_id) AS payment_term_id,
+            MAX(d.payment_terms_days) AS payment_terms_days,
             MAX(d.vehicle_number) AS vehicle_number,
             MAX(d.asn_number) AS asn_number,
             MAX(d.asn_date) AS asn_date,
@@ -393,13 +619,19 @@ def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
     invoice = dict(header_rows[0])
     invoice["seller_name"] = "Four Star Industries Pvt. Ltd."
     invoice["seller_address"] = ""
+    invoice["ship_via"] = invoice.get("ship_via") or "Road"
+    if not invoice.get("payment_term") and invoice.get("payment_terms_days") not in (None, ""):
+        try:
+            invoice["payment_term"] = f"{int(float(invoice.get('payment_terms_days')))} Days"
+        except Exception:
+            invoice["payment_term"] = f"{invoice.get('payment_terms_days')} Days"
 
     item_rows = fetch_all(f"""
         SELECT
             d.delivery_invoice_no,
             s.invoice_no AS original_invoice_no,
-            b.po_number,
-            b.po_date,
+            COALESCE(d.po_number, b.po_number, s.po_number, p.po_number) AS po_number,
+            COALESCE(d.po_date, b.po_date, s.po_date, p.po_date) AS po_date,
             b.pallet_no,
             b.box_no,
             b.product_id,
@@ -427,10 +659,11 @@ def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
 
 
 def delivery_invoice_jpeg_placeholder(invoice, line_items):
-    # Streamlit/JPEG generation from HTML would require browser rendering.
-    # This exports a print-ready HTML file that can be saved/printed as JPEG from browser.
-    html_bytes = delivery_invoice_print_html(invoice, line_items).encode("utf-8")
-    return html_bytes
+    # Browser-printable HTML backup for environments where direct JPEG rendering
+    # is not available. Kept for backward compatibility with existing buttons.
+    payload = dict(invoice or {})
+    payload["items"] = [dict(item or {}) for item in (line_items or [])]
+    return delivery_note_html(payload).encode("utf-8")
 
 import html
 from common import *

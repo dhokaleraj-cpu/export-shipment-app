@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 27.04"
+APP_VERSION = "SN 27.08"
 
 
 # ---------------------------------------------------------------------------
@@ -2212,10 +2212,17 @@ def parse_date_for_input(value):
     return date.today()
 
 def delivery_note_html(data):
-    """Commercial invoice print layout inspired by the attached Excel delivery invoice sheet."""
-    delivery_date = format_date_ddmmyyyy(data.get("delivery_date", ""))
-    due_date = format_date_ddmmyyyy(data.get("payment_due_date", ""))
-    po_date = format_date_ddmmyyyy(data.get("po_date", ""))
+    """Print-ready Delivery / Commercial Invoice HTML in the reference theme.
+
+    The print header is predominantly white with black grid lines and neutral
+    grey information cells. Charcoal is reserved for the item and summary
+    headings, replacing the previous full-page blue treatment.
+    """
+    def esc(value):
+        return html.escape(str(value or ""))
+
+    def fmt_date(value):
+        return format_date_ddmmyyyy(value or "")
 
     items = data.get("items") or []
     if not items:
@@ -2236,12 +2243,12 @@ def delivery_note_html(data):
             "po_date": data.get("po_date", ""),
         }]
 
-    total_qty = sum(float(i.get("qty") or 0) for i in items)
-    total_amount = sum(float(i.get("amount") or 0) for i in items)
+    total_qty = sum(float(i.get("qty") or i.get("delivered_qty") or 0) for i in items)
+    total_amount = sum(float(i.get("amount") or i.get("sale_amount") or 0) for i in items)
+    tax_amount = float(data.get("tax_amount") or 0)
+    other_amount = float(data.get("other_amount") or 0)
+    grand_total = total_amount + tax_amount + other_amount
     currency = data.get("currency", "") or (items[0].get("currency", "") if items else "")
-    original_invoice_no = data.get("original_invoice_no", "") or (items[0].get("original_invoice_no", "") if items else "")
-    po_number = data.get("po_number", "") or (items[0].get("po_number", "") if items else "")
-    po_date = format_date_ddmmyyyy(data.get("po_date", "") or (items[0].get("po_date", "") if items else ""))
 
     try:
         company_rows = fetch_all("SELECT * FROM company_settings WHERE id=1")
@@ -2250,177 +2257,272 @@ def delivery_note_html(data):
         company = {}
 
     company_name = company.get("company_name") or "Four Star Industries Private Limited"
-    company_addr = company.get("address") or "Plant Address"
+    company_addr = company.get("address") or ""
+    company_code = company.get("company_code") or company.get("code") or ""
     company_phone = company.get("phone") or ""
     company_email = company.get("email") or ""
-    bank_details = [
-        "BANK DETAILS:",
-        "BANK ACCOUNT NO : 004330150000003",
-        "BANK IFSC CODE : BKID0000043",
-        "BANK MICR CODE : 400013080",
-        "BANK SWIFT CODE : BKIDINBBPPD",
-    ]
+    company_tax = company.get("tax_id") or company.get("gstin") or ""
+
+    bank_account = (
+        company.get("bank_account_no") or company.get("account_no") or
+        company.get("bank_account_number") or "004330150000003"
+    )
+    bank_ifsc = company.get("bank_ifsc_code") or company.get("ifsc_code") or company.get("ifsc") or "BKID0000043"
+    bank_micr = company.get("bank_micr_code") or company.get("micr_code") or company.get("micr") or "400013080"
+    bank_swift = company.get("bank_swift_code") or company.get("swift_code") or company.get("swift") or "BKIDINBBPPD"
+
+    payment_term = str(data.get("payment_term") or data.get("payment_term_name") or "")
+    if not payment_term and data.get("payment_terms_days") not in (None, ""):
+        try:
+            payment_term = f"{int(float(data.get('payment_terms_days')))} Days"
+        except Exception:
+            payment_term = f"{data.get('payment_terms_days')} Days"
+
+    packaging = str(data.get("packaging_details") or "")
+    if data.get("packaging_remark"):
+        packaging = f"{packaging}\n{data.get('packaging_remark')}" if packaging else str(data.get("packaging_remark"))
+
+    seller_lines = ["<b>Seller</b>", f'<span class="seller-name">{esc(company_name)}</span>']
+    if company_addr:
+        seller_lines.append(f'<span class="seller-address"><b>Address:</b><br>{esc(company_addr).replace("\n", "<br>")}</span>')
+    if company_phone:
+        seller_lines.append(f"<b>Phone:</b> {esc(company_phone)}")
+    if company_email:
+        seller_lines.append(f"<b>Email:</b> {esc(company_email)}")
+    if company_tax:
+        seller_lines.append(f"<b>Tax ID / GSTIN:</b> {esc(company_tax)}")
+    seller_lines.extend(["", f"<b>Company Code:</b> {esc(company_code)}"])
+    seller_html = "<br>".join(seller_lines)
+
+    customer_lines = ["<b>Bill To</b>", f"<b>{esc(data.get('customer_name'))}</b>"]
+    if data.get("customer_company_code"):
+        customer_lines.append(f"<b>Customer ID:</b> {esc(data.get('customer_company_code'))}")
+    if data.get("customer_address"):
+        customer_lines.append(esc(data.get("customer_address")).replace("\n", "<br>"))
+    if data.get("customer_phone"):
+        customer_lines.append(f"<b>Phone:</b> {esc(data.get('customer_phone'))}")
+    if data.get("customer_email"):
+        customer_lines.append(f"<b>Email:</b> {esc(data.get('customer_email'))}")
+    customer_html = "<br>".join(customer_lines)
+
+    ship_lines = ["<b>Ship To</b>", f"<b>{esc(data.get('ship_to_name'))}</b>"]
+    if data.get("ship_to_id"):
+        ship_lines.append(f"<b>Ship To ID:</b> {esc(data.get('ship_to_id'))}")
+    for key in ("ship_to_addressline1", "ship_to_addressline2", "ship_to_addressline3"):
+        if data.get(key):
+            ship_lines.append(esc(data.get(key)))
+    if data.get("ship_to_vendor_gstin"):
+        ship_lines.append(f"<b>Vendor GSTIN:</b> {esc(data.get('ship_to_vendor_gstin'))}")
+    if data.get("ship_to_vendor_phone"):
+        ship_lines.append(f"<b>Phone:</b> {esc(data.get('ship_to_vendor_phone'))}")
+    if data.get("ship_to_vendor_email"):
+        ship_lines.append(f"<b>Email:</b> {esc(data.get('ship_to_vendor_email'))}")
+    ship_html = "<br>".join(ship_lines)
+
+    asn_display = str(data.get("asn_number") or data.get("asn_no") or "")
+    if data.get("asn_date"):
+        asn_date_text = fmt_date(data.get("asn_date"))
+        asn_display = f"{asn_display} / {asn_date_text}" if asn_display else asn_date_text
 
     item_rows = ""
     for idx, item in enumerate(items, start=1):
-        qty = float(item.get("qty") or 0)
-        unit_price = float(item.get("unit_price") or 0)
-        amount = float(item.get("amount") or 0)
-        desc = f"{item.get('product_code', '')} {item.get('product_name', '')}".strip()
+        qty = float(item.get("qty") or item.get("delivered_qty") or 0)
+        unit_price = float(item.get("unit_price") or item.get("price") or 0)
+        amount = float(item.get("amount") or item.get("sale_amount") or qty * unit_price)
+        description = " ".join(
+            value for value in [str(item.get("product_code") or "").strip(), str(item.get("product_name") or "").strip()]
+            if value
+        )
         item_rows += f"""
         <tr>
             <td class="center">{idx}</td>
-            <td>{html.escape(desc)}</td>
-            <td class="center">{html.escape(str(item.get("original_invoice_no", original_invoice_no)))}</td>
-            <td class="right">{qty:,.3f}</td>
-            <td class="right">{unit_price:,.4f}</td>
-            <td class="right">{amount:,.3f}</td>
+            <td>{esc(description)}</td>
+            <td class="center">{esc(item.get('original_invoice_no'))}</td>
+            <td class="center">{esc(item.get('po_number'))}</td>
+            <td class="center nowrap">{fmt_date(item.get('po_date'))}</td>
+            <td class="center">{esc(item.get('pallet_no'))}</td>
+            <td class="center">{esc(item.get('box_no'))}</td>
+            <td class="number">{qty:,.3f}</td>
+            <td class="number">{unit_price:,.3f}</td>
+            <td class="center">{esc(item.get('currency') or currency)}</td>
+            <td class="number">{amount:,.3f}</td>
         </tr>
         """
 
     logo_src = logo_data_uri()
-    logo_html = f'<img src="{logo_src}" class="logo">' if logo_src else '<div class="logo-text">FSI</div>'
-    ship_to = data.get("ship_to", "") or "As per delivery instruction / purchase order"
-    buyer = data.get("customer_name", "")
+    logo_html = f'<img src="{logo_src}" class="logo" alt="Company Logo">' if logo_src else '<div class="logo-text">FSI</div>'
+    contact_text = f"If you have any questions about this document, please contact<br>{esc(company_name)}"
+    if company_email:
+        contact_text += f", {esc(company_email)}"
+
+    tax_currency = esc(currency) if tax_amount else ""
+    other_currency = esc(currency) if other_amount else ""
+    tax_display = f"{tax_amount:,.3f}" if tax_amount else "-"
+    other_display = f"{other_amount:,.3f}" if other_amount else "-"
 
     return f"""
+    <!DOCTYPE html>
     <html>
     <head>
-    <style>
-    @page {{ size: A4 portrait; margin: 10mm; }}
-    body {{ font-family: Aptos, Arial, sans-serif; color:#111827; margin:0; padding:0; font-size:11px; }}
-    .sheet {{ width:100%; border-collapse:collapse; }}
-    .sheet td, .sheet th {{ border:1px solid #111827; padding:6px; vertical-align:top; }}
-    .no-border td {{ border:0; }}
-    .title {{ font-size:22px; font-weight:900; text-align:right; color:#111827; }}
-    .section-title {{ font-weight:900; background:#f3f4f6; color:#111827; }}
-    .logo {{ max-width:155px; max-height:62px; }}
-    .logo-text {{ font-size:32px; font-weight:900; color:#003B73; }}
-    .bold {{ font-weight:900; }}
-    .center {{ text-align:center; }}
-    .right {{ text-align:right; }}
-    .small {{ font-size:10px; line-height:1.35; }}
-    .items th {{ background:#f3f4f6; font-weight:900; text-align:center; }}
-    .total {{ font-weight:900; background:#fef3c7; }}
-    .bank {{ line-height:1.55; }}
-    .signature {{ height:54px; text-align:right; vertical-align:bottom !important; font-weight:900; }}
-    .print-btn {{ position:fixed; top:10px; right:10px; padding:8px 12px; background:#1B6DB5; color:white; border:0; border-radius:6px; font-weight:800; }}
-    @media print {{ .print-btn {{ display:none; }} body {{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }} }}
-    </style>
+      <meta charset="utf-8">
+      <title>Delivery / Commercial Invoice {esc(data.get('delivery_invoice_no'))}</title>
+      <style>
+        @page {{ size: A4 portrait; margin: 9mm; }}
+        * {{ box-sizing: border-box; }}
+        body {{ font-family: Aptos, Arial, sans-serif; color:#111111; margin:0; padding:0; font-size:10px; background:#ffffff; }}
+        .invoice {{ width:100%; max-width:194mm; min-height:277mm; margin:0 auto; display:flex; flex-direction:column; }}
+        .invoice-main {{ flex:1 1 auto; }}
+        .invoice-tail {{ margin-top:auto; }}
+        table {{ width:100%; border-collapse:collapse; table-layout:fixed; }}
+        td, th {{ border:1.1px solid #1f2328; padding:5px; vertical-align:top; overflow-wrap:anywhere; }}
+        .title-table {{ margin-bottom:4px; }}
+        .logo-cell {{ width:20%; height:54px; vertical-align:middle; padding:7px; }}
+        .title-cell {{ width:80%; height:54px; vertical-align:middle; text-align:center; font-size:21px; font-weight:900; letter-spacing:.2px; }}
+        .logo {{ max-width:145px; max-height:44px; display:block; }}
+        .logo-text {{ font-size:30px; font-weight:900; color:#343a40; }}
+        .seller-meta td {{ height:92px; line-height:1.34; padding:0; }}
+        .seller-cell {{ padding:8px 8px 7px 8px !important; }}
+        .seller-name {{ font-weight:800; }}
+        .seller-address {{ margin-top:3px; }}
+        .seller-extra {{ margin-top:5px; }}
+        .invoice-meta-wrap {{ padding:0 !important; }}
+        .invoice-meta-grid {{ width:100%; border-collapse:collapse; table-layout:fixed; }}
+        .invoice-meta-grid td {{ height:45px; padding:7px 8px; vertical-align:middle; line-height:1.3; border:1.1px solid #1f2328; }}
+        .invoice-meta-grid .meta-label {{ width:42%; background:#eef0f2; font-weight:800; }}
+        .invoice-meta-grid .meta-value {{ width:58%; font-weight:700; }}
+        .party td {{ height:102px; line-height:1.34; padding:7px; }}
+        .info-grid {{ margin-top:4px; }}
+        .info-grid td {{ height:29px; vertical-align:middle; padding:5px 7px; }}
+        .info-label {{ background:#eef0f2; font-weight:800; }}
+        .items {{ margin-top:5px; }}
+        .items thead {{ display:table-header-group; }}
+        .items th {{ background:#343a40; color:#ffffff; font-weight:800; text-align:center; vertical-align:middle; font-size:7.2px; line-height:1.15; padding:4px 2px; }}
+        .items td {{ min-height:28px; vertical-align:middle; font-size:7.4px; line-height:1.2; padding:4px 2px; }}
+        .center {{ text-align:center; }}
+        .number {{ text-align:right; white-space:nowrap; }}
+        .nowrap {{ white-space:nowrap; }}
+        .total-row td {{ background:#eef0f2; font-weight:800; }}
+        .footer {{ margin-top:8mm; page-break-inside:avoid; }}
+        .section-head {{ background:#343a40; color:#ffffff; font-weight:800; vertical-align:middle; }}
+        .footer .packaging {{ height:126px; white-space:pre-line; line-height:1.35; }}
+        .footer .grand {{ background:#eef0f2; font-weight:900; }}
+        .footer .bank {{ height:82px; line-height:1.45; background:#d9d9d9; }}
+        .contact-sign {{ border-collapse:separate; border-spacing:0; margin-top:6px; }}
+        .contact-sign td {{ border:0; height:34px; padding:8px 7px 0; vertical-align:top; }}
+        .contact {{ width:66%; font-size:9px; line-height:1.25; }}
+        .signature {{ width:34%; text-align:center; font-weight:800; }}
+        .print-btn {{ position:fixed; top:10px; right:10px; z-index:10; padding:8px 13px; background:#343a40; color:white; border:0; border-radius:5px; font-weight:800; cursor:pointer; }}
+        @media print {{
+          .print-btn {{ display:none; }}
+          body {{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }}
+          .invoice {{ max-width:none; min-height:277mm; }}
+          .footer {{ margin-top:7mm; }}
+        }}
+      </style>
     </head>
     <body>
-    <button class="print-btn" onclick="window.print()">Print</button>
+      <button class="print-btn" onclick="window.print()">Print</button>
+      <div class="invoice">
+        <div class="invoice-main">
+        <table class="title-table">
+          <tr>
+            <td class="logo-cell">{logo_html}</td>
+            <td class="title-cell">DELIVERY / COMMERCIAL INVOICE</td>
+          </tr>
+        </table>
 
-    <table class="sheet">
-        <tr>
-            <td colspan="4" rowspan="2">{logo_html}<br><span class="bold">{html.escape(company_name)}</span><br><span class="small">{html.escape(str(company_addr))}<br>{html.escape(str(company_phone))} {html.escape(str(company_email))}</span></td>
-            <td colspan="3" class="title">COMMERCIAL INVOICE</td>
-        </tr>
-        <tr>
-            <td colspan="2" class="section-title">VOUCHER #</td>
-            <td class="bold">{html.escape(str(data.get("delivery_invoice_no", "")))}</td>
-        </tr>
-        <tr>
-            <td colspan="4" class="section-title">PLANT ADDRESS</td>
-            <td colspan="2" class="section-title">DATE</td>
-            <td>{delivery_date}</td>
-        </tr>
-        <tr>
-            <td colspan="4">{html.escape(str(company_addr))}</td>
-            <td colspan="2" class="section-title">PURCHASE ORDER #</td>
-            <td>{html.escape(str(po_number))}</td>
-        </tr>
-        <tr>
-            <td colspan="4"></td>
-            <td colspan="2" class="section-title">PURCHASE ORDER DATE</td>
-            <td>{po_date}</td>
-        </tr>
-        <tr>
-            <td colspan="4" class="section-title">BUYER / BILL TO</td>
-            <td colspan="3" class="section-title">SHIP TO</td>
-        </tr>
-        <tr>
-            <td colspan="4" style="height:70px;"><span class="bold">{html.escape(str(buyer))}</span><br><span class="small">Customer address as per master / PO</span></td>
-            <td colspan="3" style="height:70px;">{html.escape(str(ship_to))}</td>
-        </tr>
-        <tr>
-            <td class="section-title">VEHICLE #</td>
-            <td colspan="2" class="section-title">SHIP VIA</td>
-            <td class="section-title">PAYMENT TERM</td>
-            <td class="section-title">DUE DATE</td>
-            <td colspan="2" class="section-title">ASN #</td>
-        </tr>
-        <tr>
-            <td>{html.escape(str(data.get("vehicle_no", "")))}</td>
-            <td colspan="2">{html.escape(str(data.get("ship_via", "Road")))}</td>
-            <td>{html.escape(str(data.get("payment_term", "")))}</td>
-            <td>{due_date}</td>
-            <td colspan="2">{html.escape(str(data.get("asn_no", "")))}</td>
-        </tr>
-    </table>
-
-    <table class="sheet items" style="margin-top:8px;">
-        <tr>
-            <th style="width:7%;">ITEM #</th>
-            <th>DESCRIPTION</th>
-            <th style="width:18%;">FSI ORIGINAL INVOICE #</th>
-            <th style="width:12%;">QUANTITY<br>(PCS)</th>
-            <th style="width:12%;">PRICE</th>
-            <th style="width:14%;">AMOUNT</th>
-        </tr>
-        {item_rows}
-        <tr>
-            <td colspan="3" class="right total">SUBTOTAL</td>
-            <td class="right total">{total_qty:,.3f}</td>
-            <td></td>
-            <td class="right total">{total_amount:,.3f}</td>
-        </tr>
-        <tr>
-            <td colspan="5" class="right bold">TAX</td>
-            <td class="right">0.00</td>
-        </tr>
-        <tr>
-            <td colspan="5" class="right bold">OTHER</td>
-            <td class="right">0.00</td>
-        </tr>
-        <tr>
-            <td colspan="5" class="right total">TOTAL ({html.escape(str(currency))})</td>
-            <td class="right total">{total_amount:,.3f}</td>
-        </tr>
-    </table>
-
-    <table class="sheet" style="margin-top:8px;">
-        <tr>
-            <td colspan="4" class="section-title">PACKAGING DETAILS:</td>
-            <td colspan="3" class="section-title">REFERENCES</td>
-        </tr>
-        <tr>
-            <td colspan="4">{html.escape(str(data.get("packaging_details", "As per shipment packing details")))}</td>
-            <td colspan="3">
-                Original Invoice: <b>{html.escape(str(original_invoice_no))}</b><br>
-                Shipment No: <b>{html.escape(str(data.get("shipment_no", "")))}</b><br>
-                PO: <b>{html.escape(str(po_number))}</b> / <b>{po_date}</b>
+        <table class="seller-meta">
+          <tr>
+            <td class="seller-cell" style="width:50%">{seller_html}</td>
+            <td class="invoice-meta-wrap" style="width:50%">
+              <table class="invoice-meta-grid">
+                <tr>
+                  <td class="meta-label">Delivery Invoice No</td>
+                  <td class="meta-value">{esc(data.get('delivery_invoice_no'))}</td>
+                </tr>
+                <tr>
+                  <td class="meta-label">Delivery Date</td>
+                  <td class="meta-value">{fmt_date(data.get('delivery_date'))}</td>
+                </tr>
+              </table>
             </td>
-        </tr>
-        <tr>
-            <td colspan="4" class="bank">{'<br>'.join(html.escape(x) for x in bank_details)}</td>
-            <td colspan="3" class="signature">Authorised Signatory</td>
-        </tr>
-    </table>
+          </tr>
+        </table>
+
+        <table class="party">
+          <tr>
+            <td style="width:50%">{ship_html}</td>
+            <td style="width:50%">{customer_html}</td>
+          </tr>
+        </table>
+
+        <table class="info-grid">
+          <colgroup><col style="width:20%"><col style="width:29%"><col style="width:20%"><col style="width:31%"></colgroup>
+          <tr><td class="info-label">Payment Due Date:</td><td>{fmt_date(data.get('payment_due_date'))}</td><td class="info-label">Vehicle Number:</td><td>{esc(data.get('vehicle_number') or data.get('vehicle_no'))}</td></tr>
+          <tr><td class="info-label">Payment Term:</td><td>{esc(payment_term)}</td><td class="info-label">Ship Via:</td><td>{esc(data.get('ship_via') or 'Road')}</td></tr>
+          <tr><td class="info-label">Shipment Number:</td><td>{esc(data.get('shipment_no'))}</td><td class="info-label">ASN Number / Date:</td><td>{esc(asn_display)}</td></tr>
+        </table>
+
+        <table class="items">
+          <colgroup>
+            <col style="width:4%"><col style="width:18.5%"><col style="width:11.7%"><col style="width:9.4%"><col style="width:8.7%">
+            <col style="width:7.6%"><col style="width:8.3%"><col style="width:7.8%"><col style="width:7.6%"><col style="width:5%"><col style="width:11.4%">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>SR</th><th>PRODUCT</th><th>FSI ORIG.<br>INV. #</th><th>PO NO.</th><th>PO DATE</th>
+              <th>PALLET<br>NO.</th><th>BOX<br>NO.</th><th>QTY</th><th>RATE</th><th>CUR</th><th>AMOUNT</th>
+            </tr>
+          </thead>
+          <tbody>
+            {item_rows}
+            <tr class="total-row"><td></td><td colspan="6" class="number">TOTAL</td><td class="number">{total_qty:,.3f}</td><td></td><td class="center">{esc(currency)}</td><td class="number">{total_amount:,.3f}</td></tr>
+          </tbody>
+        </table>
+
+        </div>
+        <div class="invoice-tail">
+        </div>
+        <div class="invoice-tail">
+        <table class="footer">
+          <colgroup><col style="width:63.4%"><col style="width:14.6%"><col style="width:7.8%"><col style="width:14.2%"></colgroup>
+          <tr><td class="section-head">PACKAGING DETAILS:</td><td class="section-head" colspan="3">AMOUNT SUMMARY</td></tr>
+          <tr><td class="packaging" rowspan="4">{esc(packaging)}</td><td class="number"><b>SUBTOTAL</b></td><td class="center">{esc(currency)}</td><td class="number">{total_amount:,.3f}</td></tr>
+          <tr><td class="number"><b>TAX</b></td><td class="center">{tax_currency}</td><td class="number">{tax_display}</td></tr>
+          <tr><td class="number"><b>OTHER</b></td><td class="center">{other_currency}</td><td class="number">{other_display}</td></tr>
+          <tr class="grand"><td class="number"><b>TOTAL</b></td><td class="center"><b>{esc(currency)}</b></td><td class="number"><b>{grand_total:,.3f}</b></td></tr>
+          <tr>
+            <td class="bank" colspan="4">
+              <b>BANK DETAILS:</b><br>
+              BANK ACCOUNT NO : {esc(bank_account)}<br>
+              BANK IFSC CODE : {esc(bank_ifsc)}<br>
+              BANK MICR CODE : {esc(bank_micr)}<br>
+              BANK SWIFT CODE : {esc(bank_swift)}
+            </td>
+          </tr>
+        </table>
+
+        <table class="contact-sign">
+          <tr><td class="contact">{contact_text}</td><td class="signature">Authorised Signatory</td></tr>
+        </table>
+        </div>
+      </div>
     </body>
     </html>
     """
 
+
 def build_delivery_invoice_print_data(delivery_invoice_no):
     rows = fetch_all("""
-        SELECT d.*, c.customer_name, c.address AS customer_address, c.phone AS customer_phone, c.email AS customer_email,
+        SELECT d.*, c.customer_name, c.address AS customer_address, c.company_code AS customer_company_code,
+               c.phone AS customer_phone, c.email AS customer_email,
                s.shipment_no, s.invoice_no AS original_invoice_no,
                stm.ship_to_name, stm.ship_to_id, stm.addressline1 AS ship_to_addressline1, stm.addressline2 AS ship_to_addressline2, stm.addressline3 AS ship_to_addressline3,
                stm.vendor_gstin AS ship_to_vendor_gstin, stm.vendor_phone AS ship_to_vendor_phone, stm.vendor_email AS ship_to_vendor_email,
                b.product_id, s.warehouse_id, w.warehouse_name,
                p.product_code, p.product_name,
-               COALESCE(d.po_number, s.po_number, p.po_number) AS po_number,
-               COALESCE(d.po_date, s.po_date, p.po_date) AS po_date,
+               COALESCE(d.po_number, b.po_number, s.po_number, p.po_number) AS po_number,
+               COALESCE(d.po_date, b.po_date, s.po_date, p.po_date) AS po_date,
                b.pallet_no, b.box_no
         FROM customer_deliveries d
         JOIN customers c ON d.customer_id = c.id
@@ -2464,6 +2566,7 @@ def build_delivery_invoice_print_data(delivery_invoice_no):
     return {
         "customer_name": first.get("customer_name", ""),
         "customer_address": first.get("customer_address", ""),
+        "customer_company_code": first.get("customer_company_code", ""),
         "customer_phone": first.get("customer_phone", ""),
         "customer_email": first.get("customer_email", ""),
         "ship_to_name": first.get("ship_to_name", ""),
@@ -2478,6 +2581,8 @@ def build_delivery_invoice_print_data(delivery_invoice_no):
         "asn_number": first.get("asn_number", ""),
         "asn_date": first.get("asn_date", ""),
         "packaging_details": first.get("packaging_details", ""),
+        "packaging_remark": first.get("packaging_remark", ""),
+        "ship_via": first.get("ship_via", "") or "Road",
         "shipment_no": shipment_numbers or first.get("shipment_no", ""),
         "original_invoice_no": original_invoice_numbers or first.get("original_invoice_no", ""),
         "delivery_invoice_no": delivery_invoice_no,

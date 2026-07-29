@@ -1,0 +1,8 @@
+SN 27.08 changed files
+- APP_VERSION.txt
+- common.py
+- delivery_common.py
+- README_SN27_08_DELIVERY_HEADER_GRID_A4_UPDATE.txt
+- START_HERE_SN_27_08.txt
+- SN_27_08_FILE_MANIFEST.txt
+- verify_sn27_08_delivery_header_grid_a4.py

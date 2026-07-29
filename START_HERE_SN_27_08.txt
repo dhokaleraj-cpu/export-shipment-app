@@ -1,0 +1,5 @@
+SN 27.08 quick start
+1. Replace the updated files from this patch into your export-shipment-app project folder.
+2. Keep your existing shipment_app.db, shipment_app.db-shm, and shipment_app.db-wal files unchanged.
+3. Run: python verify_sn27_08_delivery_header_grid_a4.py
+4. Start app: streamlit run app.py
