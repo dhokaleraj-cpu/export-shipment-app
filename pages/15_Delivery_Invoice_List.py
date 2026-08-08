@@ -3,6 +3,7 @@ from delivery_common import *
 page_setup()
 require_page_view("delivery_list")
 show_edit_permission_status("delivery_list")
+ensure_delivery_columns()
 show_header("Delivery Invoice List", "Delivery invoice table grid with multi-select")
 access_notice()
 render_delivery_subnav("delivery_list")

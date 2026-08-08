@@ -33,11 +33,18 @@ def fetch_shipment_headers(limit=200):
             s.shipping_bill_no, s.shipping_bill_date, s.shipment_doc_date,
             COALESCE(s.shipment_status,'In Transit') AS shipment_status, s.warehouse_delivery_date,
             s.forwarder_name, s.incoterm, s.currency, s.invoice_amount,
-            sup.supplier_name, w.warehouse_name, c.customer_name
+            s.supplier_id, s.warehouse_id, s.customer_id, s.ship_to_master_id,
+            sup.supplier_name, w.warehouse_name, c.customer_name, c.company_code,
+            c.address AS customer_address,
+            stm.ship_to_name, stm.ship_to_id,
+            stm.addressline1 AS ship_to_addressline1,
+            stm.addressline2 AS ship_to_addressline2,
+            stm.addressline3 AS ship_to_addressline3
         FROM shipments s
         LEFT JOIN suppliers sup ON s.supplier_id = sup.id
         LEFT JOIN warehouses w ON s.warehouse_id = w.id
         LEFT JOIN customers c ON s.customer_id = c.id
+        LEFT JOIN ship_to_masters stm ON s.ship_to_master_id = stm.id
         WHERE EXISTS (
             SELECT 1 FROM shipment_boxes b
             WHERE b.shipment_id = s.id
@@ -82,7 +89,8 @@ def shipment_pdf_bytes(shipment, rows):
     header_data = [
         ["Shipment No", shipment.get("shipment_no",""), "Original Invoice", shipment.get("invoice_no","")],
         ["Shipment Date", str(shipment.get("shipment_date","")), "Warehouse", shipment.get("warehouse_name","")],
-        ["Supplier", shipment.get("supplier_name",""), "Customer", shipment.get("customer_name","")],
+        ["Supplier", shipment.get("supplier_name",""), "Customer / Bill To", shipment.get("customer_name","")],
+        ["Ship To", shipment.get("ship_to_name","") or "", "Ship To ID", shipment.get("ship_to_id","") or ""],
     ]
     t = Table(header_data, colWidths=[80, 165, 90, 165])
     t.setStyle(TableStyle([
@@ -190,12 +198,25 @@ def shipment_invoice_pdf_bytes(shipment, rows):
         f"<b>Status:</b> {shipment.get('shipment_status') or 'In Transit'}<br/>"
         f"<b>Delivered to WH Date:</b> {shipment.get('warehouse_delivery_date') or ''}"
     )
+    bill_to_text = (
+        f"<b>Customer / Bill To</b><br/>{shipment.get('customer_name') or ''}<br/>"
+        f"{shipment.get('customer_address') or ''}"
+    )
+    ship_to_text = (
+        f"<b>Ship To</b><br/>{shipment.get('ship_to_name') or ''} "
+        f"({shipment.get('ship_to_id') or '-'})<br/>"
+        f"{shipment.get('ship_to_addressline1') or ''}<br/>"
+        f"{shipment.get('ship_to_addressline2') or ''}<br/>"
+        f"{shipment.get('ship_to_addressline3') or ''}"
+    )
     info_table = Table(
         [[Paragraph(seller_text, normal), Paragraph(shipment_text, normal)],
          [Paragraph(f"<b>Supplier</b><br/>{shipment.get('supplier_name') or ''}", normal),
-          Paragraph(f"<b>Customer</b><br/>{shipment.get('customer_name') or ''}", normal)]],
+          Paragraph(bill_to_text, normal)],
+         [Paragraph("<b>Product Master Relationship</b><br/>Customer and Ship To saved on Shipment header", normal),
+          Paragraph(ship_to_text, normal)]],
         colWidths=[page_width/2, page_width/2],
-        rowHeights=[62, 58]
+        rowHeights=[62, 58, 66]
     )
     info_table.setStyle(TableStyle([
         ("BOX", (0,0), (-1,-1), 0.6, colors.black),

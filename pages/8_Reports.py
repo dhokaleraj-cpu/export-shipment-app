@@ -2,13 +2,13 @@ from common import *
 import html
 from reportlab.lib.styles import ParagraphStyle
 
-REPORTS_VERSION = "SN 27.04"
+REPORTS_VERSION = "SN 27.13"
 
 page_setup()
 require_page_view("reports")
 show_edit_permission_status("reports")
 
-show_header("Reports", "SN 27.04 - Export Shipment Monitoring System")
+show_header("Reports", "SN 27.13 - Product / Warehouse balance reports added")
 access_notice()
 
 # ---------------------------------------------------------------------------
@@ -16,6 +16,8 @@ access_notice()
 # ---------------------------------------------------------------------------
 
 REPORTS = [
+    "Summary Report - Product Wise",
+    "Warehouse Balance Qty - Product Wise / Warehouse Wise",
     "Shipment List",
     "Shipment List with Part Number",
     "Shipment List with Pallet Numbers",
@@ -236,6 +238,10 @@ def _report_footer_totals(df):
         "pallet_qty": None,
         "delivery_qty": None,
         "pending_qty": None,
+        "shipment_qty": None,
+        "in_transit_qty": None,
+        "delivered_qty": None,
+        "warehouse_balance_qty": None,
     }
     if df.empty:
         return result
@@ -263,7 +269,7 @@ def _report_footer_totals(df):
         except Exception:
             result["pallet_count"] = ""
 
-    for special_col in ["pallet_qty", "delivery_qty", "pending_qty"]:
+    for special_col in ["pallet_qty", "delivery_qty", "pending_qty", "shipment_qty", "in_transit_qty", "delivered_qty", "warehouse_balance_qty"]:
         actual_col = next((c for c in df.columns if str(c).lower() == special_col), None)
         if actual_col:
             result[special_col] = _numeric_sum(df[actual_col])
@@ -318,7 +324,17 @@ def _render_report_footer_kpis(df):
 
     st.markdown('<div class="sn-report-footer-title">Report Footer Totals</div>', unsafe_allow_html=True)
 
-    if totals.get("pallet_qty") is not None or totals.get("delivery_qty") is not None or totals.get("pending_qty") is not None:
+    if totals.get("warehouse_balance_qty") is not None:
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.markdown(f'<div class="sn-report-kpi"><div class="sn-report-kpi-label">Shipment Qty</div><div class="sn-report-kpi-value">{_safe_number(totals.get("shipment_qty") or 0)}</div></div>', unsafe_allow_html=True)
+        with c2:
+            st.markdown(f'<div class="sn-report-kpi"><div class="sn-report-kpi-label">In Transit Qty</div><div class="sn-report-kpi-value">{_safe_number(totals.get("in_transit_qty") or 0)}</div></div>', unsafe_allow_html=True)
+        with c3:
+            st.markdown(f'<div class="sn-report-kpi"><div class="sn-report-kpi-label">Delivered Qty</div><div class="sn-report-kpi-value">{_safe_number(totals.get("delivered_qty") or 0)}</div></div>', unsafe_allow_html=True)
+        with c4:
+            st.markdown(f'<div class="sn-report-kpi"><div class="sn-report-kpi-label">Warehouse Balance Qty</div><div class="sn-report-kpi-value">{_safe_number(totals.get("warehouse_balance_qty") or 0)}</div></div>', unsafe_allow_html=True)
+    elif totals.get("pallet_qty") is not None or totals.get("delivery_qty") is not None or totals.get("pending_qty") is not None:
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             st.markdown(f'<div class="sn-report-kpi"><div class="sn-report-kpi-label">Total Pallet Qty</div><div class="sn-report-kpi-value">{_safe_number(totals.get("pallet_qty") or 0)}</div></div>', unsafe_allow_html=True)
@@ -532,6 +548,96 @@ def _display_report(rows, title):
 
 
 def get_report_rows(report_name):
+    # SN 27.13 inventory reports use one delivery aggregate per box to avoid
+    # multiplying shipment quantities when a box has multiple delivery rows.
+    # Warehouse Balance Qty = Shipment Qty - In Transit Qty - Delivered Qty.
+    if report_name == "Summary Report - Product Wise":
+        fsql, params = _shipment_filters("s.shipment_date")
+        query_params = [str(to_date)] + list(params)
+        return _run_query(f"""
+            WITH delivery_by_box AS (
+                SELECT d.box_id, SUM(d.delivered_qty) AS delivered_qty
+                FROM customer_deliveries d
+                WHERE d.delivery_date IS NOT NULL
+                  AND d.delivery_date::date <= ?::date
+                GROUP BY d.box_id
+            )
+            SELECT
+                p.product_code,
+                p.product_name,
+                SUM(COALESCE(b.original_qty,0)) AS shipment_qty,
+                SUM(CASE
+                        WHEN COALESCE(s.shipment_status,'In Transit') <> 'Delivered'
+                             OR s.warehouse_delivery_date IS NULL
+                        THEN COALESCE(b.original_qty,0)
+                        ELSE 0
+                    END) AS in_transit_qty,
+                SUM(COALESCE(del.delivered_qty,0)) AS delivered_qty,
+                SUM(COALESCE(b.original_qty,0))
+                - SUM(CASE
+                        WHEN COALESCE(s.shipment_status,'In Transit') <> 'Delivered'
+                             OR s.warehouse_delivery_date IS NULL
+                        THEN COALESCE(b.original_qty,0)
+                        ELSE 0
+                    END)
+                - SUM(COALESCE(del.delivered_qty,0)) AS warehouse_balance_qty
+            FROM shipment_boxes b
+            JOIN shipments s ON s.id=b.shipment_id
+            JOIN products p ON p.id=b.product_id
+            LEFT JOIN warehouses w ON w.id=s.warehouse_id
+            LEFT JOIN customers c ON c.id=s.customer_id
+            LEFT JOIN delivery_by_box del ON del.box_id=b.id
+            WHERE 1=1
+            {fsql}
+            /*ACCESS_FILTER*/
+            GROUP BY p.product_code, p.product_name
+            ORDER BY p.product_code, p.product_name
+        """, query_params)
+
+    if report_name == "Warehouse Balance Qty - Product Wise / Warehouse Wise":
+        fsql, params = _shipment_filters("s.shipment_date")
+        query_params = [str(to_date)] + list(params)
+        return _run_query(f"""
+            WITH delivery_by_box AS (
+                SELECT d.box_id, SUM(d.delivered_qty) AS delivered_qty
+                FROM customer_deliveries d
+                WHERE d.delivery_date IS NOT NULL
+                  AND d.delivery_date::date <= ?::date
+                GROUP BY d.box_id
+            )
+            SELECT
+                COALESCE(w.warehouse_name,'Unassigned Warehouse') AS warehouse_name,
+                p.product_code,
+                p.product_name,
+                SUM(COALESCE(b.original_qty,0)) AS shipment_qty,
+                SUM(CASE
+                        WHEN COALESCE(s.shipment_status,'In Transit') <> 'Delivered'
+                             OR s.warehouse_delivery_date IS NULL
+                        THEN COALESCE(b.original_qty,0)
+                        ELSE 0
+                    END) AS in_transit_qty,
+                SUM(COALESCE(del.delivered_qty,0)) AS delivered_qty,
+                SUM(COALESCE(b.original_qty,0))
+                - SUM(CASE
+                        WHEN COALESCE(s.shipment_status,'In Transit') <> 'Delivered'
+                             OR s.warehouse_delivery_date IS NULL
+                        THEN COALESCE(b.original_qty,0)
+                        ELSE 0
+                    END)
+                - SUM(COALESCE(del.delivered_qty,0)) AS warehouse_balance_qty
+            FROM shipment_boxes b
+            JOIN shipments s ON s.id=b.shipment_id
+            JOIN products p ON p.id=b.product_id
+            LEFT JOIN warehouses w ON w.id=s.warehouse_id
+            LEFT JOIN customers c ON c.id=s.customer_id
+            LEFT JOIN delivery_by_box del ON del.box_id=b.id
+            WHERE 1=1
+            {fsql}
+            /*ACCESS_FILTER*/
+            GROUP BY w.warehouse_name, p.product_code, p.product_name
+            ORDER BY w.warehouse_name, p.product_code, p.product_name
+        """, query_params)
+
     if report_name == "Shipment List":
         fsql, params = _shipment_filters("s.shipment_date")
         return _run_query(f"""
@@ -839,7 +945,7 @@ def get_report_rows(report_name):
 st.markdown(
     """
     <div class="sap-grid-card">
-        <div class="sap-grid-card-title">REPORT FILTERS - SN 26.00</div>
+        <div class="sap-grid-card-title">REPORT FILTERS - SN 27.13</div>
     """,
     unsafe_allow_html=True,
 )
@@ -874,7 +980,7 @@ if from_date > to_date:
     from_date, to_date = to_date, from_date
 
 if not generate:
-    st.info("Select report and filters, then click GENERATE REPORT.")
+    st.info("Select report and filters, then click GENERATE REPORT. For the two balance reports: Delivered Qty means delivered to customer; Warehouse Balance Qty = Shipment Qty - In Transit Qty - Delivered Qty.")
     render_slogan_footer()
     st.stop()
 

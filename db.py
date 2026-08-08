@@ -176,6 +176,137 @@ def execute_many(query, param_list):
     finally:
         conn.close()
 
+MASTER_RELATIONSHIP_SCHEMA_VERSION = "SN 27.13"
+
+MASTER_RELATIONSHIP_MIGRATIONS = [
+    """
+    CREATE TABLE IF NOT EXISTS ship_to_masters (
+        id SERIAL PRIMARY KEY,
+        ship_to_name TEXT NOT NULL,
+        ship_to_id TEXT,
+        addressline1 TEXT,
+        addressline2 TEXT,
+        addressline3 TEXT,
+        vendor_gstin TEXT,
+        vendor_phone TEXT,
+        vendor_email TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    "ALTER TABLE ship_to_masters ADD COLUMN IF NOT EXISTS ship_to_name TEXT",
+    "ALTER TABLE ship_to_masters ADD COLUMN IF NOT EXISTS ship_to_id TEXT",
+    "ALTER TABLE ship_to_masters ADD COLUMN IF NOT EXISTS addressline1 TEXT",
+    "ALTER TABLE ship_to_masters ADD COLUMN IF NOT EXISTS addressline2 TEXT",
+    "ALTER TABLE ship_to_masters ADD COLUMN IF NOT EXISTS addressline3 TEXT",
+    "ALTER TABLE ship_to_masters ADD COLUMN IF NOT EXISTS vendor_gstin TEXT",
+    "ALTER TABLE ship_to_masters ADD COLUMN IF NOT EXISTS vendor_phone TEXT",
+    "ALTER TABLE ship_to_masters ADD COLUMN IF NOT EXISTS vendor_email TEXT",
+    "ALTER TABLE ship_to_masters ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
+    "ALTER TABLE ship_to_masters ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    "ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_code TEXT",
+    "ALTER TABLE customers ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS customer_id INTEGER",
+    # Retained for backward compatibility only. The canonical SN 27.13 chain is
+    # Product.customer_id -> Customer.ship_to_master_id.
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
+    "ALTER TABLE shipments ADD COLUMN IF NOT EXISTS customer_id INTEGER",
+    "ALTER TABLE shipments ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
+    "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS customer_id INTEGER",
+    "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
+    "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS ship_via TEXT DEFAULT 'Road'",
+    "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS packaging_remark TEXT",
+    "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS vehicle_number TEXT",
+    "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS asn_number TEXT",
+    "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS asn_date DATE",
+    "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS packaging_details TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_products_customer_id ON products(customer_id)",
+    "CREATE INDEX IF NOT EXISTS idx_products_ship_to_master_id ON products(ship_to_master_id)",
+    "CREATE INDEX IF NOT EXISTS idx_customers_ship_to_master_id ON customers(ship_to_master_id)",
+    "CREATE INDEX IF NOT EXISTS idx_shipments_customer_id ON shipments(customer_id)",
+    "CREATE INDEX IF NOT EXISTS idx_shipments_ship_to_master_id ON shipments(ship_to_master_id)",
+    "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_customer_id ON customer_deliveries(customer_id)",
+    "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_ship_to_master_id ON customer_deliveries(ship_to_master_id)",
+]
+
+MASTER_RELATIONSHIP_REQUIRED_COLUMNS = {
+    ("ship_to_masters", "id"),
+    ("ship_to_masters", "ship_to_name"),
+    ("ship_to_masters", "ship_to_id"),
+    ("ship_to_masters", "addressline1"),
+    ("ship_to_masters", "addressline2"),
+    ("ship_to_masters", "addressline3"),
+    ("ship_to_masters", "is_active"),
+    ("ship_to_masters", "created_at"),
+    ("customers", "id"),
+    ("customers", "customer_name"),
+    ("customers", "address"),
+    ("customers", "payment_term_id"),
+    ("customers", "ship_to_master_id"),
+    ("products", "id"),
+    ("products", "product_code"),
+    ("products", "customer_id"),
+    ("shipments", "customer_id"),
+    ("shipments", "ship_to_master_id"),
+    ("customer_deliveries", "customer_id"),
+    ("customer_deliveries", "ship_to_master_id"),
+    ("customer_deliveries", "ship_via"),
+}
+
+
+def ensure_master_relationship_schema():
+    """Create and verify Product -> Customer -> Ship To fields.
+
+    Every migration is additive. No existing master or transaction row is
+    deleted, reset, truncated, or overwritten.
+    """
+    errors = []
+    for sql in MASTER_RELATIONSHIP_MIGRATIONS:
+        try:
+            execute_query(sql)
+        except Exception as exc:
+            errors.append({
+                "sql": " ".join(str(sql).split())[:240],
+                "error": str(exc),
+            })
+
+    found = set()
+    verification_error = ""
+    try:
+        rows = fetch_all("""
+            SELECT table_name, column_name
+            FROM information_schema.columns
+            WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+              AND table_name IN ('ship_to_masters','customers','products','shipments','customer_deliveries')
+        """)
+        found = {
+            (str(row.get("table_name") or ""), str(row.get("column_name") or ""))
+            for row in rows
+        }
+    except Exception as exc:
+        verification_error = str(exc)
+
+    missing = sorted(MASTER_RELATIONSHIP_REQUIRED_COLUMNS - found)
+    return {
+        "ok": not errors and not verification_error and not missing,
+        "version": MASTER_RELATIONSHIP_SCHEMA_VERSION,
+        "missing": [f"{table}.{column}" for table, column in missing],
+        "errors": errors,
+        "verification_error": verification_error,
+    }
+
+
+def apply_master_relationship_migrations(raise_on_error=False):
+    """Compatibility wrapper used by init_db and the deployment migrator."""
+    status = ensure_master_relationship_schema()
+    if raise_on_error and not status.get("ok"):
+        details = [item.get("error", "") for item in status.get("errors", [])]
+        details.extend(status.get("missing", []))
+        if status.get("verification_error"):
+            details.append(status["verification_error"])
+        raise RuntimeError("; ".join(x for x in details if x) or "Master relationship migration failed")
+    return bool(status.get("ok")), status
+
 
 def hash_password(password):
     return hashlib.sha256(str(password or "").encode()).hexdigest()
@@ -191,6 +322,7 @@ def verify_user(username, password):
 
 def init_db():
     """Lightweight non-destructive migrations for existing Supabase/PostgreSQL database."""
+    apply_master_relationship_migrations(raise_on_error=False)
     migrations = [
         "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS packaging_remark TEXT",
         "CREATE INDEX IF NOT EXISTS idx_shipments_invoice_no ON shipments(invoice_no)",
@@ -225,6 +357,13 @@ def init_db():
         "ALTER TABLE page_permissions ADD COLUMN IF NOT EXISTS can_modify BOOLEAN DEFAULT FALSE",
         "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_code TEXT",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS customer_id INTEGER",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
+        "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS ship_via TEXT DEFAULT 'Road'",
+        "CREATE INDEX IF NOT EXISTS idx_products_customer_id ON products(customer_id)",
+        "CREATE INDEX IF NOT EXISTS idx_products_ship_to_master_id ON products(ship_to_master_id)",
+        "CREATE INDEX IF NOT EXISTS idx_customers_ship_to_master_id ON customers(ship_to_master_id)",
         "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_modify BOOLEAN DEFAULT FALSE",
         "ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS po_number TEXT",
         "ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS po_date DATE",
@@ -238,6 +377,8 @@ def init_db():
         "ALTER TABLE shipments ADD COLUMN IF NOT EXISTS shipment_status_updated_at TIMESTAMP",
         "CREATE INDEX IF NOT EXISTS idx_shipments_status_wh_date ON shipments(shipment_status, warehouse_delivery_date)",
         "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
+        "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_customer_id ON customer_deliveries(customer_id)",
+        "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_ship_to_master_id ON customer_deliveries(ship_to_master_id)",
         "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS po_number TEXT",
         "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS po_date DATE",
         "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS vehicle_number TEXT",

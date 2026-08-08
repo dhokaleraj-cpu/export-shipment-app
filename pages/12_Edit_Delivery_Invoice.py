@@ -4,8 +4,10 @@ page_setup()
 require_page_view('delivery_edit')
 show_edit_permission_status('delivery_edit')
 ensure_delivery_columns()
+require_delivery_master_relationship_schema("Edit Delivery Invoice")
+ensure_delivery_master_link_columns(show_errors=True)
 
-show_header("Edit Delivery Invoice", "Edit pallet rows in row format, add pallets and print PDF")
+show_header("Edit Delivery Invoice", "Edit the complete invoice header including Bill To, Ship To and all transaction fields")
 render_delivery_subnav('delivery_edit')
 access_notice()
 
@@ -88,22 +90,39 @@ if current_inv_for_print and current_lines_for_print:
         key=f"download_current_delivery_invoice_{selected_delivery_invoice_no}"
     )
 
-# Common invoice/header fields, used by all selected rows and new rows.
-# Use exact saved invoice header values and dynamic Streamlit keys.
-# Fixed keys keep stale values when the user changes Delivery Invoice selection.
+# Complete common invoice/header fields. These values are applied to every row
+# under the selected Delivery Invoice so the print header cannot become mixed.
 st.divider()
-st.subheader("Common Delivery Invoice Header Fields")
-st.info("After selecting a Delivery Invoice, these fields are loaded from the original saved delivery record. Use the SAVE buttons at the bottom after editing.")
-st.caption("These common fields will be applied to all selected pallet rows and any new pallet rows added below.")
+st.subheader("Complete Delivery Invoice Header Edit")
+st.info("All editable invoice-header fields are loaded from the saved record. Bill To, Ship To and Payment Term are master-linked dropdowns; you may change them manually and save the header for the entire invoice.")
+st.caption("Original Invoice Number, Shipment Number, PO, Pallet and Box remain line-linked values and are controlled through the pallet rows below.")
 
 common_header_source = dict(selected_header or {})
 if current_inv_for_print:
-    # PDF/reprint header query is the most exact saved header source.
     common_header_source.update(dict(current_inv_for_print))
+
+# Legacy invoices may pre-date saved Customer / Ship To IDs. Infer a common
+# default only when every product line resolves to the same required master chain.
+if not common_header_source.get("customer_id") or not common_header_source.get("ship_to_master_id"):
+    inferred_defaults = []
+    for _line in (current_lines_for_print or []):
+        _product_id = _line.get("product_id")
+        if _product_id:
+            try:
+                inferred_defaults.append(fetch_product_delivery_defaults(_product_id))
+            except Exception:
+                pass
+    _inferred_customers = {int(x.get("customer_id")) for x in inferred_defaults if x.get("customer_id")}
+    _inferred_ship_tos = {int(x.get("customer_ship_to_master_id")) for x in inferred_defaults if x.get("customer_ship_to_master_id")}
+    if not common_header_source.get("customer_id") and len(_inferred_customers) == 1:
+        common_header_source["customer_id"] = next(iter(_inferred_customers))
+    if not common_header_source.get("ship_to_master_id") and len(_inferred_ship_tos) == 1:
+        common_header_source["ship_to_master_id"] = next(iter(_inferred_ship_tos))
 
 common_key_suffix = str(selected_delivery_invoice_no or "delivery").replace(" ", "_").replace("/", "_").replace("|", "_").replace("\\", "_")
 
-# If invoice selection changes, remove old common-header widget states so values are fetched from the selected record.
+# If invoice selection changes, remove old common-header widget states so values
+# are fetched from the newly selected saved record.
 previous_common_invoice = st.session_state.get("_edit_delivery_previous_invoice_no")
 if previous_common_invoice != selected_delivery_invoice_no:
     for _k in list(st.session_state.keys()):
@@ -114,65 +133,290 @@ if previous_common_invoice != selected_delivery_invoice_no:
                 pass
     st.session_state["_edit_delivery_previous_invoice_no"] = selected_delivery_invoice_no
 
+customer_rows = fetch_all("SELECT * FROM customers ORDER BY customer_name, id")
+ship_to_rows = fetch_all("SELECT * FROM ship_to_masters ORDER BY COALESCE(is_active, TRUE) DESC, ship_to_name, ship_to_id, id")
+term_rows = fetch_all("SELECT * FROM payment_terms ORDER BY days, id")
+
+customer_map = {
+    f'{r.get("customer_name") or "-"} | {r.get("company_code") or "-"} | ID {r.get("id")}': r
+    for r in customer_rows
+}
+customer_label_by_id = {int(r["id"]): label for label, r in customer_map.items()}
+ship_to_map = {
+    f'{r.get("ship_to_name") or "-"} | {r.get("ship_to_id") or "-"} | ID {r.get("id")}' + (" | INACTIVE" if r.get("is_active") is False else ""): r
+    for r in ship_to_rows
+}
+ship_to_label_by_id = {int(r["id"]): label for label, r in ship_to_map.items()}
+term_map = {
+    f'{r.get("term_name") or "-"} - {r.get("days") or 0} days | ID {r.get("id")}': r
+    for r in term_rows
+}
+term_label_by_id = {int(r["id"]): label for label, r in term_map.items()}
+
+# Provide an explicit master-relationship reload for invoices containing one Product.
+# This is optional: the saved header remains the source until the user clicks it.
+current_product_ids = sorted({int(line.get("product_id")) for line in (current_lines_for_print or []) if line.get("product_id")})
+product_header_default = fetch_product_delivery_defaults(current_product_ids[0]) if len(current_product_ids) == 1 else {}
+if product_header_default.get("customer_id") and product_header_default.get("effective_ship_to_master_id"):
+    master_customer_name = product_header_default.get("customer_name") or "-"
+    master_ship_to_rows = fetch_all("SELECT ship_to_name, ship_to_id FROM ship_to_masters WHERE id=? LIMIT 1", (product_header_default.get("effective_ship_to_master_id"),))
+    master_ship_to_name = master_ship_to_rows[0].get("ship_to_name") if master_ship_to_rows else "-"
+    st.caption(f"Product Master relationship available: {master_customer_name} → {master_ship_to_name}")
+    if st.button(
+        "Load Bill To / Ship To from Product Master Relationship",
+        key=f"load_edit_delivery_product_relationship_{common_key_suffix}",
+    ):
+        customer_id_value = int(product_header_default["customer_id"])
+        ship_to_id_value = int(product_header_default["effective_ship_to_master_id"])
+        if customer_id_value in customer_label_by_id and ship_to_id_value in ship_to_label_by_id:
+            st.session_state[f"edit_common_bill_to_{common_key_suffix}"] = customer_label_by_id[customer_id_value]
+            st.session_state[f"edit_common_ship_to_{common_key_suffix}"] = ship_to_label_by_id[ship_to_id_value]
+            term_id_value = product_header_default.get("customer_payment_term_id")
+            if term_id_value and int(term_id_value) in term_label_by_id:
+                st.session_state[f"edit_common_payment_term_{common_key_suffix}"] = term_label_by_id[int(term_id_value)]
+            st.session_state[f"_edit_common_customer_tracker_{common_key_suffix}"] = customer_id_value
+            st.rerun()
+
+if not customer_map:
+    st.error("Customer Master is empty. Create a Customer before editing the invoice header.")
+    st.stop()
+if not term_map:
+    st.error("Payment Term Master is empty. Create a Payment Term before editing the invoice header.")
+    st.stop()
+if not ship_to_map:
+    st.error("Ship To Master is empty. Create a Ship To before editing the Delivery Invoice header.")
+    st.stop()
+
+source_customer_id = common_header_source.get("customer_id")
+source_ship_to_id = common_header_source.get("ship_to_master_id")
+source_term_id = common_header_source.get("payment_term_id")
+source_customer_label = customer_label_by_id.get(int(source_customer_id), list(customer_map.keys())[0]) if source_customer_id else list(customer_map.keys())[0]
+source_ship_to_label = ship_to_label_by_id.get(int(source_ship_to_id), list(ship_to_map.keys())[0] if ship_to_map else "") if source_ship_to_id else (list(ship_to_map.keys())[0] if ship_to_map else "")
+source_term_label = term_label_by_id.get(int(source_term_id), list(term_map.keys())[0]) if source_term_id else list(term_map.keys())[0]
+
 st.markdown(
     f"""
     <div class="admin-saved-data-card">
         <b>Loaded Header From Saved Record:</b>
         Delivery Invoice: {common_header_source.get('delivery_invoice_no') or '-'} |
         Delivery Date: {common_header_source.get('delivery_date') or '-'} |
-        Payment Due Date: {common_header_source.get('payment_due_date') or '-'} |
-        Vehicle: {common_header_source.get('vehicle_number') or '-'} |
-        ASN: {common_header_source.get('asn_number') or '-'}
+        Bill To: {common_header_source.get('customer_name') or '-'} |
+        Ship To: {common_header_source.get('ship_to_name') or '-'} |
+        Original Invoice(s): {common_header_source.get('original_invoice_no') or '-'} |
+        Shipment(s): {common_header_source.get('shipment_no') or '-'}
     </div>
     """,
     unsafe_allow_html=True
 )
 
-common_c1, common_c2, common_c3, common_c4 = st.columns(4)
-with common_c1:
+common_row1 = st.columns(4)
+with common_row1[0]:
     common_invoice_no = st.text_input(
         "Delivery Invoice No",
         common_header_source.get("delivery_invoice_no") or "",
         key=f"edit_common_delivery_invoice_no_{common_key_suffix}"
     )
-    common_delivery_date = st.text_input(
-        "Delivery Date YYYY-MM-DD",
-        str(common_header_source.get("delivery_date") or ""),
+with common_row1[1]:
+    common_delivery_date = st.date_input(
+        "Delivery Date",
+        value=parse_date_for_input(common_header_source.get("delivery_date")),
         key=f"edit_common_delivery_date_{common_key_suffix}"
     )
-with common_c2:
-    common_due_date = st.text_input(
-        "Payment Due Date YYYY-MM-DD",
-        str(common_header_source.get("payment_due_date") or ""),
+with common_row1[2]:
+    bill_to_key = f"edit_common_bill_to_{common_key_suffix}"
+    common_bill_to_label = st.selectbox(
+        "Customer / Bill To *",
+        list(customer_map.keys()),
+        index=list(customer_map.keys()).index(source_customer_label),
+        key=bill_to_key
+    )
+    common_bill_to_row = customer_map[common_bill_to_label]
+    common_customer_id = int(common_bill_to_row["id"])
+
+# When Bill To is manually changed, load that Customer's linked Ship To and
+# default Payment Term before those widgets are created.
+customer_tracker_key = f"_edit_common_customer_tracker_{common_key_suffix}"
+ship_to_widget_key = f"edit_common_ship_to_{common_key_suffix}"
+term_widget_key = f"edit_common_payment_term_{common_key_suffix}"
+if customer_tracker_key not in st.session_state:
+    st.session_state[customer_tracker_key] = int(source_customer_id) if source_customer_id else common_customer_id
+elif st.session_state.get(customer_tracker_key) != common_customer_id:
+    linked_ship_to_id = common_bill_to_row.get("ship_to_master_id")
+    if linked_ship_to_id and int(linked_ship_to_id) in ship_to_label_by_id:
+        st.session_state[ship_to_widget_key] = ship_to_label_by_id[int(linked_ship_to_id)]
+    elif ship_to_widget_key in st.session_state:
+        del st.session_state[ship_to_widget_key]
+    linked_term_id = common_bill_to_row.get("payment_term_id")
+    if linked_term_id and int(linked_term_id) in term_label_by_id:
+        st.session_state[term_widget_key] = term_label_by_id[int(linked_term_id)]
+    st.session_state[customer_tracker_key] = common_customer_id
+
+with common_row1[3]:
+    if ship_to_map:
+        if ship_to_widget_key in st.session_state and st.session_state.get(ship_to_widget_key) not in ship_to_map:
+            del st.session_state[ship_to_widget_key]
+        common_ship_to_label = st.selectbox(
+            "Ship To *",
+            list(ship_to_map.keys()),
+            index=list(ship_to_map.keys()).index(source_ship_to_label) if source_ship_to_label in ship_to_map else 0,
+            key=ship_to_widget_key
+        )
+        common_ship_to_row = ship_to_map[common_ship_to_label]
+        common_ship_to_id = int(common_ship_to_row["id"])
+    else:
+        common_ship_to_row = {}
+        common_ship_to_id = None
+        st.warning("No active Ship To Master is available.")
+
+common_row2 = st.columns(4)
+with common_row2[0]:
+    if term_widget_key in st.session_state and st.session_state.get(term_widget_key) not in term_map:
+        del st.session_state[term_widget_key]
+    common_term_label = st.selectbox(
+        "Payment Term",
+        list(term_map.keys()),
+        index=list(term_map.keys()).index(source_term_label),
+        key=term_widget_key
+    )
+    common_term_row = term_map[common_term_label]
+with common_row2[1]:
+    common_due_date = st.date_input(
+        "Payment Due Date",
+        value=parse_date_for_input(common_header_source.get("payment_due_date")),
         key=f"edit_common_due_date_{common_key_suffix}"
     )
+with common_row2[2]:
     common_vehicle = st.text_input(
         "Vehicle Number",
         common_header_source.get("vehicle_number") or "",
         key=f"edit_common_vehicle_{common_key_suffix}"
     )
-with common_c3:
+with common_row2[3]:
+    common_ship_via = st.text_input(
+        "Ship Via",
+        common_header_source.get("ship_via") or "Road",
+        key=f"edit_common_ship_via_{common_key_suffix}"
+    )
+
+common_row3 = st.columns(4)
+with common_row3[0]:
     common_asn_no = st.text_input(
         "ASN Number",
         common_header_source.get("asn_number") or "",
         key=f"edit_common_asn_no_{common_key_suffix}"
     )
-    common_asn_date = st.text_input(
-        "ASN Date YYYY-MM-DD",
-        str(common_header_source.get("asn_date") or ""),
+with common_row3[1]:
+    common_asn_date = st.date_input(
+        "ASN Date",
+        value=parse_date_for_input(common_header_source.get("asn_date") or common_header_source.get("delivery_date")),
         key=f"edit_common_asn_date_{common_key_suffix}"
     )
-with common_c4:
+with common_row3[2]:
     common_packaging = st.text_input(
         "Packaging Details",
         common_header_source.get("packaging_details") or "",
         key=f"edit_common_packaging_{common_key_suffix}"
     )
+with common_row3[3]:
     common_remarks = st.text_input(
         "Remarks",
         common_header_source.get("packaging_remark") or "",
         key=f"edit_common_remarks_{common_key_suffix}"
     )
+
+common_attachment_path = str(common_header_source.get("attachment_path") or "").strip()
+attachment_cols = st.columns([1.4, 2.6])
+with attachment_cols[0]:
+    st.text_input(
+        "Current Delivery Attachment",
+        value=Path(common_attachment_path).name if common_attachment_path else "No attachment",
+        disabled=True,
+        key=f"edit_common_current_attachment_{common_key_suffix}"
+    )
+with attachment_cols[1]:
+    common_attachment = st.file_uploader(
+        "Replace / Attach Delivery File",
+        key=f"edit_common_attachment_{common_key_suffix}"
+    )
+
+bill_to_address = str(common_bill_to_row.get("address") or "").strip() or "-"
+ship_to_address = "\n".join([
+    str(common_ship_to_row.get("addressline1") or "").strip(),
+    str(common_ship_to_row.get("addressline2") or "").strip(),
+    str(common_ship_to_row.get("addressline3") or "").strip(),
+]).strip() or "-"
+address_cols = st.columns(2)
+with address_cols[0]:
+    st.markdown(f"**Bill To Address — Customer Master**  \n{html.escape(bill_to_address).replace(chr(10), '<br>')}", unsafe_allow_html=True)
+with address_cols[1]:
+    st.markdown(f"**Ship To Address — Ship To Master**  \n{html.escape(ship_to_address).replace(chr(10), '<br>')}", unsafe_allow_html=True)
+
+
+def _validate_common_header():
+    if not str(common_invoice_no or "").strip():
+        return "Delivery Invoice Number is mandatory."
+    if not common_customer_id:
+        return "Customer / Bill To is mandatory."
+    if not str(common_bill_to_row.get("address") or "").strip():
+        return "The selected Customer has no Bill To Address. Complete Customer Master before saving."
+    if not common_bill_to_row.get("ship_to_master_id"):
+        return "The selected Customer has no required Ship To link in Customer Master."
+    if not common_ship_to_id:
+        return "Ship To is mandatory. Select a Ship To Master before saving."
+    if common_ship_to_row.get("is_active") is False:
+        return "The selected Ship To is inactive. Select an active Ship To before saving."
+    if not str(common_ship_to_row.get("addressline1") or "").strip():
+        return "The selected Ship To has no Address Line 1. Complete Ship To Master before saving."
+    if common_invoice_no.strip() != selected_delivery_invoice_no:
+        existing = fetch_all(
+            "SELECT id FROM customer_deliveries WHERE delivery_invoice_no=? LIMIT 1",
+            (common_invoice_no.strip(),)
+        )
+        if existing:
+            return f"Delivery Invoice {common_invoice_no.strip()} already exists. Use a unique invoice number."
+    return ""
+
+
+def _apply_common_header_to_entire_invoice():
+    updated_attachment_path = common_attachment_path or None
+    if common_attachment is not None:
+        updated_attachment_path = save_upload(
+            common_attachment,
+            f"delivery_{common_invoice_no.strip() or selected_delivery_invoice_no}_header"
+        )
+
+    execute_query("""
+        UPDATE customer_deliveries
+        SET delivery_invoice_no=?, delivery_date=?, customer_id=?, ship_to_master_id=?,
+            payment_term_id=?, payment_terms_days=?, payment_due_date=?, vehicle_number=?,
+            ship_via=?, asn_number=?, asn_date=?, packaging_details=?, packaging_remark=?,
+            attachment_path=?
+        WHERE delivery_invoice_no=?
+    """, (
+        common_invoice_no.strip(), str(common_delivery_date), common_customer_id, common_ship_to_id,
+        common_term_row.get("id"), common_term_row.get("days"), str(common_due_date),
+        common_vehicle.strip(), common_ship_via.strip() or "Road", common_asn_no.strip(),
+        str(common_asn_date), common_packaging.strip(), common_remarks.strip(),
+        updated_attachment_path, selected_delivery_invoice_no
+    ))
+    return updated_attachment_path
+
+
+if st.button(
+    "SAVE - Update Complete Header for All Invoice Rows",
+    type="primary",
+    key=f"save_complete_delivery_header_{common_key_suffix}",
+    width='stretch'
+):
+    header_error = _validate_common_header()
+    if header_error:
+        st.error(header_error)
+    else:
+        _apply_common_header_to_entire_invoice()
+        st.session_state["edit_delivery_last_print_invoice_no"] = common_invoice_no.strip()
+        st.session_state.pop("edit_delivery_invoice_header_by_date", None)
+        clear_cache_after_write()
+        rerun_with_success("Complete Delivery Invoice header updated for all pallet rows.")
 
 rows = fetch_delivery_invoice_rows(selected_delivery_invoice_no, selected_product_id=selected_product_id)
 if not rows:
@@ -384,91 +628,65 @@ else:
         if not update_payload:
             st.error("Please select delivery rows to update.")
         else:
-            ok = True
-            for item in update_payload:
-                selected_pallet = item["selected_pallet"]
-                if not selected_pallet:
-                    ok = False
-                    st.error(f"Please select linked pallet for Delivery ID {item['delivery_id']}.")
-                    continue
-                execute_query("""
-                    UPDATE customer_deliveries
-                    SET shipment_id=?,
-                        box_id=?,
-                        delivery_invoice_no=?,
-                        delivery_date=?,
-                        delivered_qty=?,
-                        unit_price=?,
-                        currency=?,
-                        sale_amount=?,
-                        payment_due_date=?,
-                        vehicle_number=?,
-                        asn_number=?,
-                        asn_date=?,
-                        packaging_details=?,
-                        packaging_remark=?
-                    WHERE id=?
-                """, (
-                    selected_pallet["shipment_id"],
-                    selected_pallet["id"],
-                    common_invoice_no.strip(),
-                    common_delivery_date.strip(),
-                    item["delivered_qty"],
-                    item["unit_price"],
-                    item["currency"],
-                    item["sale_amount"],
-                    common_due_date.strip(),
-                    common_vehicle.strip(),
-                    common_asn_no.strip(),
-                    common_asn_date.strip() or None,
-                    common_packaging.strip(),
-                    common_remarks.strip(),
-                    item["delivery_id"],
-                ))
-            if ok:
-                st.session_state["edit_delivery_last_print_invoice_no"] = common_invoice_no.strip()
-                set_success_message("Selected delivery rows updated successfully. PDF is ready for print/download.")
-                clear_cache_after_write()
-                st.rerun()
+            header_error = _validate_common_header()
+            if header_error:
+                st.error(header_error)
+            else:
+                ok = True
+                for item in update_payload:
+                    if not item["selected_pallet"]:
+                        ok = False
+                        st.error(f"Please select linked pallet for Delivery ID {item['delivery_id']}.")
+                if ok:
+                    _apply_common_header_to_entire_invoice()
+                    for item in update_payload:
+                        selected_pallet = item["selected_pallet"]
+                        execute_query("""
+                            UPDATE customer_deliveries
+                            SET shipment_id=?, box_id=?, delivered_qty=?, unit_price=?, currency=?,
+                                sale_amount=?, po_number=?, po_date=?
+                            WHERE id=?
+                        """, (
+                            selected_pallet["shipment_id"], selected_pallet["id"],
+                            item["delivered_qty"], item["unit_price"], item["currency"],
+                            item["sale_amount"], selected_pallet.get("po_number", ""),
+                            selected_pallet.get("po_date"), item["delivery_id"]
+                        ))
+                    st.session_state["edit_delivery_last_print_invoice_no"] = common_invoice_no.strip()
+                    st.session_state.pop("edit_delivery_invoice_header_by_date", None)
+                    clear_cache_after_write()
+                    rerun_with_success("Complete header and selected delivery rows updated successfully. PDF is ready.")
 
     if save_new_rows:
         if not add_payload:
             st.error("Select new pallet rows and enter quantity.")
         else:
-            for p, qty, price, currency, amount in add_payload:
-                execute_query("""
-                    INSERT INTO customer_deliveries
-                    (shipment_id, box_id, customer_id, ship_to_master_id, delivery_date, delivered_qty, delivery_invoice_no,
-                     vehicle_number, asn_number, asn_date, packaging_details, packaging_remark,
-                     payment_term_id, payment_terms_days, payment_due_date, unit_price, currency, sale_amount, attachment_path, po_number, po_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    p["shipment_id"],
-                    p["id"],
-                    selected_header.get("customer_id"),
-                    selected_header.get("ship_to_master_id"),
-                    common_delivery_date.strip(),
-                    qty,
-                    common_invoice_no.strip(),
-                    common_vehicle.strip(),
-                    common_asn_no.strip(),
-                    common_asn_date.strip() or None,
-                    common_packaging.strip(),
-                    common_remarks.strip(),
-                    selected_header.get("payment_term_id"),
-                    selected_header.get("payment_terms_days"),
-                    common_due_date.strip(),
-                    price,
-                    currency,
-                    amount,
-                    None,
-                    p.get("po_number", ""),
-                    p.get("po_date", None),
-                ))
-            st.session_state["edit_delivery_last_print_invoice_no"] = common_invoice_no.strip()
-            set_success_message("Selected new pallet rows added successfully. PDF is ready for print/download.")
-            clear_cache_after_write()
-            st.rerun()
+            header_error = _validate_common_header()
+            if header_error:
+                st.error(header_error)
+            else:
+                updated_header_attachment_path = _apply_common_header_to_entire_invoice()
+                for p, qty, price, currency, amount in add_payload:
+                    execute_query("""
+                        INSERT INTO customer_deliveries
+                        (shipment_id, box_id, customer_id, ship_to_master_id, delivery_date, delivered_qty,
+                         delivery_invoice_no, vehicle_number, asn_number, asn_date, packaging_details,
+                         packaging_remark, ship_via, payment_term_id, payment_terms_days, payment_due_date,
+                         unit_price, currency, sale_amount, attachment_path, po_number, po_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        p["shipment_id"], p["id"], common_customer_id, common_ship_to_id,
+                        str(common_delivery_date), qty, common_invoice_no.strip(), common_vehicle.strip(),
+                        common_asn_no.strip(), str(common_asn_date), common_packaging.strip(),
+                        common_remarks.strip(), common_ship_via.strip() or "Road",
+                        common_term_row.get("id"), common_term_row.get("days"), str(common_due_date),
+                        price, currency, amount, updated_header_attachment_path, p.get("po_number", ""), p.get("po_date", None)
+                    ))
+                st.session_state["edit_delivery_last_print_invoice_no"] = common_invoice_no.strip()
+                st.session_state.pop("edit_delivery_invoice_header_by_date", None)
+                clear_cache_after_write()
+                rerun_with_success("Complete header updated and selected new pallet rows added successfully. PDF is ready.")
+
 
 
 st.divider()

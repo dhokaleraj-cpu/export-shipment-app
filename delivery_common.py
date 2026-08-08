@@ -574,42 +574,45 @@ def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
             MAX(d.payment_due_date) AS payment_due_date,
             MAX(d.payment_term_id) AS payment_term_id,
             MAX(d.payment_terms_days) AS payment_terms_days,
+            MAX(pt.term_name) AS payment_term_name,
+            MAX(d.customer_id) AS customer_id,
+            MAX(d.ship_to_master_id) AS ship_to_master_id,
             MAX(d.vehicle_number) AS vehicle_number,
+            MAX(d.ship_via) AS ship_via,
             MAX(d.asn_number) AS asn_number,
             MAX(d.asn_date) AS asn_date,
             MAX(d.packaging_details) AS packaging_details,
             MAX(d.packaging_remark) AS packaging_remark,
+            MAX(d.attachment_path) AS attachment_path,
             MAX(d.currency) AS currency,
-            c.customer_name,
-            c.address AS customer_address,
-            c.company_code AS customer_company_code,
-            c.phone AS customer_phone,
-            c.email AS customer_email,
+            MAX(c.customer_name) AS customer_name,
+            MAX(c.address) AS customer_address,
+            MAX(c.company_code) AS customer_company_code,
+            MAX(c.phone) AS customer_phone,
+            MAX(c.email) AS customer_email,
             STRING_AGG(DISTINCT s.invoice_no, ', ' ORDER BY s.invoice_no) AS original_invoice_no,
             STRING_AGG(DISTINCT s.shipment_no, ', ' ORDER BY s.shipment_no) AS shipment_no,
             MAX(s.warehouse_id) AS warehouse_id,
             STRING_AGG(DISTINCT COALESCE(w.warehouse_name,''), ', ' ORDER BY COALESCE(w.warehouse_name,'')) AS warehouse_name,
-            stm.ship_to_name,
-            stm.ship_to_id,
-            stm.addressline1 AS ship_to_addressline1,
-            stm.addressline2 AS ship_to_addressline2,
-            stm.addressline3 AS ship_to_addressline3,
-            stm.vendor_gstin AS ship_to_vendor_gstin,
-            stm.vendor_phone AS ship_to_vendor_phone,
-            stm.vendor_email AS ship_to_vendor_email
+            MAX(stm.ship_to_name) AS ship_to_name,
+            MAX(stm.ship_to_id) AS ship_to_id,
+            MAX(stm.addressline1) AS ship_to_addressline1,
+            MAX(stm.addressline2) AS ship_to_addressline2,
+            MAX(stm.addressline3) AS ship_to_addressline3,
+            MAX(stm.vendor_gstin) AS ship_to_vendor_gstin,
+            MAX(stm.vendor_phone) AS ship_to_vendor_phone,
+            MAX(stm.vendor_email) AS ship_to_vendor_email
         FROM customer_deliveries d
         JOIN customers c ON d.customer_id = c.id
         JOIN shipments s ON d.shipment_id = s.id
         JOIN shipment_boxes b ON d.box_id = b.id
         JOIN products p ON b.product_id = p.id
+        LEFT JOIN payment_terms pt ON d.payment_term_id = pt.id
         LEFT JOIN warehouses w ON s.warehouse_id = w.id
-        LEFT JOIN ship_to_masters stm ON d.ship_to_master_id = stm.id
+        LEFT JOIN ship_to_masters stm ON COALESCE(d.ship_to_master_id, s.ship_to_master_id, c.ship_to_master_id) = stm.id
         WHERE d.delivery_invoice_no=?
         {access_sql}
-        GROUP BY d.delivery_invoice_no, c.customer_name, c.address, c.company_code, c.phone, c.email,
-                 stm.ship_to_name, stm.ship_to_id,
-                 stm.addressline1, stm.addressline2, stm.addressline3,
-                 stm.vendor_gstin, stm.vendor_phone, stm.vendor_email
+        GROUP BY d.delivery_invoice_no
         ORDER BY MIN(d.id)
         LIMIT 1
     """, (delivery_invoice_no,) + access_params)
@@ -620,11 +623,20 @@ def get_saved_delivery_invoice_for_pdf(delivery_invoice_no):
     invoice["seller_name"] = "Four Star Industries Pvt. Ltd."
     invoice["seller_address"] = ""
     invoice["ship_via"] = invoice.get("ship_via") or "Road"
-    if not invoice.get("payment_term") and invoice.get("payment_terms_days") not in (None, ""):
+    term_name = str(invoice.get("payment_term_name") or "").strip()
+    term_days = invoice.get("payment_terms_days")
+    if term_name and term_days not in (None, ""):
         try:
-            invoice["payment_term"] = f"{int(float(invoice.get('payment_terms_days')))} Days"
+            invoice["payment_term"] = f"{term_name} - {int(float(term_days))} Days"
         except Exception:
-            invoice["payment_term"] = f"{invoice.get('payment_terms_days')} Days"
+            invoice["payment_term"] = f"{term_name} - {term_days} Days"
+    elif term_name:
+        invoice["payment_term"] = term_name
+    elif term_days not in (None, ""):
+        try:
+            invoice["payment_term"] = f"{int(float(term_days))} Days"
+        except Exception:
+            invoice["payment_term"] = f"{term_days} Days"
 
     item_rows = fetch_all(f"""
         SELECT
@@ -732,14 +744,8 @@ def generate_delivery_invoice_no(original_invoice_no, delivery_date_value):
     return f"{prefix}{max_seq + 1:02d}"
 
 def ensure_delivery_columns():
-    """Non-destructive delivery page migrations."""
-    for sql in [
-        "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS packaging_remark TEXT",
-    ]:
-        try:
-            execute_query(sql)
-        except Exception:
-            pass
+    """Verify the additive delivery/header/master schema before rendering."""
+    require_delivery_master_relationship_schema("Delivery module")
 
 
 def fetch_delivery_part_options():
@@ -749,10 +755,13 @@ def fetch_delivery_part_options():
         SELECT DISTINCT
             b.product_id,
             p.product_code,
-            p.product_name
+            p.product_name,
+            p.customer_id,
+            c.ship_to_master_id AS customer_ship_to_master_id
         FROM shipment_boxes b
         JOIN shipments s ON b.shipment_id = s.id
         JOIN products p ON b.product_id = p.id
+        LEFT JOIN customers c ON p.customer_id = c.id
         LEFT JOIN (
             SELECT box_id, SUM(delivered_qty) AS delivered_qty
             FROM customer_deliveries
@@ -762,6 +771,55 @@ def fetch_delivery_part_options():
         {access_sql}
         ORDER BY p.product_code, p.product_name
     """, access_params)
+
+
+def fetch_product_delivery_defaults(product_id):
+    """Return Product-linked Bill To and effective Ship To defaults.
+
+    Canonical SN 27.12 chain: Product.customer_id -> Customer.ship_to_master_id.
+    Customer.ship_to_master_id is the required Ship To source. Returned IDs are
+    defaults; the transaction header remains manually changeable before save.
+    """
+    if not product_id:
+        return {}
+    rows = fetch_all("""
+        SELECT
+            p.id AS product_id,
+            p.product_code,
+            p.product_name,
+            p.customer_id,
+            c.customer_name,
+            c.company_code AS customer_company_code,
+            c.address AS customer_address,
+            c.phone AS customer_phone,
+            c.email AS customer_email,
+            c.payment_term_id AS customer_payment_term_id,
+            c.ship_to_master_id AS customer_ship_to_master_id,
+            c.ship_to_master_id AS effective_ship_to_master_id,
+            CASE
+                WHEN c.ship_to_master_id IS NOT NULL THEN 'Customer Master'
+                ELSE ''
+            END AS ship_to_source
+        FROM products p
+        LEFT JOIN customers c ON p.customer_id = c.id
+        WHERE p.id=?
+        LIMIT 1
+    """, (product_id,))
+    return dict(rows[0]) if rows else {}
+
+
+def fetch_customer_delivery_default(customer_id):
+    """Return the selected Customer's payment-term and default Ship To link."""
+    if not customer_id:
+        return {}
+    rows = fetch_all("""
+        SELECT id AS customer_id, customer_name, company_code, address, phone, email,
+               payment_term_id, ship_to_master_id
+        FROM customers
+        WHERE id=?
+        LIMIT 1
+    """, (customer_id,))
+    return dict(rows[0]) if rows else {}
 
 
 def delivery_part_selectbox(key="delivery_part_filter", label="Part Number Filter"):
@@ -799,6 +857,8 @@ def fetch_available_invoice_shipments(selected_product_id=None):
             s.po_date,
             s.shipment_date,
             s.warehouse_id,
+            s.customer_id,
+            s.ship_to_master_id,
             w.warehouse_name,
             SUM(b.original_qty - COALESCE(del.delivered_qty, 0)) AS balance_qty
         FROM shipments s
@@ -812,7 +872,7 @@ def fetch_available_invoice_shipments(selected_product_id=None):
         WHERE b.original_qty - COALESCE(del.delivered_qty, 0) > 0
         {access_sql}
         {part_sql}
-        GROUP BY s.id, s.shipment_no, s.invoice_no, s.po_number, s.po_date, s.shipment_date, s.warehouse_id, w.warehouse_name
+        GROUP BY s.id, s.shipment_no, s.invoice_no, s.po_number, s.po_date, s.shipment_date, s.warehouse_id, s.customer_id, s.ship_to_master_id, w.warehouse_name
         HAVING SUM(b.original_qty - COALESCE(del.delivered_qty, 0)) > 0
         ORDER BY s.shipment_date ASC, s.id ASC
     """, access_params + part_params)
@@ -923,20 +983,23 @@ def fetch_delivery_invoice_headers(selected_product_id=None, selected_invoice_no
             MAX(d.delivery_date) AS delivery_date,
             MAX(d.payment_due_date) AS payment_due_date,
             MAX(d.vehicle_number) AS vehicle_number,
+            MAX(d.ship_via) AS ship_via,
             MAX(d.asn_number) AS asn_number,
             MAX(d.asn_date) AS asn_date,
             MAX(d.packaging_details) AS packaging_details,
             MAX(d.packaging_remark) AS packaging_remark,
+            MAX(d.attachment_path) AS attachment_path,
             MAX(d.customer_id) AS customer_id,
             MAX(d.ship_to_master_id) AS ship_to_master_id,
             MAX(d.payment_term_id) AS payment_term_id,
             MAX(d.payment_terms_days) AS payment_terms_days,
-            c.customer_name,
-            s.invoice_no AS original_invoice_no,
-            s.shipment_no,
+            MAX(c.customer_name) AS customer_name,
+            STRING_AGG(DISTINCT s.invoice_no, ', ' ORDER BY s.invoice_no) AS original_invoice_no,
+            STRING_AGG(DISTINCT s.shipment_no, ', ' ORDER BY s.shipment_no) AS shipment_no,
+            MAX(s.id) AS shipment_id,
             MAX(s.warehouse_id) AS warehouse_id,
-            MAX(w.warehouse_name) AS warehouse_name,
-            d.currency,
+            STRING_AGG(DISTINCT COALESCE(w.warehouse_name,''), ', ' ORDER BY COALESCE(w.warehouse_name,'')) AS warehouse_name,
+            MAX(d.currency) AS currency,
             SUM(d.delivered_qty) AS total_qty,
             SUM(d.sale_amount) AS total_amount,
             COUNT(*) AS product_rows
@@ -950,7 +1013,7 @@ def fetch_delivery_invoice_headers(selected_product_id=None, selected_invoice_no
         {access_sql}
         {part_sql}
         {invoice_sql}
-        GROUP BY d.delivery_invoice_no, c.customer_name, s.invoice_no, s.shipment_no, d.currency
+        GROUP BY d.delivery_invoice_no
         ORDER BY MIN(d.id) DESC
     """, access_params + part_params + invoice_params)
 
@@ -1066,21 +1129,23 @@ def fetch_delivery_invoice_headers_for_edit(selected_product_id=None, date_from=
             MAX(d.delivery_date) AS delivery_date,
             MAX(d.payment_due_date) AS payment_due_date,
             MAX(d.vehicle_number) AS vehicle_number,
+            MAX(d.ship_via) AS ship_via,
             MAX(d.asn_number) AS asn_number,
             MAX(d.asn_date) AS asn_date,
             MAX(d.packaging_details) AS packaging_details,
             MAX(d.packaging_remark) AS packaging_remark,
+            MAX(d.attachment_path) AS attachment_path,
             MAX(d.customer_id) AS customer_id,
             MAX(d.ship_to_master_id) AS ship_to_master_id,
             MAX(d.payment_term_id) AS payment_term_id,
             MAX(d.payment_terms_days) AS payment_terms_days,
-            c.customer_name,
-            s.invoice_no AS original_invoice_no,
-            s.shipment_no,
+            MAX(c.customer_name) AS customer_name,
+            STRING_AGG(DISTINCT s.invoice_no, ', ' ORDER BY s.invoice_no) AS original_invoice_no,
+            STRING_AGG(DISTINCT s.shipment_no, ', ' ORDER BY s.shipment_no) AS shipment_no,
             MAX(s.id) AS shipment_id,
             MAX(s.warehouse_id) AS warehouse_id,
-            MAX(w.warehouse_name) AS warehouse_name,
-            d.currency,
+            STRING_AGG(DISTINCT COALESCE(w.warehouse_name,''), ', ' ORDER BY COALESCE(w.warehouse_name,'')) AS warehouse_name,
+            MAX(d.currency) AS currency,
             SUM(d.delivered_qty) AS total_qty,
             SUM(d.sale_amount) AS total_amount,
             COUNT(*) AS product_rows
@@ -1094,7 +1159,7 @@ def fetch_delivery_invoice_headers_for_edit(selected_product_id=None, date_from=
         {access_sql}
         {part_sql}
         {date_sql}
-        GROUP BY d.delivery_invoice_no, c.customer_name, s.invoice_no, s.shipment_no, d.currency
+        GROUP BY d.delivery_invoice_no
         ORDER BY MAX(d.delivery_date) DESC, MIN(d.id) DESC
     """, access_params + part_params + date_params)
 
