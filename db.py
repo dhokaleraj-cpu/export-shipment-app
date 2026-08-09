@@ -176,7 +176,7 @@ def execute_many(query, param_list):
     finally:
         conn.close()
 
-MASTER_RELATIONSHIP_SCHEMA_VERSION = "SN 27.13"
+MASTER_RELATIONSHIP_SCHEMA_VERSION = "SN 27.14"
 
 MASTER_RELATIONSHIP_MIGRATIONS = [
     """
@@ -322,7 +322,9 @@ def verify_user(username, password):
 
 def init_db():
     """Lightweight non-destructive migrations for existing Supabase/PostgreSQL database."""
-    apply_master_relationship_migrations(raise_on_error=False)
+    # SN 27.14: do not run the old full relationship migration + information_schema
+    # verification at startup. The normal additive list below already includes the
+    # two simple Master links and transaction reference columns.
     migrations = [
         "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS packaging_remark TEXT",
         "CREATE INDEX IF NOT EXISTS idx_shipments_invoice_no ON shipments(invoice_no)",
@@ -359,10 +361,8 @@ def init_db():
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_code TEXT",
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS customer_id INTEGER",
-        "ALTER TABLE products ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
         "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS ship_via TEXT DEFAULT 'Road'",
         "CREATE INDEX IF NOT EXISTS idx_products_customer_id ON products(customer_id)",
-        "CREATE INDEX IF NOT EXISTS idx_products_ship_to_master_id ON products(ship_to_master_id)",
         "CREATE INDEX IF NOT EXISTS idx_customers_ship_to_master_id ON customers(ship_to_master_id)",
         "ALTER TABLE user_page_access ADD COLUMN IF NOT EXISTS can_modify BOOLEAN DEFAULT FALSE",
         "ALTER TABLE shipment_boxes ADD COLUMN IF NOT EXISTS po_number TEXT",

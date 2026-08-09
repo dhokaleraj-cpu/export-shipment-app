@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 27.13"
+APP_VERSION = "SN 27.14"
 
 
 # ---------------------------------------------------------------------------
@@ -1545,163 +1545,53 @@ def ensure_runtime_columns():
             pass
 
 def ensure_delivery_master_link_columns(force=False, show_errors=False):
-    """Apply and verify Product -> Customer -> Ship To schema once per session."""
-    state_key = "_delivery_master_link_columns_ready_sn2713"
-    status_key = "_delivery_master_link_columns_status_sn2713"
+    """Lightweight additive schema check for the two simple Master links.
+
+    SN 27.14 deliberately avoids the old relationship-health scans and full
+    migration verification on every page. It only ensures the columns actually
+    needed by Product -> Customer and Customer -> Ship To plus transaction IDs.
+    """
+    state_key = "_simple_master_link_columns_ready_sn2714"
     try:
         if not force and st.session_state.get(state_key):
             return True
     except Exception:
         pass
 
-    try:
-        from db import ensure_master_relationship_schema
-        status = ensure_master_relationship_schema()
-    except Exception as exc:
-        status = {
-            "ok": False,
-            "missing": [],
-            "errors": [{"error": str(exc)}],
-            "verification_error": "",
-        }
+    statements = [
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS customer_id INTEGER",
+        "ALTER TABLE shipments ADD COLUMN IF NOT EXISTS customer_id INTEGER",
+        "ALTER TABLE shipments ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
+        "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS customer_id INTEGER",
+        "ALTER TABLE customer_deliveries ADD COLUMN IF NOT EXISTS ship_to_master_id INTEGER",
+        "CREATE INDEX IF NOT EXISTS idx_products_customer_id ON products(customer_id)",
+        "CREATE INDEX IF NOT EXISTS idx_customers_ship_to_master_id ON customers(ship_to_master_id)",
+    ]
+    errors = []
+    for sql in statements:
+        try:
+            execute_query(sql)
+        except Exception as exc:
+            errors.append(str(exc))
 
-    ok = bool(status.get("ok"))
+    ok = not errors
     try:
         st.session_state[state_key] = ok
-        st.session_state[status_key] = status
     except Exception:
         pass
-
-    if show_errors and not ok:
-        st.error(
-            "The required Product → Customer → Ship To database fields are not ready. "
-            "The page has been stopped so an old or incomplete Master form cannot be used."
-        )
-        missing = status.get("missing") or []
-        if missing:
-            st.caption("Missing fields: " + ", ".join(str(x) for x in missing))
-        for item in (status.get("errors") or [])[:3]:
-            message = item.get("error") if isinstance(item, dict) else str(item)
-            if message:
-                st.caption(str(message))
-        if status.get("verification_error"):
-            st.caption(str(status.get("verification_error")))
+    if show_errors and errors:
+        st.warning("Simple Customer / Ship To link columns could not be verified. Existing fields remain available where present.")
+        st.caption(str(errors[0]))
     return ok
-
 
 def require_delivery_master_relationship_schema(context="this page"):
     """Stop the page instead of rendering a stale Master/transaction form."""
     if ensure_delivery_master_link_columns(show_errors=True):
         return True
-    st.warning(f"{context} cannot continue until the additive SN 27.13 database migration is available.")
+    st.warning(f"{context} cannot continue until the simple Customer / Ship To link columns are available.")
     st.stop()
 
-
-def fetch_master_relationship_health():
-    """Return relationship counts using the same readiness rules as entry pages."""
-    result = {
-        "ship_to_total": 0,
-        "ship_to_ready": 0,
-        "customer_total": 0,
-        "customer_linked": 0,
-        "product_total": 0,
-        "product_customer_linked": 0,
-        "product_complete_chain": 0,
-    }
-    queries = {
-        "ship_to_total": "SELECT COUNT(*) AS value FROM ship_to_masters",
-        "ship_to_ready": """
-            SELECT COUNT(*) AS value
-            FROM ship_to_masters
-            WHERE COALESCE(is_active, TRUE)=TRUE
-              AND NULLIF(TRIM(COALESCE(ship_to_name,'')), '') IS NOT NULL
-              AND NULLIF(TRIM(COALESCE(addressline1,'')), '') IS NOT NULL
-        """,
-        "customer_total": "SELECT COUNT(*) AS value FROM customers",
-        "customer_linked": """
-            SELECT COUNT(*) AS value
-            FROM customers c
-            JOIN ship_to_masters stm ON stm.id=c.ship_to_master_id
-            WHERE NULLIF(TRIM(COALESCE(c.address,'')), '') IS NOT NULL
-              AND COALESCE(stm.is_active, TRUE)=TRUE
-              AND NULLIF(TRIM(COALESCE(stm.addressline1,'')), '') IS NOT NULL
-        """,
-        "product_total": "SELECT COUNT(*) AS value FROM products",
-        "product_customer_linked": "SELECT COUNT(*) AS value FROM products WHERE customer_id IS NOT NULL",
-        "product_complete_chain": """
-            SELECT COUNT(*) AS value
-            FROM products p
-            JOIN customers c ON c.id=p.customer_id
-            JOIN ship_to_masters stm ON stm.id=c.ship_to_master_id
-            WHERE NULLIF(TRIM(COALESCE(c.address,'')), '') IS NOT NULL
-              AND COALESCE(stm.is_active, TRUE)=TRUE
-              AND NULLIF(TRIM(COALESCE(stm.addressline1,'')), '') IS NOT NULL
-        """,
-    }
-    for key, query in queries.items():
-        try:
-            rows = fetch_all(query)
-            result[key] = int((rows[0].get("value") if rows else 0) or 0)
-        except Exception:
-            result[key] = 0
-    return result
-
-
-def fetch_unlinked_master_relationships():
-    """Return Customers/Products that cannot safely drive Shipment/Delivery headers."""
-    customers_missing = []
-    products_missing = []
-    try:
-        customers_missing = fetch_all("""
-            SELECT c.id, c.customer_name, c.company_code,
-                   CASE
-                       WHEN NULLIF(TRIM(COALESCE(c.address,'')), '') IS NULL THEN 'Bill To Address Missing'
-                       WHEN c.ship_to_master_id IS NULL THEN 'Ship To Link Missing'
-                       WHEN stm.id IS NULL THEN 'Linked Ship To Not Found'
-                       WHEN COALESCE(stm.is_active, TRUE)=FALSE THEN 'Linked Ship To Inactive'
-                       WHEN NULLIF(TRIM(COALESCE(stm.addressline1,'')), '') IS NULL THEN 'Ship To Address Missing'
-                       ELSE 'COMPLETE'
-                   END AS relationship_issue
-            FROM customers c
-            LEFT JOIN ship_to_masters stm ON stm.id=c.ship_to_master_id
-            WHERE NULLIF(TRIM(COALESCE(c.address,'')), '') IS NULL
-               OR c.ship_to_master_id IS NULL
-               OR stm.id IS NULL
-               OR COALESCE(stm.is_active, TRUE)=FALSE
-               OR NULLIF(TRIM(COALESCE(stm.addressline1,'')), '') IS NULL
-            ORDER BY c.customer_name, c.id
-        """)
-    except Exception:
-        pass
-    try:
-        products_missing = fetch_all("""
-            SELECT p.id, p.product_code, p.product_name, p.customer_id,
-                   c.customer_name, c.ship_to_master_id,
-                   CASE
-                       WHEN p.customer_id IS NULL THEN 'Customer Link Missing'
-                       WHEN c.id IS NULL THEN 'Linked Customer Not Found'
-                       WHEN NULLIF(TRIM(COALESCE(c.address,'')), '') IS NULL THEN 'Bill To Address Missing'
-                       WHEN c.ship_to_master_id IS NULL THEN 'Customer Ship To Link Missing'
-                       WHEN stm.id IS NULL THEN 'Customer Ship To Not Found'
-                       WHEN COALESCE(stm.is_active, TRUE)=FALSE THEN 'Customer Ship To Inactive'
-                       WHEN NULLIF(TRIM(COALESCE(stm.addressline1,'')), '') IS NULL THEN 'Ship To Address Missing'
-                       ELSE 'COMPLETE'
-                   END AS relationship_issue
-            FROM products p
-            LEFT JOIN customers c ON c.id=p.customer_id
-            LEFT JOIN ship_to_masters stm ON stm.id=c.ship_to_master_id
-            WHERE p.customer_id IS NULL
-               OR c.id IS NULL
-               OR NULLIF(TRIM(COALESCE(c.address,'')), '') IS NULL
-               OR c.ship_to_master_id IS NULL
-               OR stm.id IS NULL
-               OR COALESCE(stm.is_active, TRUE)=FALSE
-               OR NULLIF(TRIM(COALESCE(stm.addressline1,'')), '') IS NULL
-            ORDER BY p.product_code, p.id
-        """)
-    except Exception:
-        pass
-    return customers_missing, products_missing
 
 def check_delete_password(password):
     user = st.session_state.get("user", {})
@@ -2857,101 +2747,50 @@ def whatsapp_link(phone, message):
 
 def customer_form():
     require_roles(("admin", "super_admin"))
-    require_delivery_master_relationship_schema("Customer Master")
-    st.subheader("Customer Master — Bill To linked with required Ship To")
-
+    st.subheader("Customer Master")
     can_edit_master = current_user_can_edit("masters")
+
     terms = fetch_all("SELECT * FROM payment_terms ORDER BY days, id")
     term_options = {"No Payment Term": None}
-    for term in terms:
-        term_options[f'{term.get("term_name") or "-"} - {term.get("days") or 0} days | ID {term["id"]}'] = term["id"]
+    for t in terms:
+        term_options[f'{t.get("term_name") or "-"} - {t.get("days") or 0} days'] = t["id"]
 
-    ship_to_rows = fetch_all("""
-        SELECT id, ship_to_name, ship_to_id, addressline1, addressline2, addressline3,
-               vendor_gstin, vendor_phone, vendor_email, is_active
-        FROM ship_to_masters
-        WHERE COALESCE(is_active, TRUE)=TRUE
-        ORDER BY ship_to_name, ship_to_id, id
-    """)
-    ship_to_options = {"-- Select Ship To (Required) --": None}
-    ship_to_row_by_id = {}
-    ship_to_label_by_id = {}
-    for row in ship_to_rows:
-        label = f'{row.get("ship_to_name") or "-"} | {row.get("ship_to_id") or "-"} | ID {row["id"]}'
-        ship_to_options[label] = row["id"]
-        ship_to_row_by_id[int(row["id"])] = row
-        ship_to_label_by_id[int(row["id"])] = label
-
-    if not ship_to_rows:
-        st.warning(
-            "Create at least one active Ship To Master with an address before saving a Customer. "
-            "Customer → Ship To is required for Shipment and Delivery Invoice addressing."
-        )
+    ship_rows = fetch_all("SELECT id, ship_to_name, ship_to_id FROM ship_to_masters WHERE COALESCE(is_active, TRUE)=TRUE ORDER BY ship_to_name, ship_to_id, id")
+    ship_options = {"No Ship To": None}
+    ship_label_by_id = {}
+    for row in ship_rows:
+        label = f'{row.get("ship_to_name") or "-"} | {row.get("ship_to_id") or "-"}'
+        ship_options[label] = row["id"]
+        ship_label_by_id[int(row["id"])] = label
 
     c1, c2 = st.columns(2)
     with c1:
-        customer_name = st.text_input("Customer Name * (Required)", key="customer_name")
+        customer_name = st.text_input("Customer Name", key="customer_name")
         company_code = st.text_input("Company Code / Customer ID", key="customer_company_code")
         contact_person = st.text_input("Contact Person", key="customer_contact_person")
         email = st.text_input("Email", key="customer_email")
-        address = st.text_area("Bill To Address * (Required)", key="customer_address")
     with c2:
         phone = st.text_input("Phone", key="customer_phone")
         whatsapp_no = st.text_input("WhatsApp No", key="customer_whatsapp_no")
+        address = st.text_area("Address", key="customer_address")
         selected_term = st.selectbox("Default Payment Term", list(term_options.keys()), key="customer_payment_term")
-        selected_ship_to = st.selectbox(
-            "Ship To * (Required)",
-            list(ship_to_options.keys()),
-            key="customer_default_ship_to",
-            help="This Ship To loads automatically after a Product loads this Customer in Shipment or Delivery Entry.",
-        )
-        selected_ship_to_id = ship_to_options.get(selected_ship_to)
-        selected_ship_to_row = ship_to_row_by_id.get(int(selected_ship_to_id), {}) if selected_ship_to_id else {}
-        if selected_ship_to_id:
-            selected_ship_to_address = ", ".join(
-                str(selected_ship_to_row.get(key) or "").strip()
-                for key in ("addressline1", "addressline2", "addressline3")
-                if str(selected_ship_to_row.get(key) or "").strip()
-            )
-            if selected_ship_to_address:
-                st.info(f"Linked Ship To Address: {selected_ship_to_address}")
-            else:
-                st.error("The selected Ship To has no address. Update Ship To Master before saving this Customer.")
+        selected_ship = st.selectbox("Ship To", list(ship_options.keys()), key="customer_ship_to")
 
-    st.caption(
-        "Required chain: Product Master → Customer / Bill To → Customer Ship To. "
-        "Shipment Entry and Delivery Entry load this relationship automatically; the transaction header remains manually changeable."
-    )
-
-    if st.button(
-        "Save Customer Master",
-        type="primary",
-        key="save_customer_master",
-        disabled=not can_edit_master,
-    ):
-        ship_to_address_ok = bool(str(selected_ship_to_row.get("addressline1") or "").strip())
+    if st.button("Save Customer Master", type="primary", key="save_customer_master", disabled=not can_edit_master):
         if not str(customer_name or "").strip():
             st.error("Customer Name is mandatory.")
-        elif not str(address or "").strip():
-            st.error("Bill To Address is mandatory because it is printed on the Delivery Invoice.")
-        elif not selected_ship_to_id:
-            st.error("Ship To is mandatory. Create/select a Ship To Master before saving the Customer.")
-        elif not ship_to_address_ok:
-            st.error("The selected Ship To must have Address Line 1 before it can be linked to a Customer.")
         else:
             try:
                 execute_query("""
                     INSERT INTO customers
-                    (customer_name, company_code, contact_person, email, phone, whatsapp_no, address,
-                     payment_term_id, ship_to_master_id)
+                    (customer_name, company_code, contact_person, email, phone, whatsapp_no, address, payment_term_id, ship_to_master_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     customer_name.strip(), company_code.strip(), contact_person.strip(), email.strip(),
-                    phone.strip(), whatsapp_no.strip(), address.strip(), term_options[selected_term],
-                    selected_ship_to_id,
+                    phone.strip(), whatsapp_no.strip(), address.strip(), term_options[selected_term], ship_options[selected_ship]
                 ))
                 clear_cache_after_write()
-                rerun_with_success("Customer saved successfully with required Ship To relationship.")
+                rerun_with_success("Customer saved successfully.")
             except Exception as exc:
                 if "duplicate" in str(exc).lower() or "unique" in str(exc).lower():
                     st.error("Duplicate customer found.")
@@ -2959,18 +2798,9 @@ def customer_form():
                     st.error(f"Customer could not be saved: {exc}")
 
     rows = fetch_all("""
-        SELECT c.id, c.customer_name, c.company_code, c.contact_person, c.email, c.phone,
-               c.whatsapp_no, pt.term_name AS payment_term, c.address AS bill_to_address,
-               stm.ship_to_name AS default_ship_to_name, stm.ship_to_id AS default_ship_to_id,
-               CONCAT_WS(', ', NULLIF(stm.addressline1,''), NULLIF(stm.addressline2,''), NULLIF(stm.addressline3,'')) AS default_ship_to_address,
-               CASE
-                   WHEN NULLIF(TRIM(COALESCE(c.address,'')), '') IS NULL THEN 'Bill To Address Missing'
-                   WHEN c.ship_to_master_id IS NULL THEN 'Ship To Link Missing'
-                   WHEN stm.id IS NULL THEN 'Linked Ship To Not Found'
-                   WHEN COALESCE(stm.is_active, TRUE)=FALSE THEN 'Linked Ship To Inactive'
-                   WHEN NULLIF(TRIM(COALESCE(stm.addressline1,'')), '') IS NULL THEN 'Ship To Address Missing'
-                   ELSE 'COMPLETE'
-               END AS relationship_status
+        SELECT c.id, c.customer_name, c.company_code, c.contact_person, c.email, c.phone, c.whatsapp_no,
+               pt.term_name AS payment_term, c.address,
+               stm.ship_to_name AS ship_to, stm.ship_to_id
         FROM customers c
         LEFT JOIN payment_terms pt ON c.payment_term_id = pt.id
         LEFT JOIN ship_to_masters stm ON c.ship_to_master_id = stm.id
@@ -2983,150 +2813,68 @@ def customer_form():
         st.subheader("Edit Customer Master")
         old_rows = fetch_all("SELECT * FROM customers ORDER BY id DESC")
         if old_rows:
-            row_map = {f'{row["id"]} | {row.get("customer_name") or "-"}': row for row in old_rows}
+            row_map = {f'{r["id"]} | {r.get("customer_name") or "-"}': r for r in old_rows}
             selected_key = st.selectbox("Select Customer to Edit", list(row_map.keys()), key="edit_customer_select")
             selected = row_map[selected_key]
             sid = selected["id"]
 
             current_term_id = selected.get("payment_term_id")
-            selected_term_label = next((label for label, term_id in term_options.items() if term_id == current_term_id), "No Payment Term")
-            current_ship_to_id = selected.get("ship_to_master_id")
-            selected_ship_to_label = (
-                ship_to_label_by_id.get(int(current_ship_to_id), "-- Select Ship To (Required) --")
-                if current_ship_to_id else "-- Select Ship To (Required) --"
-            )
+            selected_term_label = next((label for label, tid in term_options.items() if tid == current_term_id), "No Payment Term")
+            current_ship_id = selected.get("ship_to_master_id")
+            selected_ship_label = ship_label_by_id.get(int(current_ship_id), "No Ship To") if current_ship_id else "No Ship To"
 
             e1, e2 = st.columns(2)
             with e1:
-                e_customer_name = st.text_input("Edit Customer Name * (Required)", selected.get("customer_name") or "", key=f"edit_customer_name_{sid}")
+                e_customer_name = st.text_input("Edit Customer Name", selected.get("customer_name") or "", key=f"edit_customer_name_{sid}")
                 e_company_code = st.text_input("Edit Company Code / Customer ID", selected.get("company_code") or "", key=f"edit_customer_company_code_{sid}")
                 e_contact_person = st.text_input("Edit Contact Person", selected.get("contact_person") or "", key=f"edit_customer_contact_{sid}")
                 e_email = st.text_input("Edit Email", selected.get("email") or "", key=f"edit_customer_email_{sid}")
-                e_address = st.text_area("Edit Bill To Address * (Required)", selected.get("address") or "", key=f"edit_customer_address_{sid}")
             with e2:
                 e_phone = st.text_input("Edit Phone", selected.get("phone") or "", key=f"edit_customer_phone_{sid}")
                 e_whatsapp = st.text_input("Edit WhatsApp No", selected.get("whatsapp_no") or "", key=f"edit_customer_whatsapp_{sid}")
-                e_term = st.selectbox(
-                    "Edit Default Payment Term",
-                    list(term_options.keys()),
-                    index=list(term_options.keys()).index(selected_term_label),
-                    key=f"edit_customer_term_{sid}",
-                )
-                e_ship_to = st.selectbox(
-                    "Edit Ship To * (Required)",
-                    list(ship_to_options.keys()),
-                    index=list(ship_to_options.keys()).index(selected_ship_to_label),
-                    key=f"edit_customer_ship_to_{sid}",
-                )
-                e_ship_to_id = ship_to_options.get(e_ship_to)
-                e_ship_to_row = ship_to_row_by_id.get(int(e_ship_to_id), {}) if e_ship_to_id else {}
-                if e_ship_to_id:
-                    edit_ship_address = ", ".join(
-                        str(e_ship_to_row.get(key) or "").strip()
-                        for key in ("addressline1", "addressline2", "addressline3")
-                        if str(e_ship_to_row.get(key) or "").strip()
-                    )
-                    st.info(f"Selected Ship To Address: {edit_ship_address or '-'}")
+                e_address = st.text_area("Edit Address", selected.get("address") or "", key=f"edit_customer_address_{sid}")
+                e_term = st.selectbox("Edit Default Payment Term", list(term_options.keys()), index=list(term_options.keys()).index(selected_term_label), key=f"edit_customer_term_{sid}")
+                e_ship = st.selectbox("Edit Ship To", list(ship_options.keys()), index=list(ship_options.keys()).index(selected_ship_label), key=f"edit_customer_ship_to_{sid}")
 
             if st.button("Update Customer", type="primary", key=f"update_customer_master_{sid}"):
                 if not str(e_customer_name or "").strip():
                     st.error("Customer Name is mandatory.")
-                elif not str(e_address or "").strip():
-                    st.error("Bill To Address is mandatory because it is printed on the Delivery Invoice.")
-                elif not e_ship_to_id:
-                    st.error("Ship To is mandatory. Select a Ship To Master before updating the Customer.")
-                elif not str(e_ship_to_row.get("addressline1") or "").strip():
-                    st.error("The selected Ship To must have Address Line 1 before it can be linked to a Customer.")
                 else:
                     execute_query("""
                         UPDATE customers
-                        SET customer_name=?, company_code=?, contact_person=?, email=?, phone=?,
-                            whatsapp_no=?, address=?, payment_term_id=?, ship_to_master_id=?
+                        SET customer_name=?, company_code=?, contact_person=?, email=?, phone=?, whatsapp_no=?,
+                            address=?, payment_term_id=?, ship_to_master_id=?
                         WHERE id=?
                     """, (
-                        e_customer_name.strip(), e_company_code.strip(), e_contact_person.strip(),
-                        e_email.strip(), e_phone.strip(), e_whatsapp.strip(), e_address.strip(),
-                        term_options[e_term], e_ship_to_id, sid,
+                        e_customer_name.strip(), e_company_code.strip(), e_contact_person.strip(), e_email.strip(),
+                        e_phone.strip(), e_whatsapp.strip(), e_address.strip(), term_options[e_term], ship_options[e_ship], sid
                     ))
                     clear_cache_after_write()
-                    rerun_with_success("Customer updated successfully with required Ship To relationship.")
+                    rerun_with_success("Customer updated successfully.")
 
 def product_form():
     require_roles(("admin", "super_admin"))
-    require_delivery_master_relationship_schema("Product Master")
-    st.subheader("Product Master — required Customer / Bill To")
-
+    st.subheader("Product Master")
     can_edit_master = current_user_can_edit("masters")
-    customer_rows = fetch_all("""
-        SELECT c.id, c.customer_name, c.company_code, c.address, c.payment_term_id,
-               c.ship_to_master_id, stm.ship_to_name, stm.ship_to_id,
-               stm.addressline1 AS ship_to_addressline1,
-               stm.addressline2 AS ship_to_addressline2,
-               stm.addressline3 AS ship_to_addressline3,
-               stm.is_active AS ship_to_is_active
-        FROM customers c
-        LEFT JOIN ship_to_masters stm ON c.ship_to_master_id=stm.id
-        ORDER BY c.customer_name, c.id
-    """)
-    customer_options = {"-- Select Customer / Bill To (Required) --": None}
-    customer_row_by_id = {}
+
+    customer_rows = fetch_all("SELECT id, customer_name, company_code FROM customers ORDER BY customer_name, id")
+    customer_options = {"No Customer": None}
     customer_label_by_id = {}
     for row in customer_rows:
-        complete = bool(
-            str(row.get("address") or "").strip()
-            and row.get("ship_to_master_id")
-            and row.get("ship_to_name")
-            and row.get("ship_to_is_active") is not False
-            and str(row.get("ship_to_addressline1") or "").strip()
-        )
-        status = "COMPLETE" if complete else "INCOMPLETE"
-        label = f'{row.get("customer_name") or "-"} | {row.get("company_code") or "-"} | {status} | ID {row["id"]}'
+        label = f'{row.get("customer_name") or "-"} | {row.get("company_code") or "-"}'
         customer_options[label] = row["id"]
-        customer_row_by_id[int(row["id"])] = row
         customer_label_by_id[int(row["id"])] = label
-
-    if not customer_rows:
-        st.warning("Create a Customer Master first. Every Product must be linked to a Customer / Bill To.")
 
     c1, c2 = st.columns(2)
     with c1:
-        product_code = st.text_input("Product Code * (Required)", key="product_code")
+        product_code = st.text_input("Product Code", key="product_code")
         product_name = st.text_input("Product Name", key="product_name")
-        linked_customer_label = st.selectbox(
-            "Customer * (Required)",
-            list(customer_options.keys()),
-            key="product_linked_customer",
-            help="The selected Customer supplies Bill To, Ship To and Payment Term defaults in Shipment and Delivery Entry.",
-        )
-        linked_customer_id = customer_options[linked_customer_label]
-        linked_customer = customer_row_by_id.get(int(linked_customer_id), {}) if linked_customer_id else {}
-        if linked_customer_id:
-            st.info(
-                f"Automatic chain: {linked_customer.get('customer_name') or '-'} → "
-                f"{linked_customer.get('ship_to_name') or 'SHIP TO NOT LINKED'}"
-            )
-            st.caption(f"Bill To Address: {linked_customer.get('address') or '-'}")
-            ship_to_preview = ", ".join(
-                str(linked_customer.get(key) or "").strip()
-                for key in ("ship_to_addressline1", "ship_to_addressline2", "ship_to_addressline3")
-                if str(linked_customer.get(key) or "").strip()
-            )
-            st.caption(f"Ship To Address: {ship_to_preview or '-'}")
+        selected_customer = st.selectbox("Customer", list(customer_options.keys()), key="product_customer")
         program = st.text_input("Program", key="product_program")
         assy_plant = st.text_input("Assy Plant", key="product_assy_plant")
         unit = st.text_input("Unit", value="Nos", key="product_unit")
         po_number = st.text_input("PO Number", key="product_po_number")
-
     with c2:
-        st.text_input(
-            "Ship To (Automatically from Customer Master)",
-            value=(
-                f"{linked_customer.get('ship_to_name') or ''} | {linked_customer.get('ship_to_id') or ''}"
-                if linked_customer_id else "Select Customer first"
-            ),
-            disabled=True,
-            key=f"product_auto_ship_to_display_{int(linked_customer_id or 0)}",
-        )
         unit_price = st.number_input("Price", min_value=0.0, step=0.001, format="%.3f", key="product_unit_price")
         currency = st.selectbox("Currency", CURRENCIES, key="product_currency")
         weight = st.number_input("Weight", min_value=0.0, step=1.0, key="product_weight")
@@ -3134,78 +2882,31 @@ def product_form():
         mcr_weekly = st.number_input("MCR Weekly", min_value=0.0, step=1.0, key="product_mcr_weekly")
         po_date = st.date_input("PO Date", value=date.today(), key="product_po_date")
         two_months_inventory = lcr_weekly * 8
-        st.markdown(
-            f'<div class="total-box">Two Months Inventory = LCR Weekly × 8 = {two_months_inventory:,.3f}</div>',
-            unsafe_allow_html=True,
-        )
-
-    st.caption(
-        "Required relationship: Product → Customer / Bill To → Customer Ship To. "
-        "There is no separate operational Ship To selection in Product Master; Ship To is controlled by the linked Customer Master."
-    )
+        st.markdown(f'<div class="total-box">Two Months Inventory = LCR Weekly × 8 = {two_months_inventory:,.3f}</div>', unsafe_allow_html=True)
 
     if st.button("Save Product Master", type="primary", key="save_product_master", disabled=not can_edit_master):
-        customer_complete = bool(
-            linked_customer_id
-            and str(linked_customer.get("address") or "").strip()
-            and linked_customer.get("ship_to_master_id")
-            and linked_customer.get("ship_to_name")
-            and linked_customer.get("ship_to_is_active") is not False
-            and str(linked_customer.get("ship_to_addressline1") or "").strip()
-        )
-        if not str(product_code or "").strip():
-            st.error("Product Code is mandatory.")
-        elif not linked_customer_id:
-            st.error("Customer / Bill To is mandatory for every Product.")
-        elif not customer_complete:
-            st.error(
-                "The selected Customer is incomplete. Bill To Address and an active Ship To with Address Line 1 "
-                "must be completed in Customer / Ship To Master before saving the Product."
-            )
-        else:
-            try:
-                execute_query("""
-                    INSERT INTO products
-                    (product_code, product_name, customer_id, program, assy_plant,
-                     unit, unit_price, currency, weight, lcr_weekly, mcr_weekly,
-                     two_months_inventory, po_number, po_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    product_code.strip(), product_name.strip(), linked_customer_id,
-                    program.strip(), assy_plant.strip(), unit.strip(), unit_price, currency, weight,
-                    lcr_weekly, mcr_weekly, two_months_inventory, po_number.strip(), str(po_date),
-                ))
-                clear_cache_after_write()
-                rerun_with_success(
-                    "Product saved with required Customer. Shipment and Delivery Entry will load Customer and Customer Ship To automatically."
-                )
-            except Exception as exc:
-                if "duplicate" in str(exc).lower() or "unique" in str(exc).lower():
-                    st.error("Duplicate product code found.")
-                else:
-                    st.error(f"Product could not be saved: {exc}")
+        try:
+            execute_query("""
+                INSERT INTO products
+                (product_code, product_name, customer_id, program, assy_plant, unit, unit_price, currency, weight,
+                 lcr_weekly, mcr_weekly, two_months_inventory, po_number, po_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (product_code, product_name, customer_options[selected_customer], program, assy_plant, unit, unit_price, currency, weight,
+                  lcr_weekly, mcr_weekly, two_months_inventory, po_number, str(po_date)))
+            clear_cache_after_write()
+            rerun_with_success("Product saved successfully.")
+        except Exception as exc:
+            if "duplicate" in str(exc).lower() or "unique" in str(exc).lower():
+                st.error("Duplicate product code found.")
+            else:
+                st.error(f"Product could not be saved: {exc}")
 
     rows = fetch_all("""
-        SELECT p.id, p.product_code, p.product_name,
-               c.customer_name AS linked_customer, c.company_code AS linked_customer_code,
-               c.address AS linked_bill_to_address,
-               stm.ship_to_name AS linked_ship_to, stm.ship_to_id AS linked_ship_to_id,
-               CONCAT_WS(', ', NULLIF(stm.addressline1,''), NULLIF(stm.addressline2,''), NULLIF(stm.addressline3,'')) AS linked_ship_to_address,
-               CASE
-                   WHEN p.customer_id IS NULL THEN 'Customer Missing'
-                   WHEN c.id IS NULL THEN 'Linked Customer Not Found'
-                   WHEN NULLIF(TRIM(COALESCE(c.address,'')), '') IS NULL THEN 'Bill To Address Missing'
-                   WHEN c.ship_to_master_id IS NULL THEN 'Customer Ship To Missing'
-                   WHEN stm.id IS NULL THEN 'Customer Ship To Not Found'
-                   WHEN COALESCE(stm.is_active, TRUE)=FALSE THEN 'Customer Ship To Inactive'
-                   WHEN NULLIF(TRIM(COALESCE(stm.addressline1,'')), '') IS NULL THEN 'Ship To Address Missing'
-                   ELSE 'COMPLETE'
-               END AS relationship_status,
+        SELECT p.id, p.product_code, p.product_name, c.customer_name AS customer,
                p.program, p.assy_plant, p.unit, p.unit_price, p.currency,
                p.weight, p.lcr_weekly, p.mcr_weekly, p.two_months_inventory, p.po_number, p.po_date
         FROM products p
-        LEFT JOIN customers c ON p.customer_id=c.id
-        LEFT JOIN ship_to_masters stm ON c.ship_to_master_id=stm.id
+        LEFT JOIN customers c ON p.customer_id = c.id
         ORDER BY p.id DESC
     """)
     show_filtered_df(edit_button_column(rows, "products"), "master_products", total=True)
@@ -3215,50 +2916,23 @@ def product_form():
         st.subheader("Edit Product Master")
         old_rows = fetch_all("SELECT * FROM products ORDER BY id DESC")
         if old_rows:
-            row_map = {f'{row["id"]} | {row.get("product_code") or "-"} | {row.get("product_name") or ""}': row for row in old_rows}
+            row_map = {f'{r["id"]} | {r["product_code"]} | {r["product_name"]}': r for r in old_rows}
             selected_key = st.selectbox("Select Product Master Entry to Edit", list(row_map.keys()), key="edit_product_select")
             selected = row_map[selected_key]
             sid = selected["id"]
             current_customer_id = selected.get("customer_id")
-            current_customer_label = (
-                customer_label_by_id.get(int(current_customer_id), "-- Select Customer / Bill To (Required) --")
-                if current_customer_id else "-- Select Customer / Bill To (Required) --"
-            )
+            current_customer_label = customer_label_by_id.get(int(current_customer_id), "No Customer") if current_customer_id else "No Customer"
 
             e1, e2 = st.columns(2)
             with e1:
-                e_product_code = st.text_input("Edit Product Code * (Required)", selected.get("product_code") or "", key=f"edit_product_code_{sid}")
+                e_product_code = st.text_input("Edit Product Code", selected.get("product_code") or "", key=f"edit_product_code_{sid}")
                 e_product_name = st.text_input("Edit Product Name", selected.get("product_name") or "", key=f"edit_product_name_{sid}")
-                e_customer_label = st.selectbox(
-                    "Edit Customer * (Required)",
-                    list(customer_options.keys()),
-                    index=list(customer_options.keys()).index(current_customer_label),
-                    key=f"edit_product_customer_{sid}",
-                )
-                e_customer_id = customer_options[e_customer_label]
-                e_customer = customer_row_by_id.get(int(e_customer_id), {}) if e_customer_id else {}
+                e_customer = st.selectbox("Edit Customer", list(customer_options.keys()), index=list(customer_options.keys()).index(current_customer_label), key=f"edit_product_customer_{sid}")
                 e_program = st.text_input("Edit Program", selected.get("program") or "", key=f"edit_product_program_{sid}")
                 e_assy_plant = st.text_input("Edit Assy Plant", selected.get("assy_plant") or "", key=f"edit_product_assy_plant_{sid}")
                 e_unit = st.text_input("Edit Unit", selected.get("unit") or "Nos", key=f"edit_product_unit_{sid}")
                 e_po_number = st.text_input("Edit PO Number", selected.get("po_number") or "", key=f"edit_product_po_number_{sid}")
             with e2:
-                st.text_input(
-                    "Edit Ship To (Automatically from Customer Master)",
-                    value=(
-                        f"{e_customer.get('ship_to_name') or ''} | {e_customer.get('ship_to_id') or ''}"
-                        if e_customer_id else "Select Customer first"
-                    ),
-                    disabled=True,
-                    key=f"edit_product_auto_ship_to_display_{sid}_{int(e_customer_id or 0)}",
-                )
-                if e_customer_id:
-                    st.caption(f"Bill To Address: {e_customer.get('address') or '-'}")
-                    e_ship_address = ", ".join(
-                        str(e_customer.get(key) or "").strip()
-                        for key in ("ship_to_addressline1", "ship_to_addressline2", "ship_to_addressline3")
-                        if str(e_customer.get(key) or "").strip()
-                    )
-                    st.caption(f"Ship To Address: {e_ship_address or '-'}")
                 e_unit_price = st.number_input("Edit Price", min_value=0.0, value=float(selected.get("unit_price") or 0), step=0.001, format="%.3f", key=f"edit_product_unit_price_{sid}")
                 current_currency = selected.get("currency") or "INR"
                 e_currency = st.selectbox("Edit Currency", CURRENCIES, index=CURRENCIES.index(current_currency) if current_currency in CURRENCIES else 0, key=f"edit_product_currency_{sid}")
@@ -3267,51 +2941,26 @@ def product_form():
                 e_mcr_weekly = st.number_input("Edit MCR Weekly", min_value=0.0, value=float(selected.get("mcr_weekly") or 0), step=1.0, key=f"edit_product_mcr_weekly_{sid}")
                 e_po_date = st.date_input("Edit PO Date", value=parse_date_for_input(selected.get("po_date")), key=f"edit_product_po_date_{sid}")
                 e_two_months_inventory = e_lcr_weekly * 8
-                st.markdown(
-                    f'<div class="total-box">Two Months Inventory = LCR Weekly × 8 = {e_two_months_inventory:,.3f}</div>',
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f'<div class="total-box">Two Months Inventory = LCR Weekly × 8 = {e_two_months_inventory:,.3f}</div>', unsafe_allow_html=True)
 
             if st.button("Update Product Master", type="primary", key=f"update_product_master_{sid}"):
-                edited_customer_complete = bool(
-                    e_customer_id
-                    and str(e_customer.get("address") or "").strip()
-                    and e_customer.get("ship_to_master_id")
-                    and e_customer.get("ship_to_name")
-                    and e_customer.get("ship_to_is_active") is not False
-                    and str(e_customer.get("ship_to_addressline1") or "").strip()
-                )
-                if not str(e_product_code or "").strip():
-                    st.error("Product Code is mandatory.")
-                elif not e_customer_id:
-                    st.error("Customer / Bill To is mandatory for every Product.")
-                elif not edited_customer_complete:
-                    st.error(
-                        "The selected Customer is incomplete. Complete Bill To Address and active Customer Ship To address first."
-                    )
-                else:
-                    try:
-                        execute_query("""
-                            UPDATE products
-                            SET product_code=?, product_name=?, customer_id=?,
-                                program=?, assy_plant=?, unit=?, unit_price=?, currency=?, weight=?,
-                                lcr_weekly=?, mcr_weekly=?, two_months_inventory=?, po_number=?, po_date=?
-                            WHERE id=?
-                        """, (
-                            e_product_code.strip(), e_product_name.strip(), e_customer_id,
-                            e_program.strip(), e_assy_plant.strip(), e_unit.strip(), e_unit_price,
-                            e_currency, e_weight, e_lcr_weekly, e_mcr_weekly,
-                            e_two_months_inventory, e_po_number.strip(), str(e_po_date), sid,
-                        ))
-                        clear_cache_after_write()
-                        rerun_with_success(
-                            "Product updated with required Customer. Shipment and Delivery Entry will load Customer and Customer Ship To automatically."
-                        )
-                    except Exception as exc:
-                        if "duplicate" in str(exc).lower() or "unique" in str(exc).lower():
-                            st.error("Duplicate product code found.")
-                        else:
-                            st.error(f"Product could not be updated: {exc}")
+                try:
+                    execute_query("""
+                        UPDATE products
+                        SET product_code=?, product_name=?, customer_id=?, program=?, assy_plant=?, unit=?,
+                            unit_price=?, currency=?, weight=?, lcr_weekly=?, mcr_weekly=?,
+                            two_months_inventory=?, po_number=?, po_date=?
+                        WHERE id=?
+                    """, (e_product_code, e_product_name, customer_options[e_customer], e_program, e_assy_plant, e_unit,
+                          e_unit_price, e_currency, e_weight, e_lcr_weekly, e_mcr_weekly,
+                          e_two_months_inventory, e_po_number, str(e_po_date), sid))
+                    st.success("Product updated successfully.")
+                    st.rerun()
+                except Exception as exc:
+                    if "duplicate" in str(exc).lower() or "unique" in str(exc).lower():
+                        st.error("Duplicate product code found.")
+                    else:
+                        st.error(f"Product could not be updated: {exc}")
 
             st.divider()
             st.subheader("Delete Product Master")
@@ -3492,6 +3141,7 @@ def product_form():
                         st.caption(f"PO copy saved but could not be read: {po_path}")
                 else:
                     st.caption(f"PO copy file not found for history ID {rr.get('id')}: {po_path}")
+
 
 
 def master_form(title, table, fields, allowed_roles=("admin", "super_admin")):
@@ -3948,46 +3598,48 @@ def render_coverage_table_title(title="Coverage Plan Table"):
 
 
 def ship_to_form():
-    """Create and edit Ship To addresses used through Customer Master."""
-    require_delivery_master_relationship_schema("Ship To Master")
-    can_edit_master = current_user_can_edit("masters")
-    st.subheader("Ship To Master — required delivery address")
+    """Ship To Master form used for Delivery Invoice print details."""
+    st.subheader("Ship To Master")
     st.markdown(
-        '<div class="sap-grid-note">Create the delivery address first. Customer Master then links one required Ship To, and Product Master links the Customer.</div>',
-        unsafe_allow_html=True,
+        '<div class="sap-grid-note">Create Ship To addresses for delivery invoices. These fields are used in Delivery print layout.</div>',
+        unsafe_allow_html=True
     )
 
-    with st.form("ship_to_master_create_form", clear_on_submit=False):
+    with st.form("ship_to_master_form", clear_on_submit=False):
         c1, c2 = st.columns(2)
         with c1:
-            ship_to_name = st.text_input("Ship To Name * (Required)", key="ship_to_create_name")
-            ship_to_id = st.text_input("Ship To ID", key="ship_to_create_id")
-            addressline1 = st.text_input("Address Line 1 * (Required)", key="ship_to_create_addressline1")
-            addressline2 = st.text_input("Address Line 2", key="ship_to_create_addressline2")
+            ship_to_name = st.text_input("Ship To Name", key="ship_to_name")
+            ship_to_id = st.text_input("Ship To ID", key="ship_to_id")
+            addressline1 = st.text_input("Addressline1", key="ship_to_addressline1")
+            addressline2 = st.text_input("Addressline2", key="ship_to_addressline2")
         with c2:
-            addressline3 = st.text_input("Address Line 3", key="ship_to_create_addressline3")
-            vendor_gstin = st.text_input("Vendor GSTIN", key="ship_to_create_vendor_gstin")
-            vendor_phone = st.text_input("Vendor Phone", key="ship_to_create_vendor_phone")
-            vendor_email = st.text_input("Vendor Email", key="ship_to_create_vendor_email")
-            is_active = st.checkbox("Active", value=True, key="ship_to_create_is_active")
+            addressline3 = st.text_input("Addressline3", key="ship_to_addressline3")
+            vendor_gstin = st.text_input("vendorGSTIN", key="ship_to_vendor_gstin")
+            vendor_phone = st.text_input("vendorphone", key="ship_to_vendor_phone")
+            vendor_email = st.text_input("vendoremail", key="ship_to_vendor_email")
+            is_active = st.checkbox("Active", value=True, key="ship_to_is_active")
 
-        submitted = st.form_submit_button(
-            "Save Ship To Master",
-            type="primary",
-            disabled=not can_edit_master,
-        )
+        submitted = st.form_submit_button("Save Ship To Master", type="primary", disabled=not current_user_can_edit('masters'))
         if submitted:
-            if not str(ship_to_name or "").strip():
+            if not ship_to_name.strip():
                 st.error("Ship To Name is mandatory.")
-            elif not str(addressline1 or "").strip():
-                st.error("Address Line 1 is mandatory because it is printed on Shipment and Delivery Invoice documents.")
             else:
                 existing = fetch_all(
-                    "SELECT id FROM ship_to_masters WHERE LOWER(TRIM(ship_to_name))=LOWER(TRIM(?)) AND COALESCE(TRIM(ship_to_id),'')=COALESCE(TRIM(?),'') LIMIT 1",
-                    (ship_to_name.strip(), ship_to_id.strip()),
+                    "SELECT id FROM ship_to_masters WHERE ship_to_name=? AND COALESCE(ship_to_id,'')=COALESCE(?, '') LIMIT 1",
+                    (ship_to_name.strip(), ship_to_id.strip())
                 )
                 if existing:
-                    st.error("This Ship To Name / Ship To ID already exists. Use Edit Ship To Master below.")
+                    execute_query("""
+                        UPDATE ship_to_masters
+                        SET addressline1=?, addressline2=?, addressline3=?, vendor_gstin=?,
+                            vendor_phone=?, vendor_email=?, is_active=?
+                        WHERE id=?
+                    """, (
+                        addressline1.strip(), addressline2.strip(), addressline3.strip(),
+                        vendor_gstin.strip(), vendor_phone.strip(), vendor_email.strip(),
+                        bool(is_active), existing[0]["id"]
+                    ))
+                    st.success("Ship To Master updated.")
                 else:
                     execute_query("""
                         INSERT INTO ship_to_masters
@@ -3997,78 +3649,22 @@ def ship_to_form():
                     """, (
                         ship_to_name.strip(), ship_to_id.strip(), addressline1.strip(), addressline2.strip(),
                         addressline3.strip(), vendor_gstin.strip(), vendor_phone.strip(), vendor_email.strip(),
-                        bool(is_active),
+                        bool(is_active)
                     ))
-                    clear_cache_after_write()
-                    rerun_with_success("Ship To Master saved. It is now available in Customer Master.")
+                    st.success("Ship To Master saved.")
+                clear_cache_after_write()
+                st.rerun()
 
     rows = fetch_all("""
         SELECT id, ship_to_name, ship_to_id, addressline1, addressline2, addressline3,
-               vendor_gstin, vendor_phone, vendor_email, is_active,
-               CASE
-                   WHEN COALESCE(is_active, TRUE)=FALSE THEN 'Inactive'
-                   WHEN NULLIF(TRIM(COALESCE(addressline1,'')), '') IS NULL THEN 'Address Missing'
-                   ELSE 'READY'
-               END AS relationship_status
+               vendor_gstin, vendor_phone, vendor_email, is_active
         FROM ship_to_masters
-        ORDER BY ship_to_name, ship_to_id, id
+        ORDER BY ship_to_name, ship_to_id
     """)
     if rows:
         show_filtered_df(rows, "ship_to_master_records", total=False)
     else:
         st.info("No Ship To records created yet.")
-        return
-
-    if can_edit_master and st.session_state.user.get("role") in ("admin", "super_admin"):
-        st.divider()
-        st.subheader("Edit Ship To Master")
-        edit_map = {
-            f'{row["id"]} | {row.get("ship_to_name") or "-"} | {row.get("ship_to_id") or "-"}': row
-            for row in rows
-        }
-        edit_label = st.selectbox("Select Ship To to Edit", list(edit_map.keys()), key="ship_to_edit_select")
-        selected = edit_map[edit_label]
-        sid = int(selected["id"])
-        with st.form(f"ship_to_master_edit_form_{sid}", clear_on_submit=False):
-            e1, e2 = st.columns(2)
-            with e1:
-                e_name = st.text_input("Edit Ship To Name * (Required)", value=selected.get("ship_to_name") or "", key=f"ship_to_edit_name_{sid}")
-                e_code = st.text_input("Edit Ship To ID", value=selected.get("ship_to_id") or "", key=f"ship_to_edit_id_{sid}")
-                e_address1 = st.text_input("Edit Address Line 1 * (Required)", value=selected.get("addressline1") or "", key=f"ship_to_edit_addressline1_{sid}")
-                e_address2 = st.text_input("Edit Address Line 2", value=selected.get("addressline2") or "", key=f"ship_to_edit_addressline2_{sid}")
-            with e2:
-                e_address3 = st.text_input("Edit Address Line 3", value=selected.get("addressline3") or "", key=f"ship_to_edit_addressline3_{sid}")
-                e_gstin = st.text_input("Edit Vendor GSTIN", value=selected.get("vendor_gstin") or "", key=f"ship_to_edit_vendor_gstin_{sid}")
-                e_phone = st.text_input("Edit Vendor Phone", value=selected.get("vendor_phone") or "", key=f"ship_to_edit_vendor_phone_{sid}")
-                e_email = st.text_input("Edit Vendor Email", value=selected.get("vendor_email") or "", key=f"ship_to_edit_vendor_email_{sid}")
-                e_active = st.checkbox("Edit Active", value=bool(selected.get("is_active") is not False), key=f"ship_to_edit_is_active_{sid}")
-
-            update_submitted = st.form_submit_button("Update Ship To Master", type="primary")
-            if update_submitted:
-                if not str(e_name or "").strip():
-                    st.error("Ship To Name is mandatory.")
-                elif not str(e_address1 or "").strip():
-                    st.error("Address Line 1 is mandatory.")
-                else:
-                    duplicate = fetch_all(
-                        "SELECT id FROM ship_to_masters WHERE id<>? AND LOWER(TRIM(ship_to_name))=LOWER(TRIM(?)) AND COALESCE(TRIM(ship_to_id),'')=COALESCE(TRIM(?),'') LIMIT 1",
-                        (sid, e_name.strip(), e_code.strip()),
-                    )
-                    if duplicate:
-                        st.error("Another Ship To with the same Name / Ship To ID already exists.")
-                    else:
-                        execute_query("""
-                            UPDATE ship_to_masters
-                            SET ship_to_name=?, ship_to_id=?, addressline1=?, addressline2=?, addressline3=?,
-                                vendor_gstin=?, vendor_phone=?, vendor_email=?, is_active=?
-                            WHERE id=?
-                        """, (
-                            e_name.strip(), e_code.strip(), e_address1.strip(), e_address2.strip(),
-                            e_address3.strip(), e_gstin.strip(), e_phone.strip(), e_email.strip(),
-                            bool(e_active), sid,
-                        ))
-                        clear_cache_after_write()
-                        rerun_with_success("Ship To Master updated. Linked Customers and Products will use the updated address automatically.")
 
 def user_can_edit_page(page_key):
     """Return True if current user can edit the given page. Super admin always can edit."""
