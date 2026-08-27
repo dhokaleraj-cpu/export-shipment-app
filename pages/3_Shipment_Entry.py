@@ -331,9 +331,10 @@ else:
             ''', (pallet_no.strip(), selected_product_id))
             if new_key in existing_keys:
                 st.error('Duplicate pallet/product row already added in this shipment.')
-            elif old_match:
+            elif old_match and str(old_match[0].get('shipment_no') or '').strip() != shipment_no.strip():
                 st.error(f"This pallet number is already used for the same product in shipment {old_match[0]['shipment_no']}. It cannot be used again.")
             else:
+                recovering_old_partial_row = bool(old_match and str(old_match[0].get('shipment_no') or '').strip() == shipment_no.strip())
                 st.session_state.shipment_temp_rows.append({
                     'fifo_row_id': get_next_fifo_row_id(),
                     'pallet_no': pallet_no.strip(),
@@ -355,7 +356,10 @@ else:
                     'master_ship_to_master_id': linked_ship_to_id,
                     'manual_relationship_override': bool(manual_relationship_override),
                 })
-                st.success('Row added with Customer / Ship To relationship.')
+                if recovering_old_partial_row:
+                    st.info('This pallet already belongs to the same Shipment Number from an earlier incomplete save. It will be reconciled safely when you save the shipment.')
+                else:
+                    st.success('Row added with Customer / Ship To relationship.')
                 st.rerun()
 
     st.subheader('Current Shipment Rows')
@@ -400,47 +404,40 @@ else:
                 first_po_date = st.session_state.shipment_temp_rows[0].get('po_date') or None
                 first_currency = st.session_state.shipment_temp_rows[0]['currency']
                 path = save_upload(attachment, f'shipment_{shipment_no}')
-                execute_query('''
-                    INSERT INTO shipments
-                    (shipment_no, invoice_no, po_number, po_date, shipment_date, supplier_id, warehouse_id,
-                     customer_id, ship_to_master_id, shipment_time_days, shipment_status, warehouse_delivery_date,
-                     shipment_status_updated_at, invoice_amount, currency, attachment_path, remarks,
-                     shipping_bill_no, shipping_bill_date, shipment_doc_date, forwarder_name, incoterm,
-                     forwarder_id, incoterm_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    shipment_no.strip(), invoice_no.strip(), first_po_number, first_po_date, str(shipment_date),
-                    supplier_map[supplier], warehouse_map[warehouse], selected_customer_id, selected_ship_to_id,
-                    selected_shipment_time_days, shipment_status,
-                    str(warehouse_delivery_date) if warehouse_delivery_date else None,
-                    total_amount, first_currency, path, remarks, shipping_bill_no.strip(), str(shipping_bill_date),
-                    str(shipment_doc_date), forwarder_name, incoterm, forwarder_map.get(forwarder_name),
-                    incoterm_map.get(incoterm),
-                ))
-                shipment_rows = fetch_all('SELECT id FROM shipments WHERE shipment_no=? ORDER BY id DESC LIMIT 1', (shipment_no.strip(),))
-                if not shipment_rows:
-                    raise RuntimeError('Saved Shipment ID could not be retrieved.')
-                shipment_id = shipment_rows[0]['id']
-                for row in st.session_state.shipment_temp_rows:
-                    old_match = fetch_all('SELECT id FROM shipment_boxes WHERE pallet_no=? AND product_id=?', (row['pallet_no'], row['product_id']))
-                    if old_match:
-                        raise sqlite3.IntegrityError(f"Pallet {row['pallet_no']} already used for product {row['product_code']}")
-                    execute_query('''
-                        INSERT INTO shipment_boxes
-                        (shipment_id, fifo_row_id, pallet_no, box_no, po_number, po_date, product_id,
-                         original_qty, unit_price, currency, amount)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        shipment_id, row.get('fifo_row_id'), row['pallet_no'], row['box_no'],
-                        row.get('po_number', ''), row.get('po_date') or None, row['product_id'],
-                        row['quantity'], row['unit_price'], row['currency'], row['amount'],
-                    ))
+                shipment_header = {
+                    'shipment_no': shipment_no.strip(),
+                    'invoice_no': invoice_no.strip(),
+                    'po_number': first_po_number,
+                    'po_date': first_po_date,
+                    'shipment_date': str(shipment_date),
+                    'supplier_id': supplier_map[supplier],
+                    'warehouse_id': warehouse_map[warehouse],
+                    'customer_id': selected_customer_id,
+                    'ship_to_master_id': selected_ship_to_id,
+                    'shipment_time_days': selected_shipment_time_days,
+                    'shipment_status': shipment_status,
+                    'warehouse_delivery_date': str(warehouse_delivery_date) if warehouse_delivery_date else None,
+                    'invoice_amount': total_amount,
+                    'currency': first_currency,
+                    'attachment_path': path,
+                    'remarks': remarks,
+                    'shipping_bill_no': shipping_bill_no.strip(),
+                    'shipping_bill_date': str(shipping_bill_date),
+                    'shipment_doc_date': str(shipment_doc_date),
+                    'forwarder_name': forwarder_name,
+                    'incoterm': incoterm,
+                    'forwarder_id': forwarder_map.get(forwarder_name),
+                    'incoterm_id': incoterm_map.get(incoterm),
+                }
+                save_result = save_shipment_atomic(shipment_header, st.session_state.shipment_temp_rows)
+                shipment_id = save_result['shipment_id']
 
-                notify_event(
-                    'shipment',
-                    'New Shipment Created',
-                    f"Shipment No: {shipment_no}\nOriginal Invoice: {invoice_no}\nCustomer: {selected_customer_row.get('customer_name')}\nShip To: {selected_shipment_ship_to.get('ship_to_name')}\nAmount: {total_amount}\nCurrency: {first_currency}",
-                )
+                if save_result.get('inserted_boxes', 0) > 0 or not save_result.get('recovered'):
+                    notify_event(
+                        'shipment',
+                        'Shipment Recovered / Completed' if save_result.get('recovered') else 'New Shipment Created',
+                        f"Shipment No: {shipment_no}\nOriginal Invoice: {invoice_no}\nCustomer: {selected_customer_row.get('customer_name')}\nShip To: {selected_shipment_ship_to.get('ship_to_name')}\nAmount: {total_amount}\nCurrency: {first_currency}",
+                    )
                 st.session_state.shipment_temp_rows = []
                 for key in (
                     '_shipment_relation_context_sn2713',
@@ -450,9 +447,16 @@ else:
                 ):
                     st.session_state.pop(key, None)
                 clear_cache_after_write()
-                rerun_with_success('Shipment and pallet/product rows saved with Product-linked Customer and Ship To.')
+                if save_result.get('recovered'):
+                    rerun_with_success(
+                        f"Shipment {shipment_no.strip()} recovered/completed successfully. "
+                        f"Existing rows reused: {save_result.get('existing_boxes_reused', 0)}; "
+                        f"new rows saved: {save_result.get('inserted_boxes', 0)}."
+                    )
+                else:
+                    rerun_with_success('Shipment and pallet/product rows saved successfully in one database transaction.')
             except Exception as exc:
-                st.error(f'Shipment save failed. Existing database entries were not changed. Details: {exc}')
+                st.error(f'Shipment save failed. The complete database transaction was rolled back; no partial shipment was created. Details: {exc}')
 
     st.divider()
     st.caption('Last Shipments and Edit Shipment sections are available under Shipment subpages.')

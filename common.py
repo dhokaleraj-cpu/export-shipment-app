@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 27.14"
+APP_VERSION = "SN 27.15"
 
 
 # ---------------------------------------------------------------------------
@@ -1513,6 +1513,15 @@ def clear_app_cache():
 def execute_query(query, params=()):
     from db import execute_query as db_execute_query
     return db_execute_query(query, params)
+
+def save_shipment_atomic(header, box_rows):
+    """Save one shipment header + all pallet/box rows in one PostgreSQL transaction.
+
+    Also reconciles an incomplete/partial shipment created by the legacy non-atomic
+    save logic, but only when the existing header and rows match the current retry.
+    """
+    from db import save_shipment_atomic as db_save_shipment_atomic
+    return db_save_shipment_atomic(header, box_rows)
 
 def ensure_runtime_columns():
     """Keep Supabase/PostgreSQL schema aligned with the latest app fields."""

@@ -176,6 +176,261 @@ def execute_many(query, param_list):
     finally:
         conn.close()
 
+
+def save_shipment_atomic(header, box_rows):
+    """Atomically save a shipment header and every pallet/product row.
+
+    SN 27.15 fixes the legacy pattern where INSERT INTO shipments committed
+    before shipment_boxes were written. That could leave an orphan/partial
+    shipment and make a retry fail on shipments.shipment_no UNIQUE.
+
+    Recovery is deliberately conservative: an existing shipment number is
+    reused only when it is clearly an incomplete retry of the same shipment.
+    Otherwise a friendly ValueError is raised and no database row is changed.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    header = dict(header or {})
+    box_rows = [dict(x or {}) for x in (box_rows or [])]
+    shipment_no = str(header.get("shipment_no") or "").strip()
+    invoice_no = str(header.get("invoice_no") or "").strip()
+    if not shipment_no:
+        raise ValueError("Shipment Number is mandatory.")
+    if not invoice_no:
+        raise ValueError("Original Invoice Number is mandatory.")
+    if not box_rows:
+        raise ValueError("At least one pallet/product row is required.")
+
+    def _txt(value):
+        return str(value or "").strip()
+
+    def _id(value):
+        try:
+            return int(value) if value not in (None, "") else None
+        except Exception:
+            return value
+
+    def _dec(value):
+        try:
+            return Decimal(str(value or 0)).quantize(Decimal("0.000001"))
+        except (InvalidOperation, ValueError, TypeError):
+            return Decimal("0")
+
+    requested = {}
+    for row in box_rows:
+        pallet_no = _txt(row.get("pallet_no"))
+        product_id = _id(row.get("product_id"))
+        if not pallet_no or product_id is None:
+            raise ValueError("Every shipment row requires Pallet Number and Product.")
+        key = (pallet_no, product_id)
+        if key in requested:
+            raise ValueError(f"Duplicate pallet/product row in this shipment: {pallet_no}")
+        requested[key] = row
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            # Serialize shipment saves briefly. This also prevents two users from
+            # racing on Shipment No / FIFO allocation during the same second.
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (2715001,))
+
+            cur.execute(
+                """
+                SELECT id, shipment_no, invoice_no, supplier_id, warehouse_id,
+                       customer_id, ship_to_master_id
+                FROM shipments
+                WHERE shipment_no=%s
+                FOR UPDATE
+                """,
+                (shipment_no,),
+            )
+            existing_header = cur.fetchone()
+            existing_header = dict(existing_header) if existing_header else None
+            recovered = False
+            skipped_existing = 0
+
+            if existing_header:
+                shipment_id = int(existing_header["id"])
+                cur.execute(
+                    """
+                    SELECT id, shipment_id, fifo_row_id, pallet_no, box_no, product_id,
+                           original_qty, unit_price, currency, amount, po_number, po_date
+                    FROM shipment_boxes
+                    WHERE shipment_id=%s
+                    ORDER BY id
+                    FOR UPDATE
+                    """,
+                    (shipment_id,),
+                )
+                existing_boxes = [dict(r) for r in cur.fetchall()]
+
+                same_invoice = _txt(existing_header.get("invoice_no")) == invoice_no
+                same_supplier = _id(existing_header.get("supplier_id")) == _id(header.get("supplier_id"))
+                same_warehouse = _id(existing_header.get("warehouse_id")) == _id(header.get("warehouse_id"))
+                same_customer = _id(existing_header.get("customer_id")) == _id(header.get("customer_id"))
+                same_ship_to = _id(existing_header.get("ship_to_master_id")) == _id(header.get("ship_to_master_id"))
+
+                # A header with no boxes is the exact orphan pattern created by the
+                # old code. For a partial save, require the same header identity.
+                if not same_invoice:
+                    raise ValueError(
+                        f"Shipment Number {shipment_no} already exists for Original Invoice "
+                        f"{_txt(existing_header.get('invoice_no')) or '-'}; use a different Shipment Number "
+                        "or edit the existing shipment."
+                    )
+                if existing_boxes and not (same_supplier and same_warehouse and same_customer and same_ship_to):
+                    raise ValueError(
+                        f"Shipment Number {shipment_no} already exists with saved pallet rows and a different header. "
+                        "Use Edit Shipment or a different Shipment Number."
+                    )
+
+                # Every already-saved row must be part of this retry and must match.
+                for old in existing_boxes:
+                    key = (_txt(old.get("pallet_no")), _id(old.get("product_id")))
+                    new = requested.get(key)
+                    if not new:
+                        raise ValueError(
+                            f"Shipment Number {shipment_no} already contains pallet {key[0]} that is not in this retry. "
+                            "Use Edit Shipment instead of creating a new shipment with the same number."
+                        )
+                    if (
+                        _txt(old.get("box_no")) != _txt(new.get("box_no"))
+                        or _dec(old.get("original_qty")) != _dec(new.get("quantity"))
+                        or _dec(old.get("unit_price")) != _dec(new.get("unit_price"))
+                        or _txt(old.get("currency")) != _txt(new.get("currency"))
+                    ):
+                        raise ValueError(
+                            f"Shipment Number {shipment_no} already contains pallet {key[0]} with different saved values. "
+                            "Use Edit Shipment to change the existing record."
+                        )
+                recovered = True
+
+                # Refresh an orphan/partial header from the current form before
+                # completing the missing rows.
+                cur.execute(
+                    """
+                    UPDATE shipments SET
+                        invoice_no=%s, po_number=%s, po_date=%s, shipment_date=%s,
+                        supplier_id=%s, warehouse_id=%s, customer_id=%s, ship_to_master_id=%s,
+                        shipment_time_days=%s, shipment_status=%s, warehouse_delivery_date=%s,
+                        shipment_status_updated_at=CURRENT_TIMESTAMP,
+                        invoice_amount=%s, currency=%s, attachment_path=%s, remarks=%s,
+                        shipping_bill_no=%s, shipping_bill_date=%s, shipment_doc_date=%s,
+                        forwarder_name=%s, incoterm=%s, forwarder_id=%s, incoterm_id=%s
+                    WHERE id=%s
+                    """,
+                    (
+                        invoice_no, header.get("po_number"), header.get("po_date"), header.get("shipment_date"),
+                        header.get("supplier_id"), header.get("warehouse_id"), header.get("customer_id"),
+                        header.get("ship_to_master_id"), header.get("shipment_time_days"), header.get("shipment_status"),
+                        header.get("warehouse_delivery_date"), header.get("invoice_amount"), header.get("currency"),
+                        header.get("attachment_path"), header.get("remarks"), header.get("shipping_bill_no"),
+                        header.get("shipping_bill_date"), header.get("shipment_doc_date"), header.get("forwarder_name"),
+                        header.get("incoterm"), header.get("forwarder_id"), header.get("incoterm_id"), shipment_id,
+                    ),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO shipments
+                    (shipment_no, invoice_no, po_number, po_date, shipment_date, supplier_id, warehouse_id,
+                     customer_id, ship_to_master_id, shipment_time_days, shipment_status, warehouse_delivery_date,
+                     shipment_status_updated_at, invoice_amount, currency, attachment_path, remarks,
+                     shipping_bill_no, shipping_bill_date, shipment_doc_date, forwarder_name, incoterm,
+                     forwarder_id, incoterm_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        shipment_no, invoice_no, header.get("po_number"), header.get("po_date"), header.get("shipment_date"),
+                        header.get("supplier_id"), header.get("warehouse_id"), header.get("customer_id"),
+                        header.get("ship_to_master_id"), header.get("shipment_time_days"), header.get("shipment_status"),
+                        header.get("warehouse_delivery_date"), header.get("invoice_amount"), header.get("currency"),
+                        header.get("attachment_path"), header.get("remarks"), header.get("shipping_bill_no"),
+                        header.get("shipping_bill_date"), header.get("shipment_doc_date"), header.get("forwarder_name"),
+                        header.get("incoterm"), header.get("forwarder_id"), header.get("incoterm_id"),
+                    ),
+                )
+                inserted = cur.fetchone()
+                shipment_id = int(inserted["id"] if isinstance(inserted, dict) else inserted[0])
+                existing_boxes = []
+
+            existing_by_key = {
+                (_txt(x.get("pallet_no")), _id(x.get("product_id"))): x
+                for x in existing_boxes
+            }
+
+            # Allocate FIFO IDs inside the same transaction to avoid stale MAX()+1
+            # values from the UI when multiple users save shipments concurrently.
+            cur.execute("SELECT COALESCE(MAX(fifo_row_id), 0) AS max_id FROM shipment_boxes")
+            max_row = cur.fetchone()
+            if isinstance(max_row, dict):
+                next_fifo = int(max_row.get("max_id") or 0) + 1
+            else:
+                next_fifo = int((max_row[0] if max_row else 0) or 0) + 1
+
+            inserted_boxes = 0
+            for row in box_rows:
+                key = (_txt(row.get("pallet_no")), _id(row.get("product_id")))
+                if key in existing_by_key:
+                    skipped_existing += 1
+                    continue
+
+                # Prevent the same pallet/product from being attached to another
+                # shipment. Lock the matching row when it exists.
+                cur.execute(
+                    """
+                    SELECT id, shipment_id
+                    FROM shipment_boxes
+                    WHERE pallet_no=%s AND product_id=%s
+                    FOR UPDATE
+                    """,
+                    key,
+                )
+                conflict = cur.fetchone()
+                if conflict:
+                    conflict = dict(conflict)
+                    raise ValueError(
+                        f"Pallet {key[0]} is already used for this Product in another shipment. "
+                        "No part of this shipment was saved."
+                    )
+
+                cur.execute(
+                    """
+                    INSERT INTO shipment_boxes
+                    (shipment_id, fifo_row_id, pallet_no, box_no, po_number, po_date, product_id,
+                     original_qty, unit_price, currency, amount)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        shipment_id, next_fifo, key[0], _txt(row.get("box_no")), _txt(row.get("po_number")),
+                        row.get("po_date"), key[1], row.get("quantity"), row.get("unit_price"),
+                        _txt(row.get("currency")), row.get("amount"),
+                    ),
+                )
+                next_fifo += 1
+                inserted_boxes += 1
+
+        conn.commit()
+        return {
+            "shipment_id": shipment_id,
+            "recovered": recovered,
+            "inserted_boxes": inserted_boxes,
+            "existing_boxes_reused": skipped_existing,
+        }
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 MASTER_RELATIONSHIP_SCHEMA_VERSION = "SN 27.14"
 
 MASTER_RELATIONSHIP_MIGRATIONS = [
