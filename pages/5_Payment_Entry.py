@@ -1,250 +1,132 @@
-from common import *
+from payment_common import *
+
+SN2722_PAYMENT_MARKER = "SN 27.22 EXPLICIT LINE-ITEM PAYMENT ACTIVE"
 
 page_setup()
-
 require_page_view('payment')
 show_edit_permission_status('payment')
-
-show_header('Payment Entry')
+show_header('Payment Entry', 'Select exact Original Invoice / Product line(s) and allocate payment')
 access_notice()
 render_payment_subnav('payment')
-
 can_add_payment = current_user_can_add('payment')
-if can_add_payment:
-    st.caption('Payment Add permission: Enabled for this user.')
+
+st.markdown('''
+<div class="card" style="margin-bottom:14px;border:2px solid #0b6fb8;">
+<b>SN 27.22 EXPLICIT LINE-ITEM PAYMENT ACTIVE</b><br>
+Select a Delivery Invoice, tick the exact Original Invoice / Product line(s), and enter the allocation amount for each selected line.
+</div>
+''', unsafe_allow_html=True)
+
+try:
+    ensure_payment_allocation_schema()
+except Exception as exc:
+    st.error(f'Payment line-allocation schema could not be prepared: {exc}')
+    st.stop()
+
+search_text = st.text_input('Search by Original Invoice / Delivery Invoice / Customer / Shipment', key='payment_search_sn2722').strip().lower()
+try:
+    due_rows = fetch_payment_due_rows() or []
+except Exception as exc:
+    st.error(f'Pending invoices could not be loaded: {exc}')
+    st.stop()
+
+if search_text:
+    due_rows = [r for r in due_rows if search_text in ' | '.join([
+        str(r.get('original_invoice_no') or ''), str(r.get('delivery_invoice_no') or ''),
+        str(r.get('customer_name') or ''), str(r.get('shipment_no') or ''), str(r.get('warehouse_name') or '')
+    ]).lower()]
+
+if not due_rows:
+    st.warning('No pending Delivery Invoice is available for the current access/search.')
 else:
-    st.caption('Payment Add permission: Disabled. User can view pending invoices but cannot save new payment entries.')
+    delivery_map = {f"Delivery Inv {d.get('delivery_invoice_no') or '-'} | Original Inv {d.get('original_invoice_no') or '-'} | {d.get('customer_name') or '-'} | Pending {float(d.get('pending_amount') or 0):,.3f} {d.get('currency') or ''}": d for d in due_rows}
+    selected_key = searchable_selectbox('Select Pending Delivery Invoice', list(delivery_map.keys()), key='payment_delivery_select_sn2722')
+    selected_delivery = delivery_map[selected_key]
+    delivery_invoice_no = selected_delivery.get('delivery_invoice_no') or ''
 
+    st.markdown(f'''
+    <div class="card" style="margin-bottom:14px;">
+      <h3 style="margin:0;color:#003B73;">Payment Summary</h3>
+      <table style="width:100%;font-family:Aptos,Arial,sans-serif;font-weight:700;margin-top:10px;">
+        <tr><td><b>Delivery Invoice</b></td><td>{delivery_invoice_no or '-'}</td><td><b>Original Invoice(s)</b></td><td>{selected_delivery.get('original_invoice_no') or '-'}</td></tr>
+        <tr><td><b>Customer</b></td><td>{selected_delivery.get('customer_name') or '-'}</td><td><b>Due Date</b></td><td>{selected_delivery.get('payment_due_date') or '-'}</td></tr>
+        <tr><td><b>Invoice Amount</b></td><td>{float(selected_delivery.get('total_invoice_amount') or 0):,.3f}</td><td><b>Already Received</b></td><td>{float(selected_delivery.get('paid_amount') or 0):,.3f}</td></tr>
+        <tr><td><b>Pending Amount</b></td><td>{float(selected_delivery.get('pending_amount') or 0):,.3f}</td><td><b>Shipment No</b></td><td>{selected_delivery.get('shipment_no') or '-'}</td></tr>
+      </table>
+    </div>
+    ''', unsafe_allow_html=True)
 
-# Fast pending-payment lookup indexes. Non-destructive and safe to run repeatedly.
-for _idx_sql in [
-    "CREATE INDEX IF NOT EXISTS idx_payments_delivery_id ON payments(delivery_id)",
-    "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_invoice_no ON customer_deliveries(delivery_invoice_no)",
-    "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_box_id ON customer_deliveries(box_id)",
-    "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_shipment_id ON customer_deliveries(shipment_id)",
-    "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_due_date ON customer_deliveries(payment_due_date)",
-    "CREATE INDEX IF NOT EXISTS idx_shipment_boxes_product_id ON shipment_boxes(product_id)",
-    "CREATE INDEX IF NOT EXISTS idx_shipments_warehouse_id ON shipments(warehouse_id)",
-    "CREATE INDEX IF NOT EXISTS idx_shipments_invoice_no ON shipments(invoice_no)",
-]:
-    try:
-        execute_query(_idx_sql)
-    except Exception:
-        pass
+    pending_lines = [r for r in fetch_payment_line_rows(delivery_invoice_no) if float(r.get('pending_amount') or 0) > 0.0005]
+    st.markdown('<div class="input-section-title">Line Item Allocation — Tick Required Line(s)</div>', unsafe_allow_html=True)
 
+    if not pending_lines:
+        st.success('All line items under this Delivery Invoice are already fully paid.')
+    else:
+        if st.session_state.get('_payment_invoice_sn2722') != delivery_invoice_no:
+            for k in list(st.session_state.keys()):
+                if str(k).startswith(('pay_line_select_sn2722_', 'pay_line_amount_sn2722_')):
+                    st.session_state.pop(k, None)
+            st.session_state['_payment_invoice_sn2722'] = delivery_invoice_no
 
-# ---------------------------------------------------------------------------
-# Fast Pending Delivery Invoice query
-# ---------------------------------------------------------------------------
-# Search is applied inside SQL and only unpaid/pending invoices are returned.
-# Default limit avoids loading all invoices. Paid invoices are excluded by HAVING pending_amount > 0.
+        hdr = st.columns([0.55,1.25,1.05,2.0,1.0,1.0,1.0,1.15])
+        for c,t in zip(hdr,['Select','Original Invoice','Product Code','Product Name','Invoice Amount','Already Paid','Pending','Allocate Amount']):
+            c.markdown(f'**{t}**')
 
-st.markdown('<div class="input-section-title">Search Pending Delivery Invoice</div>', unsafe_allow_html=True)
-pending_invoice_search = st.text_input(
-    "Search by Original Invoice / Delivery Invoice / Customer / Shipment",
-    key="payment_pending_invoice_search",
-    placeholder="Type invoice number, delivery invoice, customer or shipment number"
-).strip()
+        allocations = []
+        errors = []
+        for line in pending_lines:
+            line_id = int(line.get('anchor_delivery_id') or 0)
+            pending = float(line.get('pending_amount') or 0)
+            cols = st.columns([0.55,1.25,1.05,2.0,1.0,1.0,1.0,1.15])
+            selected = cols[0].checkbox('Select', key=f'pay_line_select_sn2722_{delivery_invoice_no}_{line_id}', label_visibility='collapsed')
+            cols[1].write(line.get('original_invoice_no') or '-')
+            cols[2].write(line.get('product_code') or '-')
+            cols[3].write(line.get('product_name') or '-')
+            cols[4].write(f"{float(line.get('invoice_amount') or 0):,.3f}")
+            cols[5].write(f"{float(line.get('paid_amount') or 0):,.3f}")
+            cols[6].write(f"{pending:,.3f}")
+            amount = cols[7].number_input('Allocate Amount', min_value=0.0, max_value=max(0.0,pending), step=1.0, format='%.3f', key=f'pay_line_amount_sn2722_{delivery_invoice_no}_{line_id}', label_visibility='collapsed', disabled=not selected)
+            if selected:
+                if amount <= 0:
+                    errors.append(f"{line.get('original_invoice_no') or '-'} / {line.get('product_code') or '-'}: enter allocation amount.")
+                else:
+                    allocations.append({'delivery_id': line_id, 'amount': float(amount), 'original_invoice_no': line.get('original_invoice_no') or '', 'product_code': line.get('product_code') or ''})
+            st.divider()
 
-limit_col1, limit_col2 = st.columns([1, 4])
-with limit_col1:
-    pending_limit = st.selectbox(
-        "Max Pending Rows",
-        [50, 100, 200, 500],
-        index=1,
-        key="payment_pending_invoice_limit"
-    )
+        total = sum(x['amount'] for x in allocations)
+        a,b,c = st.columns(3)
+        a.metric('Selected Lines', len(allocations))
+        b.metric('Payment Receipt Total', f"{total:,.3f} {selected_delivery.get('currency') or ''}")
+        c.metric('Balance After Receipt', f"{max(0.0,float(selected_delivery.get('pending_amount') or 0)-total):,.3f}")
+        for e in errors:
+            st.warning(e)
 
-payment_product_ids = current_user_allowed_product_ids()
-payment_warehouse_ids = current_user_allowed_warehouse_ids()
-payment_access_clauses = []
-payment_access_params = []
-if payment_product_ids:
-    payment_access_clauses.append(" AND b.product_id IN (" + ",".join(["?"] * len(payment_product_ids)) + ") ")
-    payment_access_params.extend(payment_product_ids)
-if payment_warehouse_ids:
-    payment_access_clauses.append(" AND s.warehouse_id IN (" + ",".join(["?"] * len(payment_warehouse_ids)) + ") ")
-    payment_access_params.extend(payment_warehouse_ids)
-payment_access_sql = "".join(payment_access_clauses)
+        c1,c2 = st.columns(2)
+        with c1:
+            payment_received_date = st.date_input('Payment Received Date', value=date.today(), key='payment_date_sn2722')
+            payment_reference = st.text_input('Payment Reference', key='payment_ref_sn2722')
+        with c2:
+            attachment = st.file_uploader('Attach Payment File', key='payment_file_sn2722')
+            remarks = st.text_area('Remarks', key='payment_remarks_sn2722')
 
-search_sql = ""
-search_params = []
-if pending_invoice_search:
-    search_sql = """
-        AND (
-            LOWER(COALESCE(base.delivery_invoice_no,'')) LIKE ?
-            OR LOWER(COALESCE(base.original_invoice_no,'')) LIKE ?
-            OR LOWER(COALESCE(base.customer_name,'')) LIKE ?
-            OR LOWER(COALESCE(base.shipment_no,'')) LIKE ?
-            OR LOWER(COALESCE(base.warehouse_name,'')) LIKE ?
-        )
-    """
-    like_value = "%" + pending_invoice_search.lower() + "%"
-    search_params = [like_value, like_value, like_value, like_value, like_value]
-
-deliveries = fetch_all(f"""
-    WITH delivery_base AS (
-        SELECT
-            d.id AS delivery_id,
-            d.delivery_invoice_no,
-            s.invoice_no AS original_invoice_no,
-            s.shipment_no,
-            c.customer_name,
-            b.product_id,
-            s.warehouse_id,
-            w.warehouse_name,
-            d.currency,
-            d.payment_due_date,
-            d.sale_amount
-        FROM customer_deliveries d
-        JOIN customers c ON d.customer_id = c.id
-        JOIN shipments s ON d.shipment_id = s.id
-        JOIN shipment_boxes b ON d.box_id = b.id
-        LEFT JOIN warehouses w ON s.warehouse_id = w.id
-        WHERE COALESCE(d.delivery_invoice_no, '') <> ''
-        {payment_access_sql}
-    ),
-    invoice_totals AS (
-        SELECT
-            MIN(delivery_id) AS id,
-            delivery_invoice_no,
-            MAX(original_invoice_no) AS original_invoice_no,
-            MAX(shipment_no) AS shipment_no,
-            MAX(customer_name) AS customer_name,
-            MAX(product_id) AS product_id,
-            MAX(warehouse_id) AS warehouse_id,
-            MAX(warehouse_name) AS warehouse_name,
-            MAX(currency) AS currency,
-            MAX(payment_due_date) AS payment_due_date,
-            SUM(COALESCE(sale_amount, 0)) AS total_invoice_amount
-        FROM delivery_base
-        GROUP BY delivery_invoice_no
-    ),
-    payment_totals AS (
-        SELECT
-            d.delivery_invoice_no,
-            SUM(COALESCE(p.payment_amount, 0)) AS paid_amount
-        FROM payments p
-        JOIN customer_deliveries d ON p.delivery_id = d.id
-        GROUP BY d.delivery_invoice_no
-    )
-    SELECT
-        base.id,
-        base.delivery_invoice_no,
-        base.original_invoice_no,
-        base.shipment_no,
-        base.customer_name,
-        base.product_id,
-        base.warehouse_id,
-        base.warehouse_name,
-        base.currency,
-        base.payment_due_date,
-        base.total_invoice_amount,
-        COALESCE(pay.paid_amount, 0) AS paid_amount,
-        base.total_invoice_amount - COALESCE(pay.paid_amount, 0) AS pending_amount
-    FROM invoice_totals base
-    LEFT JOIN payment_totals pay ON base.delivery_invoice_no = pay.delivery_invoice_no
-    WHERE base.total_invoice_amount - COALESCE(pay.paid_amount, 0) > 0
-    {search_sql}
-    ORDER BY base.payment_due_date NULLS LAST, base.delivery_invoice_no
-    LIMIT {int(pending_limit)}
-""", tuple(payment_access_params + search_params))
-
-filtered_deliveries = deliveries or []
-
-if not filtered_deliveries:
-    st.warning('No pending delivery invoices available for your current product/warehouse access or search text.')
-    st.info('If you expect pending invoices here, confirm that the user has View + Add rights for Payment and product/warehouse access for the related part/warehouse.')
-else:
-    delivery_map = {
-        f"Original Inv {d.get('original_invoice_no') or '-'} | Delivery Inv {d.get('delivery_invoice_no') or '-'} | {d.get('customer_name') or '-'} | Shipment {d.get('shipment_no') or '-'} | Pending {float(d.get('pending_amount') or 0):,.3f} {d.get('currency') or ''}": d
-        for d in filtered_deliveries
-    }
-    selected_delivery_key = searchable_selectbox(
-        'Select Pending Delivery Invoice',
-        list(delivery_map.keys()),
-        key='payment_delivery_select'
-    )
-    selected_delivery = delivery_map[selected_delivery_key]
-
-    st.markdown(f"""
-        <div class="card" style="margin-bottom:16px;">
-            <h3 style="margin:0;color:#003B73;">Payment Summary</h3>
-            <table style="width:100%;font-family:Aptos,Arial,sans-serif;font-weight:700;margin-top:10px;">
-                <tr>
-                    <td><b>Original Invoice</b></td><td>{selected_delivery.get('original_invoice_no') or '-'}</td>
-                    <td><b>Delivery Invoice</b></td><td>{selected_delivery.get('delivery_invoice_no') or '-'}</td>
-                </tr>
-                <tr>
-                    <td><b>Customer</b></td><td>{selected_delivery.get('customer_name') or '-'}</td>
-                    <td><b>Due Date</b></td><td>{selected_delivery.get('payment_due_date') or '-'}</td>
-                </tr>
-                <tr>
-                    <td><b>Invoice Amount</b></td><td>{float(selected_delivery.get('total_invoice_amount') or 0):,.3f} {selected_delivery.get('currency') or ''}</td>
-                    <td><b style="color:#047857;">Received Amount</b></td><td style="color:#047857;font-weight:900;">{float(selected_delivery.get('paid_amount') or 0):,.3f}</td>
-                </tr>
-                <tr>
-                    <td><b style="color:#b91c1c;">Pending Amount</b></td><td style="color:#b91c1c;font-weight:900;">{float(selected_delivery.get('pending_amount') or 0):,.3f}</td>
-                    <td><b>Shipment No</b></td><td>{selected_delivery.get('shipment_no') or '-'}</td>
-                </tr>
-            </table>
-        </div>
-        """, unsafe_allow_html=True)
-
-    c1, c2 = st.columns(2)
-    with c1:
-        payment_received_date = st.date_input('Payment Received Date', value=date.today(), key='payment_received_date')
-        payment_amount = st.number_input(
-            'Payment Amount',
-            min_value=0.0,
-            max_value=float(selected_delivery.get('pending_amount') or 0),
-            value=0.0,
-            step=1.0,
-            key='payment_amount'
-        )
-    with c2:
-        payment_reference = st.text_input('Payment Reference', key='payment_reference')
-        attachment = st.file_uploader('Attach Payment File', key='payment_attachment_file')
-        remarks = st.text_area('Remarks', key='payment_remarks')
-
-    if st.button('Save Payment', type='primary', key='save_payment', disabled=not can_add_payment):
-        if not current_user_can_add('payment'):
-            st.error('You do not have Add permission for Payment Entry. Contact Super Admin.')
-            st.stop()
-        if payment_amount <= 0:
-            st.error('Payment amount must be greater than zero.')
-            st.stop()
-        if payment_amount > float(selected_delivery.get('pending_amount') or 0):
-            st.error('Payment amount cannot be more than pending amount.')
-            st.stop()
-
-        path = save_upload(attachment, f"payment_{selected_delivery['delivery_invoice_no']}")
-        execute_query("""
-            INSERT INTO payments (delivery_id, payment_received_date, payment_amount, payment_reference, attachment_path, remarks)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            selected_delivery['id'],
-            str(payment_received_date),
-            payment_amount,
-            payment_reference,
-            path,
-            remarks
-        ))
-        notify_event(
-            'payment',
-            'Payment Received',
-            f"Delivery Invoice: {selected_delivery['delivery_invoice_no']}\n"
-            f"Customer: {selected_delivery['customer_name']}\n"
-            f"Amount Received: {payment_amount}\n"
-            f"Reference: {payment_reference}"
-        )
-        set_success_message('Payment saved successfully. Email notification attempted if enabled.')
-        clear_cache_after_write()
-        st.rerun()
-
-# Payment history table removed from Payment Entry for faster loading.
-# Use Payment Due and Edit Payment subpages for review/edit work.
-st.divider()
-st.info("Payment history was moved out of this entry screen for faster loading. Use Payment Due or Edit Payment subpages.")
+        if st.button('Save Payment with Selected Line Item(s)', type='primary', key='save_payment_sn2722', disabled=not can_add_payment):
+            if errors:
+                st.error('Correct the line allocation warnings before saving.')
+                st.stop()
+            if not allocations:
+                st.error('Tick at least one line item and enter its allocation amount.')
+                st.stop()
+            if total > float(selected_delivery.get('pending_amount') or 0) + 0.0005:
+                st.error('Allocated total cannot exceed Delivery Invoice pending balance.')
+                st.stop()
+            path = save_upload(attachment, f'payment_{delivery_invoice_no}')
+            try:
+                result = save_invoice_payment_allocated_atomic(delivery_invoice_no, str(payment_received_date), allocations, payment_reference, path, remarks)
+            except Exception as exc:
+                st.error(f'Payment save failed: {exc}')
+                st.stop()
+            clear_cache_after_write()
+            set_success_message(f"Payment {total:,.3f} saved against {len(allocations)} selected line item(s). Pending balance: {float(result.get('pending_after') or 0):,.3f}.")
+            st.rerun()
 
 render_slogan_footer()

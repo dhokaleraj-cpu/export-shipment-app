@@ -563,6 +563,364 @@ def apply_master_relationship_migrations(raise_on_error=False):
     return bool(status.get("ok")), status
 
 
+
+def ensure_payment_allocation_schema():
+    """Create the SN 27.17 line-allocation table without changing existing payment rows."""
+    statements = [
+        """
+        CREATE TABLE IF NOT EXISTS payment_allocations (
+            id SERIAL PRIMARY KEY,
+            payment_id INTEGER NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+            delivery_id INTEGER NOT NULL REFERENCES customer_deliveries(id) ON DELETE RESTRICT,
+            allocated_amount NUMERIC(18,6) NOT NULL CHECK (allocated_amount >= 0),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(payment_id, delivery_id)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_payment_allocations_payment_id ON payment_allocations(payment_id)",
+        "CREATE INDEX IF NOT EXISTS idx_payment_allocations_delivery_id ON payment_allocations(delivery_id)",
+    ]
+    for sql in statements:
+        execute_query(sql)
+    return True
+
+
+def _payment_line_balances_in_cursor(cur, invoice_no, exclude_payment_id=0):
+    """Return payable Delivery-Invoice line groups while holding the caller transaction.
+
+    Explicit SN 27.17 allocations are respected exactly. Older receipts that do not
+    have allocation rows are preserved and distributed FIFO only across the remaining
+    line capacity, so historical data is not rewritten or double-counted.
+    """
+    from decimal import Decimal
+
+    cur.execute(
+        """
+        SELECT
+            MIN(d.id) AS anchor_delivery_id,
+            s.invoice_no AS original_invoice_no,
+            b.product_id,
+            p.product_code,
+            p.product_name,
+            COALESCE(d.unit_price,0) AS unit_price,
+            MAX(d.currency) AS currency,
+            SUM(COALESCE(d.delivered_qty,0)) AS delivered_qty,
+            SUM(COALESCE(d.sale_amount,0)) AS invoice_amount
+        FROM customer_deliveries d
+        JOIN shipments s ON s.id=d.shipment_id
+        JOIN shipment_boxes b ON b.id=d.box_id
+        JOIN products p ON p.id=b.product_id
+        WHERE d.delivery_invoice_no=%s
+        GROUP BY s.invoice_no, b.product_id, p.product_code, p.product_name, COALESCE(d.unit_price,0)
+        ORDER BY MIN(d.id), s.invoice_no, p.product_code
+        """,
+        (invoice_no,),
+    )
+    lines=[dict(r) for r in cur.fetchall()]
+    if not lines:
+        return []
+
+    cur.execute(
+        """
+        SELECT
+            s.invoice_no AS original_invoice_no,
+            b.product_id,
+            COALESCE(d.unit_price,0) AS unit_price,
+            SUM(COALESCE(pa.allocated_amount,0)) AS explicit_paid
+        FROM payment_allocations pa
+        JOIN payments pay ON pay.id=pa.payment_id
+        JOIN customer_deliveries d ON d.id=pa.delivery_id
+        JOIN shipments s ON s.id=d.shipment_id
+        JOIN shipment_boxes b ON b.id=d.box_id
+        WHERE d.delivery_invoice_no=%s AND pay.id<>%s
+        GROUP BY s.invoice_no, b.product_id, COALESCE(d.unit_price,0)
+        """,
+        (invoice_no, int(exclude_payment_id or 0)),
+    )
+    explicit={
+        (str(r.get('original_invoice_no') or ''), int(r.get('product_id') or 0), str(r.get('unit_price') or 0)):
+        Decimal(str(r.get('explicit_paid') or 0))
+        for r in (dict(x) for x in cur.fetchall())
+    }
+
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(pay.payment_amount),0) AS legacy_paid
+        FROM payments pay
+        JOIN customer_deliveries anchor ON anchor.id=pay.delivery_id
+        WHERE anchor.delivery_invoice_no=%s
+          AND pay.id<>%s
+          AND NOT EXISTS (SELECT 1 FROM payment_allocations pa WHERE pa.payment_id=pay.id)
+        """,
+        (invoice_no, int(exclude_payment_id or 0)),
+    )
+    legacy_row=cur.fetchone()
+    legacy_remaining=Decimal(str(dict(legacy_row).get('legacy_paid') or 0)) if legacy_row else Decimal('0')
+
+    result=[]
+    for line in lines:
+        key=(str(line.get('original_invoice_no') or ''), int(line.get('product_id') or 0), str(line.get('unit_price') or 0))
+        invoice_amount=Decimal(str(line.get('invoice_amount') or 0))
+        explicit_paid=max(Decimal('0'), explicit.get(key, Decimal('0')))
+        capacity=max(Decimal('0'), invoice_amount-explicit_paid)
+        legacy_alloc=min(capacity, max(Decimal('0'), legacy_remaining))
+        legacy_remaining-=legacy_alloc
+        paid=min(invoice_amount, explicit_paid+legacy_alloc)
+        pending=max(Decimal('0'), invoice_amount-paid)
+        row=dict(line)
+        row['paid_amount']=float(paid)
+        row['pending_amount']=float(pending)
+        row['explicit_paid_amount']=float(explicit_paid)
+        row['legacy_paid_amount']=float(legacy_alloc)
+        row['invoice_amount']=float(invoice_amount)
+        result.append(row)
+    return result
+
+
+def save_invoice_payment_allocated_atomic(delivery_invoice_no, payment_received_date, allocations,
+                                          payment_reference="", attachment_path=None, remarks=""):
+    """Save one payment receipt with user-selected line allocations atomically."""
+    from decimal import Decimal
+
+    invoice_no=str(delivery_invoice_no or '').strip()
+    if not invoice_no:
+        raise ValueError('Delivery Invoice Number is mandatory.')
+    normalized={}
+    for item in allocations or []:
+        delivery_id=int(item.get('delivery_id') or 0)
+        amount=Decimal(str(item.get('amount') or 0))
+        if delivery_id<=0 or amount<=0:
+            continue
+        normalized[delivery_id]=normalized.get(delivery_id, Decimal('0'))+amount
+    if not normalized:
+        raise ValueError('Select at least one line item and enter an allocation amount greater than zero.')
+
+    conn=get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ('PAYMENT:'+invoice_no,))
+            cur.execute(
+                "SELECT id, COALESCE(sale_amount,0) AS sale_amount FROM customer_deliveries WHERE delivery_invoice_no=%s ORDER BY id FOR UPDATE",
+                (invoice_no,),
+            )
+            delivery_rows=[dict(r) for r in cur.fetchall()]
+            if not delivery_rows:
+                raise ValueError(f'Delivery Invoice {invoice_no} was not found.')
+            invoice_delivery_ids={int(r['id']) for r in delivery_rows}
+            invoice_amount=sum(Decimal(str(r.get('sale_amount') or 0)) for r in delivery_rows)
+
+            cur.execute(
+                """
+                SELECT pay.id, COALESCE(pay.payment_amount,0) AS payment_amount
+                FROM payments pay
+                JOIN customer_deliveries anchor ON anchor.id=pay.delivery_id
+                WHERE anchor.delivery_invoice_no=%s
+                FOR UPDATE OF pay
+                """,
+                (invoice_no,),
+            )
+            payment_rows=[dict(r) for r in cur.fetchall()]
+            already_paid=sum(Decimal(str(r.get('payment_amount') or 0)) for r in payment_rows)
+            invoice_pending=max(Decimal('0'), invoice_amount-already_paid)
+
+            line_rows=_payment_line_balances_in_cursor(cur, invoice_no, 0)
+            line_by_anchor={int(r['anchor_delivery_id']):r for r in line_rows}
+            tolerance=Decimal('0.0005')
+            total=Decimal('0')
+            for delivery_id, amount in normalized.items():
+                if delivery_id not in invoice_delivery_ids or delivery_id not in line_by_anchor:
+                    raise ValueError('A selected payment line does not belong to the chosen Delivery Invoice.')
+                pending=Decimal(str(line_by_anchor[delivery_id].get('pending_amount') or 0))
+                if amount-pending>tolerance:
+                    line=line_by_anchor[delivery_id]
+                    raise ValueError(
+                        f"Allocation {amount:,.3f} exceeds pending {pending:,.3f} for "
+                        f"Original Invoice {line.get('original_invoice_no') or '-'} / Product {line.get('product_code') or '-'} ."
+                    )
+                total+=amount
+            if total-invoice_pending>tolerance:
+                raise ValueError(f'Allocated payment {total:,.3f} exceeds Delivery Invoice pending balance {invoice_pending:,.3f}.')
+
+            anchor_id=next(iter(normalized.keys()))
+            cur.execute(
+                """
+                INSERT INTO payments
+                    (delivery_id, payment_received_date, payment_amount, payment_reference, attachment_path, remarks)
+                VALUES (%s,%s,%s,%s,%s,%s)
+                RETURNING id
+                """,
+                (anchor_id, str(payment_received_date), total, str(payment_reference or ''), attachment_path, str(remarks or '')),
+            )
+            payment_id=int(dict(cur.fetchone())['id'])
+            for delivery_id, amount in normalized.items():
+                cur.execute(
+                    "INSERT INTO payment_allocations (payment_id, delivery_id, allocated_amount) VALUES (%s,%s,%s)",
+                    (payment_id, delivery_id, amount),
+                )
+        conn.commit()
+        return {
+            'payment_id':payment_id,
+            'delivery_invoice_no':invoice_no,
+            'payment_amount':float(total),
+            'allocation_count':len(normalized),
+            'pending_after':float(max(Decimal('0'), invoice_pending-total)),
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def update_invoice_payment_allocated_atomic(payment_id, payment_received_date, allocations,
+                                            payment_reference="", remarks=""):
+    """Edit one receipt and its selected line allocations as one transaction."""
+    from decimal import Decimal
+
+    pid=int(payment_id)
+    normalized={}
+    for item in allocations or []:
+        delivery_id=int(item.get('delivery_id') or 0)
+        amount=Decimal(str(item.get('amount') or 0))
+        if delivery_id<=0 or amount<=0:
+            continue
+        normalized[delivery_id]=normalized.get(delivery_id, Decimal('0'))+amount
+    if not normalized:
+        raise ValueError('Select at least one line item and enter an allocation amount greater than zero.')
+
+    conn=get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT pay.id, anchor.delivery_invoice_no
+                   FROM payments pay JOIN customer_deliveries anchor ON anchor.id=pay.delivery_id
+                   WHERE pay.id=%s""", (pid,)
+            )
+            base=cur.fetchone()
+            if not base:
+                raise ValueError('Payment receipt was not found.')
+            invoice_no=str(dict(base).get('delivery_invoice_no') or '')
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ('PAYMENT:'+invoice_no,))
+            cur.execute(
+                "SELECT id, COALESCE(sale_amount,0) AS sale_amount FROM customer_deliveries WHERE delivery_invoice_no=%s ORDER BY id FOR UPDATE",
+                (invoice_no,),
+            )
+            delivery_rows=[dict(r) for r in cur.fetchall()]
+            invoice_delivery_ids={int(r['id']) for r in delivery_rows}
+            invoice_amount=sum(Decimal(str(r.get('sale_amount') or 0)) for r in delivery_rows)
+            cur.execute(
+                """
+                SELECT pay.id, COALESCE(pay.payment_amount,0) AS payment_amount
+                FROM payments pay JOIN customer_deliveries anchor ON anchor.id=pay.delivery_id
+                WHERE anchor.delivery_invoice_no=%s AND pay.id<>%s
+                FOR UPDATE OF pay
+                """, (invoice_no,pid)
+            )
+            other_paid=sum(Decimal(str(dict(r).get('payment_amount') or 0)) for r in cur.fetchall())
+            max_receipt=max(Decimal('0'), invoice_amount-other_paid)
+            line_rows=_payment_line_balances_in_cursor(cur, invoice_no, pid)
+            line_by_anchor={int(r['anchor_delivery_id']):r for r in line_rows}
+            tolerance=Decimal('0.0005')
+            total=Decimal('0')
+            for delivery_id, amount in normalized.items():
+                if delivery_id not in invoice_delivery_ids or delivery_id not in line_by_anchor:
+                    raise ValueError('A selected payment line does not belong to this Delivery Invoice.')
+                pending=Decimal(str(line_by_anchor[delivery_id].get('pending_amount') or 0))
+                if amount-pending>tolerance:
+                    line=line_by_anchor[delivery_id]
+                    raise ValueError(
+                        f"Allocation {amount:,.3f} exceeds available {pending:,.3f} for "
+                        f"Original Invoice {line.get('original_invoice_no') or '-'} / Product {line.get('product_code') or '-'} ."
+                    )
+                total+=amount
+            if total-max_receipt>tolerance:
+                raise ValueError(f'Allocated payment {total:,.3f} exceeds the maximum editable receipt amount {max_receipt:,.3f}.')
+
+            anchor_id=next(iter(normalized.keys()))
+            cur.execute(
+                """UPDATE payments SET delivery_id=%s, payment_received_date=%s, payment_amount=%s,
+                   payment_reference=%s, remarks=%s WHERE id=%s""",
+                (anchor_id, str(payment_received_date), total, str(payment_reference or ''), str(remarks or ''), pid),
+            )
+            cur.execute('DELETE FROM payment_allocations WHERE payment_id=%s', (pid,))
+            for delivery_id, amount in normalized.items():
+                cur.execute(
+                    'INSERT INTO payment_allocations (payment_id, delivery_id, allocated_amount) VALUES (%s,%s,%s)',
+                    (pid, delivery_id, amount),
+                )
+        conn.commit()
+        return {'payment_id':pid, 'delivery_invoice_no':invoice_no, 'payment_amount':float(total)}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+# Backward-compatible wrappers retained for any older page imports. They auto-
+# distribute an invoice-level amount across available lines instead of anchoring
+# the whole payment to one line.
+def save_invoice_payment_atomic(delivery_invoice_no, payment_received_date, payment_amount,
+                                payment_reference="", attachment_path=None, remarks=""):
+    from decimal import Decimal
+    amount=Decimal(str(payment_amount or 0))
+    conn=get_connection()
+    try:
+        with conn.cursor() as cur:
+            rows=_payment_line_balances_in_cursor(cur, str(delivery_invoice_no or '').strip(), 0)
+    finally:
+        conn.close()
+    remaining=amount
+    allocations=[]
+    for row in rows:
+        if remaining<=Decimal('0.0005'):
+            break
+        pending=Decimal(str(row.get('pending_amount') or 0))
+        alloc=min(pending,remaining)
+        if alloc>Decimal('0.0005'):
+            allocations.append({'delivery_id':int(row['anchor_delivery_id']),'amount':alloc})
+            remaining-=alloc
+    if remaining>Decimal('0.0005'):
+        raise ValueError('Payment amount exceeds available Delivery Invoice line balances.')
+    return save_invoice_payment_allocated_atomic(
+        delivery_invoice_no, payment_received_date, allocations,
+        payment_reference, attachment_path, remarks
+    )
+
+
+def update_invoice_payment_atomic(payment_id, payment_received_date, payment_amount,
+                                  payment_reference="", remarks=""):
+    from decimal import Decimal
+    pid=int(payment_id)
+    base=fetch_all("""SELECT anchor.delivery_invoice_no
+                      FROM payments p JOIN customer_deliveries anchor ON anchor.id=p.delivery_id
+                      WHERE p.id=?""", (pid,))
+    if not base:
+        raise ValueError('Payment receipt was not found.')
+    invoice_no=str(base[0].get('delivery_invoice_no') or '')
+    amount=Decimal(str(payment_amount or 0))
+    conn=get_connection()
+    try:
+        with conn.cursor() as cur:
+            rows=_payment_line_balances_in_cursor(cur, invoice_no, pid)
+    finally:
+        conn.close()
+    remaining=amount
+    allocations=[]
+    for row in rows:
+        if remaining<=Decimal('0.0005'):
+            break
+        pending=Decimal(str(row.get('pending_amount') or 0))
+        alloc=min(pending,remaining)
+        if alloc>Decimal('0.0005'):
+            allocations.append({'delivery_id':int(row['anchor_delivery_id']),'amount':alloc})
+            remaining-=alloc
+    if remaining>Decimal('0.0005'):
+        raise ValueError('Payment amount exceeds available Delivery Invoice line balances.')
+    return update_invoice_payment_allocated_atomic(
+        pid, payment_received_date, allocations, payment_reference, remarks
+    )
+
 def hash_password(password):
     return hashlib.sha256(str(password or "").encode()).hexdigest()
 
@@ -591,6 +949,18 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_box_id ON customer_deliveries(box_id)",
         "CREATE INDEX IF NOT EXISTS idx_customer_deliveries_invoice_no ON customer_deliveries(delivery_invoice_no)",
         "CREATE INDEX IF NOT EXISTS idx_payments_delivery_id ON payments(delivery_id)",
+        """
+        CREATE TABLE IF NOT EXISTS payment_allocations (
+            id SERIAL PRIMARY KEY,
+            payment_id INTEGER NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+            delivery_id INTEGER NOT NULL REFERENCES customer_deliveries(id) ON DELETE RESTRICT,
+            allocated_amount NUMERIC(18,6) NOT NULL CHECK (allocated_amount >= 0),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(payment_id, delivery_id)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_payment_allocations_payment_id ON payment_allocations(payment_id)",
+        "CREATE INDEX IF NOT EXISTS idx_payment_allocations_delivery_id ON payment_allocations(delivery_id)",
         """
         CREATE TABLE IF NOT EXISTS product_price_history (
             id SERIAL PRIMARY KEY,

@@ -21,7 +21,7 @@ import pandas as pd
 
 import streamlit as st
 
-APP_VERSION = "SN 27.15"
+APP_VERSION = "SN 27.22"
 
 
 # ---------------------------------------------------------------------------
@@ -1523,6 +1523,27 @@ def save_shipment_atomic(header, box_rows):
     from db import save_shipment_atomic as db_save_shipment_atomic
     return db_save_shipment_atomic(header, box_rows)
 
+
+def save_invoice_payment_atomic(delivery_invoice_no, payment_received_date, payment_amount, payment_reference="", attachment_path=None, remarks=""):
+    from db import save_invoice_payment_atomic as _save_invoice_payment_atomic
+    return _save_invoice_payment_atomic(delivery_invoice_no, payment_received_date, payment_amount, payment_reference, attachment_path, remarks)
+
+def update_invoice_payment_atomic(payment_id, payment_received_date, payment_amount, payment_reference="", remarks=""):
+    from db import update_invoice_payment_atomic as _update_invoice_payment_atomic
+    return _update_invoice_payment_atomic(payment_id, payment_received_date, payment_amount, payment_reference, remarks)
+
+def save_invoice_payment_allocated_atomic(delivery_invoice_no, payment_received_date, allocations, payment_reference="", attachment_path=None, remarks=""):
+    from db import save_invoice_payment_allocated_atomic as _save
+    return _save(delivery_invoice_no, payment_received_date, allocations, payment_reference, attachment_path, remarks)
+
+def update_invoice_payment_allocated_atomic(payment_id, payment_received_date, allocations, payment_reference="", remarks=""):
+    from db import update_invoice_payment_allocated_atomic as _update
+    return _update(payment_id, payment_received_date, allocations, payment_reference, remarks)
+
+def ensure_payment_allocation_schema():
+    from db import ensure_payment_allocation_schema as _ensure
+    return _ensure()
+
 def ensure_runtime_columns():
     """Keep Supabase/PostgreSQL schema aligned with the latest app fields."""
     schema_updates = [
@@ -2708,46 +2729,59 @@ def login_page():
     force_exact_login_page()
 
 def overdue_rows():
+    """Return overdue balances once per Delivery Invoice (SN 27.16).
+
+    A payment receipt belongs to the complete Delivery Invoice even though the
+    legacy payments table stores one delivery_id as its anchor.  Never compare a
+    receipt only with that anchor line: resolve the anchor to delivery_invoice_no,
+    total all invoice lines, then subtract all receipts for the invoice.
+    """
     return fetch_all("""
+        WITH invoice_totals AS (
+            SELECT
+                MIN(d.id) AS delivery_id,
+                d.delivery_invoice_no,
+                STRING_AGG(DISTINCT s.invoice_no, ', ' ORDER BY s.invoice_no) AS original_invoice_no,
+                MAX(c.customer_name) AS customer_name,
+                MAX(c.email) AS email,
+                MAX(c.whatsapp_no) AS whatsapp_no,
+                MAX(d.delivery_date) AS delivery_date,
+                MAX(d.payment_due_date) AS payment_due_date,
+                MAX(d.currency) AS currency,
+                SUM(COALESCE(d.sale_amount, 0)) AS invoice_amount
+            FROM customer_deliveries d
+            JOIN customers c ON d.customer_id = c.id
+            JOIN shipments s ON d.shipment_id = s.id
+            WHERE COALESCE(d.delivery_invoice_no, '') <> ''
+            GROUP BY d.delivery_invoice_no
+        ),
+        payment_totals AS (
+            SELECT
+                anchor.delivery_invoice_no,
+                SUM(COALESCE(p.payment_amount, 0)) AS paid_amount
+            FROM payments p
+            JOIN customer_deliveries anchor ON anchor.id = p.delivery_id
+            WHERE COALESCE(anchor.delivery_invoice_no, '') <> ''
+            GROUP BY anchor.delivery_invoice_no
+        )
         SELECT
-            d.id AS delivery_id,
-            d.delivery_invoice_no,
-            c.customer_name,
-            c.email,
-            c.whatsapp_no,
-            d.delivery_date,
-            d.payment_due_date,
-            d.sale_amount,
-            COALESCE(SUM(p.payment_amount), 0) AS paid_amount,
-            d.sale_amount - COALESCE(SUM(p.payment_amount), 0) AS pending_amount
-        FROM customer_deliveries d
-        JOIN customers c ON d.customer_id = c.id
-        LEFT JOIN payments p ON d.id = p.delivery_id
-        GROUP BY
-            d.id,
-            d.delivery_invoice_no,
-            c.customer_name,
-            c.email,
-            c.whatsapp_no,
-            d.delivery_date,
-            d.payment_due_date,
-            d.sale_amount
-        HAVING
-            d.sale_amount - COALESCE(SUM(p.payment_amount), 0) > 0
-            AND d.payment_due_date < CURRENT_DATE
-        ORDER BY d.payment_due_date
-    """)
-    return fetch_all("""
-        SELECT d.id delivery_id, d.delivery_invoice_no, c.customer_name, c.email, c.whatsapp_no,
-               d.delivery_date, d.payment_due_date, d.sale_amount,
-               IFNULL(SUM(p.payment_amount),0) paid_amount,
-               d.sale_amount - IFNULL(SUM(p.payment_amount),0) pending_amount
-        FROM customer_deliveries d
-        JOIN customers c ON d.customer_id = c.id
-        LEFT JOIN payments p ON d.id = p.delivery_id
-        GROUP BY d.id
-        HAVING pending_amount > 0 AND date(d.payment_due_date) < date('now')
-        ORDER BY d.payment_due_date
+            i.delivery_id,
+            i.delivery_invoice_no,
+            i.original_invoice_no,
+            i.customer_name,
+            i.email,
+            i.whatsapp_no,
+            i.delivery_date,
+            i.payment_due_date,
+            i.currency,
+            i.invoice_amount AS sale_amount,
+            COALESCE(p.paid_amount, 0) AS paid_amount,
+            GREATEST(i.invoice_amount - COALESCE(p.paid_amount, 0), 0) AS pending_amount
+        FROM invoice_totals i
+        LEFT JOIN payment_totals p ON p.delivery_invoice_no = i.delivery_invoice_no
+        WHERE i.invoice_amount - COALESCE(p.paid_amount, 0) > 0.0005
+          AND i.payment_due_date::date < CURRENT_DATE
+        ORDER BY i.payment_due_date, i.delivery_invoice_no
     """)
 
 def whatsapp_link(phone, message):
