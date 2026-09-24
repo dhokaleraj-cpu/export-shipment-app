@@ -1,0 +1,36 @@
+Export Shipment Android First-App v1.0.0
+========================================
+Architecture
+- One hardened Android WebView only.
+- Export Shipment / Streamlit owns all menus, navigation, permissions and login flow.
+- No native route map, no query-route injection and no Android-side page switching.
+- Cookies, DOM storage and third-party cookies are enabled to preserve the web login/session.
+- File upload chooser and authenticated DownloadManager downloads are supported.
+- HTTPS only; cleartext traffic disabled.
+
+Android identity
+- App label: Export Shipment Mobile
+- Release namespace/applicationId: com.fourstar.exportshipment
+- Debug/test package: com.fourstar.exportshipment.test
+- Version: 1.0.0
+- Version code: 1
+- User-agent token: ExportShipmentClassicShell/1.0.0
+- minSdk: 26
+- target/compile SDK: 35
+- Java: 17
+
+GitHub build
+- Workflow: Export Shipment Android First-App APK
+- Ubuntu 24.04 + Temurin Java 17 + Gradle 8.9
+- Android API 35 / Build Tools 35.0.0
+- assembleDebug + lintDebug
+- APK Signature Scheme v2 verification
+- zipalign verification
+- package/version validation
+- Artifact: Export-Shipment-Mobile-FIRST-APP-APK
+- APK: Export_Shipment_Mobile_FIRST_APP_v1.0.0_TEST.apk
+
+First launch
+- Enter the existing Export Shipment HTTPS app URL once.
+- The URL is stored locally in Android SharedPreferences.
+- It can be changed later from the top-right menu.

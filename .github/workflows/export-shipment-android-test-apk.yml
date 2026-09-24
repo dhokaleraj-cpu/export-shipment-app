@@ -1,0 +1,129 @@
+name: Export Shipment Android First-App APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_reason:
+        description: 'Optional build reason / release reference'
+        required: false
+        default: 'manual Export Shipment Android build'
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: export-shipment-first-app-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout Export Shipment repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Install Android API 35 tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          MANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$MANAGER" ]; then
+            MANAGER="$(find "$SDK/cmdline-tools" -name sdkmanager -type f | head -1)"
+          fi
+          [ -x "$MANAGER" ] || { echo 'Android sdkmanager is unavailable on runner.'; exit 1; }
+          set +o pipefail
+          yes | "$MANAGER" --sdk_root="$SDK" --licenses >/dev/null
+          RC=${PIPESTATUS[1]}
+          set -o pipefail
+          [ "$RC" -eq 0 ] || exit "$RC"
+          "$MANAGER" --sdk_root="$SDK" 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+          printf 'sdk.dir=%s\n' "$SDK" > mobile/android_export_shipment/local.properties
+          printf 'SHIPMENT_ANDROID_SDK=%s\n' "$SDK" >> "$GITHUB_ENV"
+
+      - name: Read Android identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          GRADLE_FILE=mobile/android_export_shipment/app/build.gradle
+          VERSION_NAME="$(sed -n "s/^[[:space:]]*versionName[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" "$GRADLE_FILE" | head -1)"
+          VERSION_CODE="$(sed -n "s/^[[:space:]]*versionCode[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$GRADLE_FILE" | head -1)"
+          [ -n "$VERSION_NAME" ] || { echo 'Unable to read versionName'; exit 1; }
+          [ -n "$VERSION_CODE" ] || { echo 'Unable to read versionCode'; exit 1; }
+          printf 'SHIPMENT_MOBILE_VERSION=%s\n' "$VERSION_NAME" >> "$GITHUB_ENV"
+          printf 'SHIPMENT_MOBILE_VERSION_CODE=%s\n' "$VERSION_CODE" >> "$GITHUB_ENV"
+          printf 'SHIPMENT_APK_NAME=Export_Shipment_Mobile_FIRST_APP_v%s_TEST.apk\n' "$VERSION_NAME" >> "$GITHUB_ENV"
+          if [ -f APP_VERSION.txt ]; then printf 'SHIPMENT_SERVER_RELEASE=%s\n' "$(tr -d '\r\n' < APP_VERSION.txt)" >> "$GITHUB_ENV"; else printf 'SHIPMENT_SERVER_RELEASE=unknown\n' >> "$GITHUB_ENV"; fi
+
+      - name: Verify classic single-WebView architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC=mobile/android_export_shipment/app/src/main/java/com/fourstar/exportshipment/MainActivity.java
+          grep -Fq 'ExportShipmentClassicShell/1.0.0' "$SRC"
+          grep -Fq 'return false;' "$SRC"
+          grep -Fq 'Let the WebView/Streamlit router handle the real link' "$SRC"
+          grep -Fq 'setAcceptThirdPartyCookies' "$SRC"
+          grep -Fq 'setDownloadListener' "$SRC"
+          grep -Fq 'onShowFileChooser' "$SRC"
+          if grep -Eq 'appendQueryParameter\("(native_mobile|native_nav|page|route|shipment_route|shipment_native_route)"' "$SRC"; then echo 'Native route injection detected.'; exit 1; fi
+          if grep -Eq '(openDrawer|closeDrawer|__qcmsNativeNavigate|__shipmentNativeNavigate|toggleStreamlitSidebar)' "$SRC"; then echo 'Native navigation bridge detected.'; exit 1; fi
+          test -f mobile/android_export_shipment/app/src/main/res/drawable-nodpi/fsi_shipment_icon.png
+
+      - name: Build APK and lint
+        working-directory: mobile/android_export_shipment
+        run: gradle --no-daemon :app:assembleDebug :app:lintDebug
+
+      - name: Verify APK signature, alignment and package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p apk-artifacts
+          APK="apk-artifacts/$SHIPMENT_APK_NAME"
+          cp mobile/android_export_shipment/app/build/outputs/apk/debug/app-debug.apk "$APK"
+          BT="$SHIPMENT_ANDROID_SDK/build-tools/35.0.0"
+
+          set +e
+          "$BT/apksigner" verify --verbose --print-certs "$APK" | tee apk-artifacts/SIGNATURE_VERIFICATION.txt
+          APKSIGN_RC=${PIPESTATUS[0]}
+          set -e
+          [ "$APKSIGN_RC" -eq 0 ] || exit "$APKSIGN_RC"
+          grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' apk-artifacts/SIGNATURE_VERIFICATION.txt
+
+          "$BT/zipalign" -c -P 16 -v 4 "$APK" > apk-artifacts/ALIGNMENT_VERIFICATION.txt
+          "$BT/aapt" dump badging "$APK" | tee apk-artifacts/APK_PACKAGE_INFO.txt
+
+          ACTUAL_PACKAGE="$(sed -n "s/^package: name='\([^']*\)'.*/\1/p" apk-artifacts/APK_PACKAGE_INFO.txt | head -1)"
+          ACTUAL_VERSION="$(sed -n "s/.*versionName='\([^']*\)'.*/\1/p" apk-artifacts/APK_PACKAGE_INFO.txt | head -1)"
+          ACTUAL_CODE="$(sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" apk-artifacts/APK_PACKAGE_INFO.txt | head -1)"
+          [ "$ACTUAL_PACKAGE" = 'com.fourstar.exportshipment.test' ] || { echo "Unexpected package: $ACTUAL_PACKAGE"; exit 1; }
+          [ "$ACTUAL_VERSION" = "$SHIPMENT_MOBILE_VERSION" ] || { echo "Version mismatch: $ACTUAL_VERSION"; exit 1; }
+          [ "$ACTUAL_CODE" = "$SHIPMENT_MOBILE_VERSION_CODE" ] || { echo "VersionCode mismatch: $ACTUAL_CODE"; exit 1; }
+
+          (cd apk-artifacts && sha256sum "$SHIPMENT_APK_NAME" > SHA256SUMS.txt)
+          cp mobile/android_export_shipment/INSTALL_APK_ON_SAMSUNG.md apk-artifacts/INSTALL_README.md
+          printf 'Export Shipment classic Android build: PASS\nAPK Signature Scheme v2: PASS\nPackage: %s\nAndroid version: %s (%s)\n' "$ACTUAL_PACKAGE" "$ACTUAL_VERSION" "$ACTUAL_CODE" > apk-artifacts/VERIFICATION_SUMMARY.txt
+          printf '## Export Shipment Android APK\nServer release **%s** / Android **%s** built and verified. Download artifact **Export-Shipment-Mobile-FIRST-APP-APK** and install `%s`.\n' "$SHIPMENT_SERVER_RELEASE" "$SHIPMENT_MOBILE_VERSION" "$SHIPMENT_APK_NAME" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Export-Shipment-Mobile-FIRST-APP-APK
+          path: apk-artifacts/
+          if-no-files-found: error
+          retention-days: 30

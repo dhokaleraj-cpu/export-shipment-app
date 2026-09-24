@@ -1,0 +1,5 @@
+<resources>
+    <color name="shipment_blue">#0B4F84</color>
+    <color name="shipment_white">#FFFFFF</color>
+    <color name="shipment_black">#000000</color>
+</resources>
