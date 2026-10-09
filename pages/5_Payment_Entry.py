@@ -1,6 +1,6 @@
 from payment_common import *
 
-SN2722_PAYMENT_MARKER = "SN 27.22 EXPLICIT LINE-ITEM PAYMENT ACTIVE"
+SN2723_PAYMENT_MARKER = "SN 27.23 EXPLICIT LINE-ITEM PAYMENT ACTIVE"
 
 page_setup()
 require_page_view('payment')
@@ -12,7 +12,7 @@ can_add_payment = current_user_can_add('payment')
 
 st.markdown('''
 <div class="card" style="margin-bottom:14px;border:2px solid #0b6fb8;">
-<b>SN 27.22 EXPLICIT LINE-ITEM PAYMENT ACTIVE</b><br>
+<b>SN 27.23 EXPLICIT LINE-ITEM PAYMENT ACTIVE</b><br>
 Select a Delivery Invoice, tick the exact Original Invoice / Product line(s), and enter the allocation amount for each selected line.
 </div>
 ''', unsafe_allow_html=True)
@@ -67,6 +67,17 @@ else:
                 if str(k).startswith(('pay_line_select_sn2722_', 'pay_line_amount_sn2722_')):
                     st.session_state.pop(k, None)
             st.session_state['_payment_invoice_sn2722'] = delivery_invoice_no
+
+        fill_c1, fill_c2 = st.columns([1.4, 3])
+        with fill_c1:
+            if st.button('Fill Full Pending for Ticked Lines', key='payment_fill_pending_sn2723'):
+                for _line in pending_lines:
+                    _lid = int(_line.get('anchor_delivery_id') or 0)
+                    if st.session_state.get(f'pay_line_select_sn2722_{delivery_invoice_no}_{_lid}'):
+                        st.session_state[f'pay_line_amount_sn2722_{delivery_invoice_no}_{_lid}'] = float(_line.get('pending_amount') or 0)
+                st.rerun()
+        with fill_c2:
+            st.caption('Tick lines, then click to copy each line\'s full Pending into Allocate Amount. You can still edit any amount for a part payment.')
 
         hdr = st.columns([0.55,1.25,1.05,2.0,1.0,1.0,1.0,1.15])
         for c,t in zip(hdr,['Select','Original Invoice','Product Code','Product Name','Invoice Amount','Already Paid','Pending','Allocate Amount']):

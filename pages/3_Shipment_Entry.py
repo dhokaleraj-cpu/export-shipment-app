@@ -1,6 +1,6 @@
 from common import *
 
-SN2722_MARKER = "SN 27.22 SIMPLE SHIPMENT HEADER ACTIVE"
+SN2723_MARKER = "SN 27.23 SIMPLE SHIPMENT HEADER ACTIVE"
 
 def _local_effective_product_price(product_id, effective_date=None):
     try:
@@ -70,7 +70,7 @@ else:
 
     st.markdown('''
         <div class="card" style="margin-bottom:14px;border:2px solid #0b6fb8;">
-            <b>SN 27.22 SIMPLE SHIPMENT HEADER ACTIVE</b><br>
+            <b>SN 27.23 SIMPLE SHIPMENT HEADER ACTIVE</b><br>
             Shipment header contains only <b>Customer / Bill To</b> and <b>Ship To</b>.
             There is no Product / Part selection in the shipment header.<br>
             Select Product only inside <b>Add Pallet / Product Row</b>; add different Products as separate rows under the same Shipment.
@@ -290,9 +290,25 @@ else:
         visible_cols = ['fifo_row_id','pallet_no','box_no','po_number','po_date','product_code','product_name','header_customer_name','header_ship_to_name','quantity','unit_price','currency','amount']
         st.dataframe(style_total_row(add_total_row(temp_df[visible_cols])), width='stretch', hide_index=True)
         st.markdown(f'<div class="total-box">Rows: {len(temp_df)} &nbsp; | &nbsp; Products: {temp_df["product_id"].nunique()} &nbsp; | &nbsp; Total Quantity: {temp_df["quantity"].sum()} &nbsp; | &nbsp; Total Amount: {temp_df["amount"].sum():,.3f}</div>', unsafe_allow_html=True)
-        if st.button('Clear Unsaved Rows', key='clear_unsaved_shipment_rows'):
-            st.session_state.shipment_temp_rows = []
-            st.rerun()
+        # SN 27.23: remove individual unsaved rows (nothing is in the database yet).
+        remove_df = temp_df[['fifo_row_id', 'pallet_no', 'box_no', 'product_code', 'quantity', 'amount']].copy()
+        remove_df.insert(0, 'Remove', False)
+        edited_remove = st.data_editor(
+            remove_df, width='stretch', hide_index=True,
+            disabled=[c for c in remove_df.columns if c != 'Remove'],
+            column_config={'Remove': st.column_config.CheckboxColumn('Remove', default=False)},
+            key=f'shipment_remove_rows_sn2723_{len(temp_df)}',
+        )
+        remove_ids = {int(x) for x in edited_remove.loc[edited_remove['Remove'] == True, 'fifo_row_id'].tolist()}
+        rc1, rc2 = st.columns(2)
+        with rc1:
+            if st.button(f'Remove Ticked Rows ({len(remove_ids)})', key='remove_ticked_shipment_rows_sn2723', disabled=not remove_ids):
+                st.session_state.shipment_temp_rows = [r for r in st.session_state.shipment_temp_rows if int(r.get('fifo_row_id') or 0) not in remove_ids]
+                st.rerun()
+        with rc2:
+            if st.button('Clear Unsaved Rows', key='clear_unsaved_shipment_rows'):
+                st.session_state.shipment_temp_rows = []
+                st.rerun()
     else:
         st.info('No product rows added yet.')
 

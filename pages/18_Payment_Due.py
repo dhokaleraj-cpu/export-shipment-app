@@ -3,7 +3,7 @@ from payment_common import *
 page_setup()
 require_page_view('payment_due')
 show_edit_permission_status('payment_due')
-show_header("Payment Due", "Pending delivery invoices and balances")
+show_header("Payment Due", "One control balance per Delivery Invoice")
 access_notice()
 render_payment_subnav('payment_due')
 

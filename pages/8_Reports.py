@@ -2,14 +2,19 @@ from common import *
 import html
 from reportlab.lib.styles import ParagraphStyle
 
-REPORTS_VERSION = "SN 27.13"
+REPORTS_VERSION = "SN 27.23"
 
 page_setup()
 require_page_view("reports")
 show_edit_permission_status("reports")
 
-show_header("Reports", "SN 27.13 - Product / Warehouse balance reports added")
+show_header("Reports", "SN 27.23 - exact payment line allocation + invoice-level control")
 access_notice()
+try:
+    ensure_payment_allocation_schema()
+except Exception:
+    pass
+
 
 # ---------------------------------------------------------------------------
 # Report list requested for SN 26.00
@@ -761,91 +766,308 @@ def get_report_rows(report_name):
         """, params)
 
     if report_name == "Payment Report with Original Invoice Number":
-        fsql, params = _base_filters("COALESCE(pay.payment_received_date, d.payment_due_date)")
-        return _run_query(f"""
+        # SN 27.17: exact user-selected line allocations are used when available.
+        # Older receipts without payment_allocations remain untouched and use a
+        # FIFO legacy fallback only against remaining line capacity.
+        clauses, params = [], []
+        for clause, values in [
+            _like_clause("a.original_invoice_no", original_invoice_filter),
+            _like_clause("a.product_code || ' ' || a.product_name", part_filter),
+            _like_clause("a.customer_name || ' ' || COALESCE(a.warehouse_name,'')", customer_filter),
+            _like_clause("a.delivery_invoice_no", delivery_invoice_filter),
+            _like_clause("a.asn_number", asn_filter),
+            _date_clause("a.payment_due_date", from_date, to_date),
+        ]:
+            clauses.append(clause)
+            params.extend(values)
+        access_sql, access_params = _access_clause("a.product_id", "a.warehouse_id")
+        clauses.append(access_sql)
+        params.extend(access_params)
+        outer_filter = "".join(clauses)
+
+        sql = f"""
+            WITH line_groups AS (
+                SELECT
+                    MIN(d.id) AS line_order,
+                    d.delivery_invoice_no,
+                    s.invoice_no AS original_invoice_no,
+                    MAX(d.asn_number) AS asn_number,
+                    MAX(c.customer_name) AS customer_name,
+                    b.product_id,
+                    s.warehouse_id,
+                    MAX(w.warehouse_name) AS warehouse_name,
+                    p.product_code,
+                    p.product_name,
+                    COALESCE(d.unit_price,0) AS unit_price,
+                    MAX(d.payment_due_date) AS payment_due_date,
+                    SUM(COALESCE(d.sale_amount,0)) AS invoice_amount
+                FROM customer_deliveries d
+                JOIN shipment_boxes b ON b.id = d.box_id
+                JOIN shipments s ON s.id = d.shipment_id
+                JOIN products p ON p.id = b.product_id
+                LEFT JOIN warehouses w ON w.id = s.warehouse_id
+                LEFT JOIN customers c ON c.id = d.customer_id
+                WHERE COALESCE(d.delivery_invoice_no,'') <> ''
+                GROUP BY d.delivery_invoice_no, s.invoice_no, b.product_id, s.warehouse_id,
+                         p.product_code, p.product_name, COALESCE(d.unit_price,0)
+            ),
+            explicit_paid AS (
+                SELECT
+                    d.delivery_invoice_no,
+                    s.invoice_no AS original_invoice_no,
+                    b.product_id,
+                    s.warehouse_id,
+                    COALESCE(d.unit_price,0) AS unit_price,
+                    SUM(COALESCE(pa.allocated_amount,0)) AS explicit_paid
+                FROM payment_allocations pa
+                JOIN payments pay ON pay.id=pa.payment_id
+                JOIN customer_deliveries d ON d.id=pa.delivery_id
+                JOIN shipments s ON s.id=d.shipment_id
+                JOIN shipment_boxes b ON b.id=d.box_id
+                GROUP BY d.delivery_invoice_no, s.invoice_no, b.product_id, s.warehouse_id, COALESCE(d.unit_price,0)
+            ),
+            legacy_total AS (
+                SELECT
+                    anchor.delivery_invoice_no,
+                    SUM(COALESCE(pay.payment_amount,0)) AS legacy_paid
+                FROM payments pay
+                JOIN customer_deliveries anchor ON anchor.id=pay.delivery_id
+                WHERE NOT EXISTS (SELECT 1 FROM payment_allocations pa WHERE pa.payment_id=pay.id)
+                GROUP BY anchor.delivery_invoice_no
+            ),
+            remaining AS (
+                SELECT
+                    lg.*,
+                    COALESCE(ep.explicit_paid,0) AS explicit_paid,
+                    GREATEST(lg.invoice_amount-COALESCE(ep.explicit_paid,0),0) AS remaining_capacity,
+                    COALESCE(lt.legacy_paid,0) AS legacy_paid
+                FROM line_groups lg
+                LEFT JOIN explicit_paid ep
+                  ON ep.delivery_invoice_no=lg.delivery_invoice_no
+                 AND ep.original_invoice_no=lg.original_invoice_no
+                 AND ep.product_id=lg.product_id
+                 AND ep.warehouse_id=lg.warehouse_id
+                 AND ep.unit_price=lg.unit_price
+                LEFT JOIN legacy_total lt ON lt.delivery_invoice_no=lg.delivery_invoice_no
+            ),
+            running AS (
+                SELECT
+                    r.*,
+                    COALESCE(
+                        SUM(r.remaining_capacity) OVER (
+                            PARTITION BY r.delivery_invoice_no
+                            ORDER BY r.line_order, r.original_invoice_no, r.product_code
+                            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                        ),0
+                    ) AS prior_remaining_capacity
+                FROM remaining r
+            ),
+            allocated AS (
+                SELECT
+                    x.*,
+                    GREATEST(
+                        LEAST(x.remaining_capacity, x.legacy_paid-x.prior_remaining_capacity),
+                        0
+                    ) AS legacy_allocated
+                FROM running x
+            )
             SELECT
-                s.invoice_no AS original_invoice_no,
-                d.delivery_invoice_no,
-                d.asn_number,
-                c.customer_name,
-                p.product_code,
-                p.product_name,
-                d.payment_due_date,
-                SUM(d.sale_amount) AS invoice_amount,
-                COALESCE(SUM(pay.payment_amount),0) AS paid_amount,
-                SUM(d.sale_amount) - COALESCE(SUM(pay.payment_amount),0) AS pending_amount
-            FROM customer_deliveries d
-            JOIN shipment_boxes b ON b.id = d.box_id
-            JOIN shipments s ON s.id = d.shipment_id
-            JOIN products p ON p.id = b.product_id
-            LEFT JOIN warehouses w ON w.id = s.warehouse_id
-            LEFT JOIN customers c ON c.id = d.customer_id
-            LEFT JOIN payments pay ON pay.delivery_id = d.id
+                a.original_invoice_no,
+                a.delivery_invoice_no,
+                a.asn_number,
+                a.customer_name,
+                a.product_code,
+                a.product_name,
+                a.payment_due_date,
+                a.invoice_amount,
+                LEAST(a.invoice_amount, a.explicit_paid+a.legacy_allocated) AS paid_amount,
+                GREATEST(a.invoice_amount-(a.explicit_paid+a.legacy_allocated),0) AS pending_amount
+            FROM allocated a
             WHERE 1=1
-            {fsql}
-            /*ACCESS_FILTER*/
-            GROUP BY s.invoice_no, d.delivery_invoice_no, d.asn_number, c.customer_name, p.product_code, p.product_name, d.payment_due_date
-            ORDER BY d.payment_due_date, s.invoice_no, d.delivery_invoice_no
-        """, params)
+            {outer_filter}
+            ORDER BY a.payment_due_date, a.delivery_invoice_no, a.line_order
+            LIMIT {int(row_limit)}
+        """
+        return fetch_all(sql, tuple(params))
 
     if report_name == "Payment Due Invoice List":
-        fsql, params = _base_filters("d.payment_due_date")
-        return _run_query(f"""
+        # One accounting balance per Delivery Invoice. Original invoices are
+        # shown as a comma-separated reference only; they do not create separate
+        # overdue balances.
+        clauses, params = [], []
+        for clause, values in [
+            _like_clause("i.original_invoice_no", original_invoice_filter),
+            _like_clause("i.product_text", part_filter),
+            _like_clause("i.customer_name || ' ' || COALESCE(i.warehouse_name,'')", customer_filter),
+            _like_clause("i.delivery_invoice_no", delivery_invoice_filter),
+            _like_clause("i.asn_number", asn_filter),
+            _date_clause("i.payment_due_date", from_date, to_date),
+        ]:
+            clauses.append(clause)
+            params.extend(values)
+        outer_filter = "".join(clauses)
+
+        # Preserve product/warehouse security without reducing the invoice total.
+        access_sql, access_params = _access_clause("vb.product_id", "vs.warehouse_id")
+        visibility_sql = ""
+        if access_sql:
+            visibility_sql = f"""
+                AND EXISTS (
+                    SELECT 1
+                    FROM customer_deliveries vd
+                    JOIN shipment_boxes vb ON vb.id = vd.box_id
+                    JOIN shipments vs ON vs.id = vd.shipment_id
+                    WHERE vd.delivery_invoice_no = i.delivery_invoice_no
+                    {access_sql}
+                )
+            """
+            params.extend(access_params)
+
+        sql = f"""
+            WITH invoice_totals AS (
+                SELECT
+                    d.delivery_invoice_no,
+                    STRING_AGG(DISTINCT s.invoice_no, ', ' ORDER BY s.invoice_no) AS original_invoice_no,
+                    STRING_AGG(DISTINCT COALESCE(d.asn_number,''), ', ' ORDER BY COALESCE(d.asn_number,'')) AS asn_number,
+                    MAX(c.customer_name) AS customer_name,
+                    STRING_AGG(DISTINCT p.product_code || ' ' || p.product_name, ', ' ORDER BY p.product_code || ' ' || p.product_name) AS product_text,
+                    STRING_AGG(DISTINCT COALESCE(w.warehouse_name,''), ', ' ORDER BY COALESCE(w.warehouse_name,'')) AS warehouse_name,
+                    MAX(d.delivery_date) AS delivery_date,
+                    MAX(d.payment_due_date) AS payment_due_date,
+                    SUM(COALESCE(d.sale_amount,0)) AS invoice_amount
+                FROM customer_deliveries d
+                JOIN shipment_boxes b ON b.id = d.box_id
+                JOIN shipments s ON s.id = d.shipment_id
+                JOIN products p ON p.id = b.product_id
+                LEFT JOIN warehouses w ON w.id = s.warehouse_id
+                LEFT JOIN customers c ON c.id = d.customer_id
+                WHERE COALESCE(d.delivery_invoice_no,'') <> ''
+                GROUP BY d.delivery_invoice_no
+            ),
+            payment_totals AS (
+                SELECT
+                    anchor.delivery_invoice_no,
+                    SUM(COALESCE(pay.payment_amount,0)) AS paid_amount
+                FROM payments pay
+                JOIN customer_deliveries anchor ON anchor.id = pay.delivery_id
+                WHERE COALESCE(anchor.delivery_invoice_no,'') <> ''
+                GROUP BY anchor.delivery_invoice_no
+            )
             SELECT
-                s.invoice_no AS original_invoice_no,
-                d.delivery_invoice_no,
-                d.asn_number,
-                c.customer_name,
-                d.delivery_date,
-                d.payment_due_date,
-                SUM(d.sale_amount) AS invoice_amount,
-                COALESCE(SUM(pay.payment_amount),0) AS paid_amount,
-                SUM(d.sale_amount) - COALESCE(SUM(pay.payment_amount),0) AS pending_amount,
+                i.original_invoice_no,
+                i.delivery_invoice_no,
+                i.asn_number,
+                i.customer_name,
+                i.delivery_date,
+                i.payment_due_date,
+                i.invoice_amount,
+                COALESCE(p.paid_amount,0) AS paid_amount,
+                GREATEST(i.invoice_amount - COALESCE(p.paid_amount,0),0) AS pending_amount,
                 CASE
-                    WHEN SUM(d.sale_amount) - COALESCE(SUM(pay.payment_amount),0) <= 0 THEN 'Paid'
-                    WHEN MAX(d.payment_due_date)::date < CURRENT_DATE THEN 'Overdue'
+                    WHEN i.invoice_amount - COALESCE(p.paid_amount,0) <= 0.0005 THEN 'Paid'
+                    WHEN i.payment_due_date::date < CURRENT_DATE THEN 'Overdue'
                     ELSE 'Pending'
                 END AS payment_status
-            FROM customer_deliveries d
-            JOIN shipment_boxes b ON b.id = d.box_id
-            JOIN shipments s ON s.id = d.shipment_id
-            JOIN products p ON p.id = b.product_id
-            LEFT JOIN warehouses w ON w.id = s.warehouse_id
-            LEFT JOIN customers c ON c.id = d.customer_id
-            LEFT JOIN payments pay ON pay.delivery_id = d.id
-            WHERE 1=1
-            {fsql}
-            /*ACCESS_FILTER*/
-            GROUP BY s.invoice_no, d.delivery_invoice_no, d.asn_number, c.customer_name, d.delivery_date, d.payment_due_date
-            HAVING SUM(d.sale_amount) - COALESCE(SUM(pay.payment_amount),0) > 0
-            ORDER BY d.payment_due_date, d.delivery_invoice_no
-        """, params)
+            FROM invoice_totals i
+            LEFT JOIN payment_totals p ON p.delivery_invoice_no = i.delivery_invoice_no
+            WHERE i.invoice_amount - COALESCE(p.paid_amount,0) > 0.0005
+            {outer_filter}
+            {visibility_sql}
+            ORDER BY i.payment_due_date, i.delivery_invoice_no
+            LIMIT {int(row_limit)}
+        """
+        return fetch_all(sql, tuple(params))
 
     if report_name == "Payment Received Report":
-        fsql, params = _base_filters("pay.payment_received_date")
-        return _run_query(f"""
+        # One row per receipt. Aggregate the Original Invoice / Product references
+        # from the complete Delivery Invoice instead of showing only the legacy
+        # anchor delivery row.
+        clauses, params = [], []
+        for clause, values in [
+            _like_clause("i.original_invoice_no", original_invoice_filter),
+            _like_clause("i.product_text", part_filter),
+            _like_clause("i.customer_name || ' ' || COALESCE(i.warehouse_name,'')", customer_filter),
+            _like_clause("i.delivery_invoice_no", delivery_invoice_filter),
+            _like_clause("i.asn_number", asn_filter),
+            _date_clause("pay.payment_received_date", from_date, to_date),
+        ]:
+            clauses.append(clause)
+            params.extend(values)
+        outer_filter = "".join(clauses)
+
+        access_sql, access_params = _access_clause("vb.product_id", "vs.warehouse_id")
+        visibility_sql = ""
+        if access_sql:
+            visibility_sql = f"""
+                AND EXISTS (
+                    SELECT 1
+                    FROM customer_deliveries vd
+                    JOIN shipment_boxes vb ON vb.id=vd.box_id
+                    JOIN shipments vs ON vs.id=vd.shipment_id
+                    WHERE vd.delivery_invoice_no=i.delivery_invoice_no
+                    {access_sql}
+                )
+            """
+            params.extend(access_params)
+
+        sql = f"""
+            WITH invoice_summary AS (
+                SELECT
+                    d.delivery_invoice_no,
+                    STRING_AGG(DISTINCT s.invoice_no, ', ' ORDER BY s.invoice_no) AS original_invoice_no,
+                    STRING_AGG(DISTINCT COALESCE(d.asn_number,''), ', ' ORDER BY COALESCE(d.asn_number,'')) AS asn_number,
+                    MAX(c.customer_name) AS customer_name,
+                    STRING_AGG(DISTINCT p.product_code || ' ' || p.product_name, ', ' ORDER BY p.product_code || ' ' || p.product_name) AS product_text,
+                    STRING_AGG(DISTINCT p.product_code, ', ' ORDER BY p.product_code) AS product_code,
+                    STRING_AGG(DISTINCT p.product_name, ', ' ORDER BY p.product_name) AS product_name,
+                    STRING_AGG(DISTINCT COALESCE(w.warehouse_name,''), ', ' ORDER BY COALESCE(w.warehouse_name,'')) AS warehouse_name
+                FROM customer_deliveries d
+                JOIN shipment_boxes b ON b.id = d.box_id
+                JOIN shipments s ON s.id = d.shipment_id
+                JOIN products p ON p.id = b.product_id
+                LEFT JOIN warehouses w ON w.id = s.warehouse_id
+                LEFT JOIN customers c ON c.id = d.customer_id
+                GROUP BY d.delivery_invoice_no
+            ),
+            payment_base AS (
+                SELECT pay.*, anchor.delivery_invoice_no
+                FROM payments pay
+                JOIN customer_deliveries anchor ON anchor.id = pay.delivery_id
+            ),
+            allocation_summary AS (
+                SELECT
+                    pa.payment_id,
+                    STRING_AGG(
+                        s.invoice_no || ' / ' || p.product_code || ': ' || TO_CHAR(pa.allocated_amount, 'FM9999999990.000'),
+                        ', ' ORDER BY s.invoice_no, p.product_code
+                    ) AS allocated_lines
+                FROM payment_allocations pa
+                JOIN customer_deliveries d ON d.id=pa.delivery_id
+                JOIN shipments s ON s.id=d.shipment_id
+                JOIN shipment_boxes b ON b.id=d.box_id
+                JOIN products p ON p.id=b.product_id
+                GROUP BY pa.payment_id
+            )
             SELECT
                 pay.payment_received_date,
                 pay.payment_reference,
-                s.invoice_no AS original_invoice_no,
-                d.delivery_invoice_no,
-                c.customer_name,
-                p.product_code,
-                p.product_name,
-                SUM(pay.payment_amount) AS payment_received_amount
-            FROM payments pay
-            JOIN customer_deliveries d ON d.id = pay.delivery_id
-            JOIN shipment_boxes b ON b.id = d.box_id
-            JOIN shipments s ON s.id = d.shipment_id
-            JOIN products p ON p.id = b.product_id
-            LEFT JOIN warehouses w ON w.id = s.warehouse_id
-            LEFT JOIN customers c ON c.id = d.customer_id
+                i.original_invoice_no,
+                i.delivery_invoice_no,
+                i.customer_name,
+                i.product_code,
+                i.product_name,
+                pay.payment_amount AS payment_received_amount,
+                COALESCE(a.allocated_lines, 'Legacy / Auto allocation') AS line_allocation
+            FROM payment_base pay
+            JOIN invoice_summary i ON i.delivery_invoice_no = pay.delivery_invoice_no
+            LEFT JOIN allocation_summary a ON a.payment_id=pay.id
             WHERE 1=1
-            {fsql}
-            /*ACCESS_FILTER*/
-            GROUP BY pay.payment_received_date, pay.payment_reference, s.invoice_no, d.delivery_invoice_no, d.asn_number, c.customer_name, p.product_code, p.product_name
-            ORDER BY pay.payment_received_date DESC, pay.payment_reference
-        """, params)
+            {outer_filter}
+            {visibility_sql}
+            ORDER BY pay.payment_received_date DESC, pay.id DESC
+            LIMIT {int(row_limit)}
+        """
+        return fetch_all(sql, tuple(params))
 
     if report_name == "Customer Wise Shipment Report":
         fsql, params = _shipment_filters("s.shipment_date")
@@ -945,7 +1167,7 @@ def get_report_rows(report_name):
 st.markdown(
     """
     <div class="sap-grid-card">
-        <div class="sap-grid-card-title">REPORT FILTERS - SN 27.13</div>
+        <div class="sap-grid-card-title">REPORT FILTERS - SN 27.23</div>
     """,
     unsafe_allow_html=True,
 )

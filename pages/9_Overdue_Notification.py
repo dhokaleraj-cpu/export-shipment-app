@@ -29,7 +29,7 @@ if st.button('Add Recipient', key='add_recipient'):
         st.success('Recipient added.')
 show_filtered_df(fetch_all('SELECT * FROM notification_recipients ORDER BY event_type, id DESC'), 'notification_recipients', total=False)
 st.divider()
-show_header('Overdue Payment Notification')
+show_header('Overdue Payment Notification', 'Invoice-level overdue balance')
 rows = overdue_rows()
 df = show_filtered_df(rows, 'reports_filter', total=True)
 export_buttons(df, 'overdue_payment_list')

@@ -3,9 +3,16 @@ from payment_common import *
 page_setup()
 require_page_view("payment_list")
 show_edit_permission_status("payment_list")
-show_header("Payment Received List", "SN 27.13 — select multiple receipts and password-delete")
+show_header("Payment Received List", "Receipt allocations + multi-select delete")
 access_notice()
 render_payment_subnav("payment_list")
+
+try:
+    ensure_payment_allocation_schema()
+except Exception as exc:
+    st.error(f"Payment line-allocation schema could not be prepared: {exc}")
+    st.stop()
+
 
 c1, c2, c3, c4, c5 = st.columns(5)
 with c1:
